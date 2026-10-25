@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atlas BI · 电商经营分析 Copilot</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">A</div>
+        <div>
+          <div class="brand-name">Atlas BI</div>
+          <div class="brand-sub">电商经营分析 Copilot</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="workspace"><span class="nav-icon">◈</span><span>分析工作台</span></button>
+        <button class="nav-item" data-view="evidence"><span class="nav-icon">◎</span><span>检索与证据</span></button>
+        <button class="nav-item" data-view="evaluation"><span class="nav-icon">◇</span><span>评测结果</span></button>
+      </nav>
+      <div class="sidebar-card">
+        <div class="sidebar-label">运行状态</div>
+        <div class="status-row"><span class="status-dot"></span><span id="health-text">正在连接…</span></div>
+        <div class="mini-meta" id="retrieval-meta">双路召回 · 只读 SQL</div>
+      </div>
+      <div class="sidebar-foot">
+        <div class="foot-title">设计原则</div>
+        <p>可解释检索、只读执行、失败可修复、结果可验收。</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">OPERATIONS INTELLIGENCE / 2026 Q1</div>
+          <h1>用自然语言完成一次可信的经营分析</h1>
+        </div>
+        <div class="top-actions">
+          <span class="pill"><span class="status-dot"></span>只读数据集</span>
+          <button class="icon-btn" id="refresh-btn" title="刷新指标">↻</button>
+        </div>
+      </header>
+
+      <section class="view active" id="view-workspace">
+        <div class="metrics-grid" id="metrics-grid">
+          <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
+          <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
+        </div>
+        <div class="workspace-grid">
+          <section class="panel ask-panel">
+            <div class="panel-head">
+              <div><div class="panel-kicker">01 / ASK</div><h2>今天想了解什么？</h2></div>
+              <span class="tag">自然语言 → SQL</span>
+            </div>
+            <form id="query-form" class="query-form">
+              <textarea id="question" rows="3" maxlength="300" placeholder="例如：上个月华东地区销售额是多少？"></textarea>
+              <div class="form-foot">
+                <span class="hint">支持时间、地区、渠道、品类、退款和 ROI 分析</span>
+                <button class="primary-btn" id="submit-btn" type="submit"><span>开始分析</span><span class="arrow">↗</span></button>
+              </div>
+            </form>
+            <div class="examples"><div class="section-label">试试这些问题</div><div id="example-list" class="example-list"></div></div>
+            <div class="pipeline">
+              <div class="pipeline-step"><span>01</span>双路召回</div><div class="pipeline-arrow">→</div>
+              <div class="pipeline-step"><span>02</span>查询规划</div><div class="pipeline-arrow">→</div>
+              <div class="pipeline-step"><span>03</span>安全执行</div><div class="pipeline-arrow">→</div>
+              <div class="pipeline-step"><span>04</span>结果校验</div>
+            </div>
+          </section>
+          <section class="panel result-panel" id="result-panel">
+            <div class="empty-state">
+              <div class="empty-orbit"><div class="orbit-core">BI</div><span class="orbit-dot dot-one"></span><span class="orbit-dot dot-two"></span></div>
+              <h3>结果会在这里展开</h3>
+              <p>提交问题后，你会看到结论、图表、生成的 SQL，以及系统选择这些表和字段的依据。</p>
+              <div class="feature-row"><span>可解释召回</span><span>SQL 安全门禁</span><span>失败自动修复</span></div>
+            </div>
+          </section>
+        </div>
+        <div class="bottom-grid">
+          <section class="panel trend-panel">
+            <div class="panel-head compact"><div><div class="panel-kicker">02 / SIGNAL</div><h2>本月销售趋势</h2></div><span class="muted">实付口径 · 不含退款</span></div>
+            <div id="trend-chart" class="trend-chart"></div>
+          </section>
+          <section class="panel channel-panel">
+            <div class="panel-head compact"><div><div class="panel-kicker">03 / MIX</div><h2>渠道销售结构</h2></div><span class="muted">按订单实付</span></div>
+            <div id="channel-list" class="channel-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-evidence">
+        <div class="page-heading">
+          <div class="eyebrow">EXPLAINABILITY</div><h2>每一次生成，都应该能被追问</h2>
+          <p>这里展示最近一次查询的 Schema 召回、候选分数、SQL 校验与执行轨迹。</p>
+        </div>
+        <div id="evidence-content" class="evidence-content"><div class="panel empty-small">先运行一条查询，再回到这里查看证据链。</div></div>
+      </section>
+
+      <section class="view" id="view-evaluation">
+        <div class="page-heading">
+          <div class="eyebrow">EVALUATION</div><h2>用固定的问题集验收，而不是凭感觉说“效果不错”</h2>
+          <p>评测集覆盖销售、品类、退款、投放和趋势五类意图，计算执行成功率、结果命中率和耗时。</p>
+        </div>
+        <div class="eval-summary" id="eval-summary">
+          <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
+          <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head compact"><div><div class="panel-kicker">GOLDEN SET</div><h2>语义验收用例</h2></div><button class="secondary-btn" id="run-eval-btn">运行评测</button></div>
+          <div class="table-wrap" id="eval-table"><p class="muted">点击“运行评测”生成最新结果。</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
