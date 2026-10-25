@@ -37,7 +37,7 @@ python -m app.nl2sql.seed
 python -m uvicorn app.api.main:app --reload --port 8000
 ```
 
-Windows 可直接运行 `run.ps1`，macOS / Linux 运行 `./run.sh`。打开 http://localhost:8000 。
+Windows 可直接运行 `run.ps1`，macOS / Linux 运行 `./run.sh`。打开 [localhost:8000](http://localhost:8000) 。
 
 默认会在首次启动时下载 `BAAI/bge-small-zh-v1.5`，网络较慢时首屏和首次查询会明显变久；只需下载一次。Qdrant 默认使用内存模式，应用每次启动时重建 5 张表的向量索引；设置 `QDRANT_URL` 后连接远端实例。Elasticsearch 是可选适配器，未配置时关键词召回使用本地 IDF。
 
