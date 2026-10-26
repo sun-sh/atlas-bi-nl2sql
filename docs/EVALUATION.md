@@ -17,4 +17,4 @@ python -m app.evaluation.run
 python -m pytest -q
 ```
 
-These values describe this repository and this machine, not a production benchmark.
+Measurements are produced by the included deterministic dataset and benchmark script.
