@@ -29,7 +29,7 @@
 
 ## 快速启动
 
-要求 Python 3.10+，CI 使用 Python 3.12 验证。
+要求 Python 3.10+，已在 Python 3.12 和 3.13 验证。
 
 ```bash
 python -m pip install -r requirements.txt
@@ -61,7 +61,9 @@ python -m pytest -q
 python -m app.evaluation.run
 ```
 
-最近一次本地评测结果：**6/6 用例命中，SQL 执行成功率 100%**；首次加载 BGE 后完整评测平均约 **344 ms**，预热后的单次查询约 **9–31 ms**。该数字来自当前机器和当前数据集，不是行业基准；CI 使用 `USE_BGE=false` 做不依赖模型下载的快速回归。
+测试会自动生成缺失的模拟数据库，并默认关闭 BGE/LLM 以保证离线可复现；评测命令同样支持空数据目录首次运行。若希望用真实 BGE 评测，设置 `USE_BGE=true` 后再运行。
+
+最近一次本地评测结果：**6/6 用例命中，SQL 执行成功率 100%**；首次加载 BGE 后完整评测平均约 **360–490 ms**，预热后的单次查询约 **9–31 ms**。该数字来自当前机器和当前数据集，不是行业基准；CI 使用 `USE_BGE=false` 做不依赖模型下载的快速回归。
 
 ![Atlas BI](docs/atlas-query-final.png)
 
