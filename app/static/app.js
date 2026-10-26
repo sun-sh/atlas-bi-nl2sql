@@ -151,18 +151,15 @@ function renderResultBody(
     <div class="result-answer"><strong>分析结论</strong> <span class="narrative-tag">${result.narrative?.mode === 'model' ? '模型解读 · 流式' : '确定性摘要'}</span><div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div></div>
     ${(result.warnings || []).length ? `<div class="result-meta">${result.warnings.map((w) => `<span class="small-pill">${escapeHtml(w)}</span>`).join('')}</div>` : ''}
     <div class="result-meta">
-      <span class="small-pill">${{ llm: 'LLM 生成', 'llm-repair': 'LLM 修复', 'rule-repair': '规则回退修复' }[result.mode] || '规则生成'}</span>
+      <span class="small-pill">${{ llm: '模型生成', 'llm-repair': '模型修复', 'model-failed': '模型未产出', 'model-repair-failed': '模型修复失败' }[result.mode] || '模型生成'}</span>
       <span class="small-pill">${escapeHtml(result.plan?.intent || '')}</span>
-      <span class="small-pill">${escapeHtml(result.plan?.time_range || '')}</span>
-      <span class="small-pill">${escapeHtml(result.elapsed_ms)} ms</span>
-      <span class="small-pill">${attempts.length} 次执行</span>
+      <span class="small-pill">${attempts.length} 次执行 · ${escapeHtml(result.elapsed_ms)} ms</span>
       ${(result.plan?.inherited || []).map((item) => `<span class="small-pill inherited-pill">继承 · ${escapeHtml(item)}</span>`).join('')}
     </div>
     ${numericCol && rows.length ? `<div class="chart-box"><div class="chart-title">${escapeHtml(numericCol)} · 按 ${escapeHtml(firstDimension)} 展示</div><div class="chart-bars">${bars}</div></div>` : ''}
     ${table}
     <details class="accordion"><summary><span>查看生成的 SQL</span><span>⌄</span></summary><div class="sql-block">${escapeHtml(result.sql)}</div></details>
-    <details class="accordion"><summary><span>执行与自愈轨迹</span><span>⌄</span></summary><div class="trace">${attempts.map((a) => `<div class="trace-item"><span class="trace-mark ${a.status === 'failed' ? 'bad' : ''}">${a.status === 'failed' ? '!' : '✓'}</span><span>第 ${escapeHtml(a.attempt)} 次 · ${escapeHtml(a.status)} · ${escapeHtml(a.elapsed_ms)} ms${a.error ? ' · ' + escapeHtml(a.error) : ''}</span></div>`).join('')}</div></details>
-    <details class="accordion"><summary><span>Schema 召回依据</span><span>⌄</span></summary><div class="trace">${(result.retrieval || []).map((hit) => `<div class="trace-item"><span class="trace-mark">◎</span><span>${escapeHtml(hit.label)}（${escapeHtml(hit.table)}）· 融合分 ${escapeHtml(hit.score)} · 语义 ${escapeHtml(hit.vector_score)} · 关键词 ${escapeHtml(hit.lexical_score)}</span></div>`).join('')}</div></details>`;
+    <details class="accordion"><summary><span>执行轨迹与证据</span><span>⌄</span></summary><div class="trace">${attempts.map((a) => `<div class="trace-item"><span class="trace-mark ${a.status === 'failed' ? 'bad' : ''}">${a.status === 'failed' ? '!' : '✓'}</span><span>第 ${escapeHtml(a.attempt)} 次 · ${escapeHtml(a.status)} · ${escapeHtml(a.elapsed_ms)} ms${a.error ? ' · ' + escapeHtml(a.error) : ''}</span></div>`).join('')}${(result.retrieval || []).map((hit) => `<div class="trace-item"><span class="trace-mark">◎</span><span>召回 ${escapeHtml(hit.label)}（${escapeHtml(hit.table)}）· 融合 ${escapeHtml(hit.score)} · 语义 ${escapeHtml(hit.vector_score)} · 关键词 ${escapeHtml(hit.lexical_score)}</span></div>`).join('')}</div></details>`;
 }
 
 function renderResult(result) {
@@ -217,7 +214,7 @@ function renderResult(result) {
     `
     <article class="turn-card">
       <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(result.question)}</div></div>
-      <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.trace_id || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span></div>
+      <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span></div>
       ${renderResultBody(result, cols, rows, firstDimension, numericCol, max, attempts, bars, table)}
     </article>`,
   );
@@ -547,7 +544,7 @@ async function streamQuery(question, sessionId) {
           }
           const turnMeta = card?.querySelector('.turn-meta');
           if (turnMeta && result) {
-            turnMeta.innerHTML = `<span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.trace_id || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span>`;
+            turnMeta.innerHTML = `<span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span>`;
           }
         } else if (event === 'error') {
           throw new Error(data.message || '流式查询失败');
@@ -665,46 +662,77 @@ function formatEvaluatedAt(value) {
     : date.toLocaleString('zh-CN', { hour12: false });
 }
 
+function evalModeLabel(item) {
+  return (
+    {
+      llm: '模型生成',
+      'llm-repair': '模型修复',
+      'model-failed': '模型未产出',
+      'model-repair-failed': '模型修复失败',
+      unavailable: '未运行',
+      error: '异常',
+    }[item.sql_mode] || item.sql_mode || '未知'
+  );
+}
+
 function renderEvaluation(data) {
+  const model = data.model || {};
+  const modelLabel = model.model
+    ? `${model.model}${model.active ? '' : ' · 未启用'}`
+    : '未配置模型';
   $('#eval-meta').innerHTML = `
-    <span>评测模式 <strong>${escapeHtml(data.mode || 'rule')}</strong></span>
+    <span>评测模式 <strong>严格模型链路</strong></span>
+    <span>模型 <strong>${escapeHtml(modelLabel)}</strong></span>
     <span>数据集 <strong>${escapeHtml(data.dataset_range || '固定数据集')}</strong></span>
     <span>结果时间 <strong>${escapeHtml(formatEvaluatedAt(data.evaluated_at))}</strong></span>`;
   $('#eval-summary').innerHTML = [
     metricCard(
-      '执行成功率',
-      data.execution_rate + '%',
-      `${data.passed}/${data.total} 条通过`,
+      '模型通过率',
+      `${data.hit_rate ?? 0}%`,
+      `${data.passed}/${data.total} 条模型结果通过`,
       true,
     ),
-    metricCard('结果命中率', data.hit_rate + '%', '关键结果值符合预期'),
+    metricCard(
+      'SQL 执行率',
+      `${data.execution_rate ?? 0}%`,
+      `${(data.cases || []).filter((item) => item.executed).length}/${data.total} 条模型 SQL 成功执行`,
+    ),
     metricCard(
       '平均响应时间',
-      data.avg_elapsed_ms + ' ms',
-      '本地运行 · 含检索与 SQL',
+      `${data.avg_elapsed_ms ?? 0} ms`,
+      '真实模型 · 含检索、SQL 与修复',
     ),
     metricCard(
       '覆盖意图',
-      data.intents + ' 类',
+      `${data.intents ?? 0} 类`,
       '销售 / 品类 / 退款 / ROI / 趋势',
     ),
   ].join('');
-  $('#eval-count').textContent = `${data.passed}/${data.total} 通过`;
+  $('#eval-count').textContent = data.available
+    ? `${data.passed}/${data.total} 通过`
+    : '尚未运行';
   const rows = (data.cases || [])
-    .map(
-      (item) => `
+    .map((item) => {
+      const modelBadge = item.model_used
+        ? '<span class="badge">模型完成</span>'
+        : '<span class="badge fail">模型未完成</span>';
+      return `
     <tr>
       <td>${escapeHtml(item.question)}</td>
       <td>${escapeHtml(EVAL_LABELS[item.intent] || item.intent)}</td>
-      <td><span class="badge ${item.executed ? '' : 'fail'}">${item.executed ? '已执行' : '失败'}</span></td>
-      <td><span class="badge ${item.hit ? '' : 'fail'}">${item.hit ? '命中' : '未命中'}</span></td>
+      <td>${modelBadge}<div class="muted">${escapeHtml(evalModeLabel(item))}</div></td>
+      <td><span class="badge ${item.hit ? '' : 'fail'}">${item.hit ? '通过' : '未通过'}</span></td>
       <td>${escapeHtml(item.attempts)} 次 / ${escapeHtml(item.elapsed_ms)} ms</td>
-      <td class="eval-result-cell">${item.error ? `<span class="eval-error">${escapeHtml(item.error)}</span>` : '<span class="eval-pass">符合验收标准</span>'}</td>
-    </tr>`,
-    )
+      <td class="eval-result-cell">${
+        item.error
+          ? `<span class="eval-error">${escapeHtml(item.error)}</span>`
+          : '<span class="eval-pass">模型结果符合验收值</span>'
+      }</td>
+    </tr>`;
+    })
     .join('');
   $('#eval-table').innerHTML = rows
-    ? `<table class="eval-table"><thead><tr><th>黄金问题</th><th>意图</th><th>执行</th><th>结果</th><th>尝试 / 耗时</th><th>验收说明</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table class="eval-table"><thead><tr><th>黄金问题</th><th>意图</th><th>SQL 来源</th><th>模型验收</th><th>执行 / 耗时</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<p class="muted">当前评测集没有返回用例。</p>';
 }
 
@@ -715,7 +743,7 @@ async function loadEvaluation() {
   try {
     const data = await api('/api/evaluation');
     renderEvaluation(data);
-    toast(`评测完成 · ${data.passed}/${data.total} 通过`);
+    toast(data.available ? `模型评测完成 · ${data.passed}/${data.total} 通过` : "模型未启用，无法运行模型评测");
   } catch (error) {
     toast(error.message);
     $('#eval-table').innerHTML =
@@ -744,9 +772,9 @@ function renderModelRuntime(model, active) {
   const runtime = $('#model-runtime');
   if (runtime)
     runtime.innerHTML = [
-      ['状态', active ? '大模型生成已启用' : '规则生成模式'],
+      ['状态', active ? '模型生成已启用' : '模型未启用'],
       ['模型', model.model || '未选择'],
-      ['服务商', model.provider || '未配置'],
+      ['服务商', model.provider || '未选择'],
       ['接口地址', model.base_url || '未配置'],
       ['API Key', model.api_key_configured ? '已保存（服务端）' : '未配置'],
     ]

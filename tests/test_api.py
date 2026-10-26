@@ -46,31 +46,48 @@ def test_secondary_routes_are_directly_accessible():
         assert "Atlas BI" in response.text and "NL2SQL" in response.text
 
 
-def test_evaluation_endpoint_exposes_acceptance_metadata():
+def test_evaluation_endpoint_reports_model_only_status():
     response = client.get("/api/evaluation")
     assert response.status_code == 200
     body = response.json()
-    assert body["mode"] == "rule"
+    assert body["mode"] == "model"
     assert body["dataset_range"] == "2025-10-01 至 2026-02-28"
     assert body["evaluated_at"]
     assert body["total"] == 6
-    assert body["passed"] == 6
+    assert body["available"] is False
+    assert body["passed"] == 0
+    assert body["model_rate"] == 0
     assert all(
-        {"question", "intent", "executed", "hit", "attempts", "elapsed_ms", "error"} <= set(case)
+        {
+            "question",
+            "intent",
+            "executed",
+            "hit",
+            "model_used",
+            "narrative_mode",
+            "attempts",
+            "elapsed_ms",
+            "sql_mode",
+            "warnings",
+            "error",
+        }
+        <= set(case)
         for case in body["cases"]
     )
 
 
-def test_evaluation_page_contains_acceptance_and_auto_load_markup():
-    body = client.get("/evaluation").text
-    assert "验收标准" in body
-    assert "逐用例结果" in body
+def test_evaluation_page_explains_strict_model_policy():
+    body = client.get('/evaluation').text
+    assert '严格模型链路' in body
+    assert '生成或解读未完成时直接判失败' in body
+    assert '逐用例结果' in body
     assert 'id="eval-meta"' in body
     assert 'id="eval-count"' in body
-    script = client.get("/static/app.js").text
+    script = client.get('/static/app.js').text
     assert "if (view === 'evaluation') loadEvaluation();" in script
-    assert "renderEvaluation(data)" in script
-    assert "验收说明" in script
+    assert 'renderEvaluation(data)' in script
+    assert 'SQL 执行率' in script
+    assert '规则回退' not in script
 
 def test_model_config_endpoint_masks_api_key(monkeypatch, tmp_path):
     monkeypatch.setenv("ATLAS_MODEL_CONFIG_PATH", str(tmp_path / "model.json"))

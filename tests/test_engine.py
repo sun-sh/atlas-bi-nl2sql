@@ -153,18 +153,85 @@ def test_model_failure_is_visible_when_falling_back_to_rules(monkeypatch):
     assert any("模型调用失败" in warning for warning in result.warnings)
 
 
-def test_evaluation_forces_rule_mode(monkeypatch):
-    evaluated_modes = []
-    real_run_query = run_query
+def test_strict_model_query_never_calls_rule_fallback(monkeypatch):
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: None)
+    monkeypatch.setattr("app.nl2sql.generator.LAST_LLM_ERROR", "模拟空返回")
 
-    def capture(question):
-        result = real_run_query(question)
-        evaluated_modes.append(result.mode)
-        return result
+    def forbidden_rule(*args):
+        raise AssertionError("strict model evaluation must not call rule SQL")
 
-    monkeypatch.setattr("app.nl2sql.evaluation.run_query", capture)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_rule_sql", forbidden_rule)
+    result = run_query("各渠道销售额", allow_rule_fallback=False)
+    assert result.mode == "model-failed"
+    assert result.sql == ""
+    assert result.attempts[-1]["status"] == "failed"
+    assert any("不回退规则" in warning for warning in result.warnings)
+
+
+def test_evaluation_does_not_run_when_model_is_disabled(monkeypatch):
+    monkeypatch.setenv("ATLAS_DISABLE_MODEL", "1")
     from app.nl2sql.evaluation import run_evaluation
 
     report = run_evaluation()
-    assert report["passed"] == 6
-    assert set(evaluated_modes) == {"rule"}
+    assert report["mode"] == "model"
+    assert report["available"] is False
+    assert report["passed"] == 0
+    assert all(case["model_used"] is False for case in report["cases"])
+
+
+def test_evaluation_strict_model_failure_is_not_masked(monkeypatch):
+    from app.nl2sql import evaluation
+
+    class FakeResult:
+        mode = "model-failed"
+        narrative_mode = "digest"
+        rows = []
+        attempts = [{"status": "failed"}]
+        warnings = ["模型未生成 SQL，严格模型评测不回退规则：模拟空返回"]
+
+    monkeypatch.setattr(evaluation, "_model_state", lambda: {
+        "configured": True,
+        "active": True,
+        "model": "fake-model",
+        "provider": "fake",
+    })
+    monkeypatch.setattr(
+        evaluation,
+        "run_query",
+        lambda question, **kwargs: FakeResult(),
+    )
+    report = evaluation.run_evaluation()
+    assert report["available"] is True
+    assert report["passed"] == 0
+    assert report["model_rate"] == 0.0
+    assert all(case["model_used"] is False for case in report["cases"])
+    assert all(case["hit"] is False for case in report["cases"])
+    assert all("严格模型评测" in case["error"] for case in report["cases"])
+
+
+def test_evaluation_rejects_digest_narrative_as_model_pass(monkeypatch):
+    from app.nl2sql import evaluation
+
+    class FakeResult:
+        mode = "llm"
+        narrative_mode = "digest"
+        rows = [{"销售额": 79947.85}]
+        attempts = [{"status": "success"}]
+        warnings = ["模型结果解读失败，已回退确定性摘要：模拟超时"]
+
+    monkeypatch.setattr(evaluation, "_model_state", lambda: {
+        "configured": True,
+        "active": True,
+        "model": "fake-model",
+        "provider": "fake",
+    })
+    monkeypatch.setattr(
+        evaluation,
+        "run_query",
+        lambda question, **kwargs: FakeResult(),
+    )
+    report = evaluation.run_evaluation()
+    assert report["passed"] == 0
+    assert report["model_rate"] == 0.0
+    assert all(case["narrative_mode"] == "digest" for case in report["cases"])
+    assert all("确定性摘要" in case["error"] for case in report["cases"])

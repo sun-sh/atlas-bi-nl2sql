@@ -46,7 +46,7 @@ python -m pytest -q
 python -m app.evaluation.run
 ```
 
-A release candidate should have all tests passing, `execution_rate=100.0` and no unexpected warning regressions. Evaluation forces rule mode so external model latency and availability do not change the benchmark.
+A release candidate should have all tests passing and no unexpected warning regressions. Evaluation uses the configured model in strict mode: record `execution_rate`, `hit_rate` and `model_rate` as observed, and never treat rule fallback as a model pass. Model-dependent scores are a dated snapshot, not a deterministic CI gate.
 
 ## Troubleshooting
 

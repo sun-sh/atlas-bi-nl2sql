@@ -36,6 +36,7 @@ class GraphState(TypedDict, total=False):
     mode: str
     context: dict[str, Any]
     narrate: bool
+    allow_rule_fallback: bool
     narrative: NarrativeResult
     final: QueryResult
 
@@ -86,10 +87,15 @@ def generate_node(state: GraphState) -> GraphState:
     mode = "llm"
     warnings = list(state.get("warnings", []))
     if not sql:
-        sql = generate_rule_sql(state["question"], plan, state["hits"])
-        mode = "rule"
-        if generator.LAST_LLM_ERROR:
-            warnings.append("模型调用失败，已回退规则 SQL：" + generator.LAST_LLM_ERROR)
+        if state.get("allow_rule_fallback", True):
+            sql = generate_rule_sql(state["question"], plan, state["hits"])
+            mode = "rule"
+            if generator.LAST_LLM_ERROR:
+                warnings.append("模型调用失败，已回退规则 SQL：" + generator.LAST_LLM_ERROR)
+        else:
+            reason = generator.LAST_LLM_ERROR or "模型返回空内容"
+            warnings.append("模型未生成 SQL，严格模型评测不回退规则：" + reason)
+            return {"sql": "", "mode": "model-failed", "warnings": warnings}
     return {"sql": sql, "mode": mode, "warnings": warnings}
 
 
@@ -138,12 +144,23 @@ def repair_node(state: GraphState) -> GraphState:
         state.get("sql", ""),
         last_error,
     )
-    sql = repaired or generate_rule_sql(question, plan, state["hits"])
-    mode = "llm-repair" if repaired else "rule-repair"
     warning = f"第 {len(attempts)} 次执行失败：{last_error}"
-    extra = ["修复来源：" + mode]
-    if not repaired and generator.LAST_LLM_ERROR:
-        extra.append("模型修复失败：" + generator.LAST_LLM_ERROR)
+    if repaired:
+        sql = repaired
+        mode = "llm-repair"
+        extra = ["修复来源：" + mode]
+    elif state.get("allow_rule_fallback", True):
+        sql = generate_rule_sql(question, plan, state["hits"])
+        mode = "rule-repair"
+        extra = ["修复来源：" + mode]
+        if generator.LAST_LLM_ERROR:
+            extra.append("模型修复失败：" + generator.LAST_LLM_ERROR)
+    else:
+        sql = ""
+        mode = "model-repair-failed"
+        extra = ["严格模型评测不回退规则"]
+        if generator.LAST_LLM_ERROR:
+            extra.append("模型修复失败：" + generator.LAST_LLM_ERROR)
     return {
         "sql": sql,
         "mode": mode,
@@ -152,6 +169,8 @@ def repair_node(state: GraphState) -> GraphState:
 
 
 def should_repair(state: GraphState) -> str:
+    if state.get("mode") in {"model-failed", "model-repair-failed"}:
+        return "finalize"
     result = state.get("result")
     if result is not None:
         return "finish"
@@ -228,6 +247,7 @@ def run_query(
     context: dict[str, Any] | None = None,
     *,
     narrate: bool = True,
+    allow_rule_fallback: bool = True,
 ) -> QueryResult:
     global _GRAPH
     if _GRAPH is None:
@@ -238,6 +258,7 @@ def run_query(
         "started": time.perf_counter(),
         "trace_id": uuid.uuid4().hex[:12],
         "narrate": narrate,
+        "allow_rule_fallback": allow_rule_fallback,
     }
     state = _GRAPH.invoke(initial)
     return state["final"]
