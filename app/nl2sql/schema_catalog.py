@@ -105,3 +105,12 @@ def schema_prompt() -> str:
 
 def allowed_tables() -> set[str]:
     return {table.name for table in SCHEMA}
+
+
+def compact_schema_prompt(tables: list[str] | None = None) -> str:
+    selected = [t for t in SCHEMA if tables is None or t.name in tables]
+    lines = []
+    for table in selected:
+        cols = ", ".join(c.name for c in table.columns if c.sensitivity == "public")
+        lines.append(f"{table.name}({cols})")
+    return "\n".join(lines)

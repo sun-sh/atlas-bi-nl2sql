@@ -4,7 +4,7 @@ import re
 
 from app.nl2sql.model_config import get_model_config
 from app.nl2sql.models import QueryPlan, SchemaHit
-from app.nl2sql.schema_catalog import schema_prompt
+from app.nl2sql.schema_catalog import compact_schema_prompt, schema_prompt
 
 
 def _where(filters: list[str]) -> str:
@@ -115,7 +115,7 @@ def generate_llm_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> s
     return _llm_sql(
         "你是 SQLite 电商经营分析专家。只输出一条 SELECT SQL，不要解释。"
         "只能使用给定表和字段；禁止 customer_id 和 cost_price；必须聚合。",
-        f"问题：{question}\nSchema：\n{schema_prompt()}\n候选表：{plan.tables}\n筛选：{plan.filters}",
+        f"问题：{question}\n表结构：\n{compact_schema_prompt(plan.tables)}\n筛选：{plan.filters}\n只返回 SQL。",
     )
 
 
@@ -124,6 +124,6 @@ def generate_llm_repair_sql(question: str, plan: QueryPlan, hits: list[SchemaHit
     return _llm_sql(
         "修复失败的 SQLite SQL。根据错误修复，只输出一条 SELECT SQL，不要解释。"
         "禁止编造表或列；禁止 customer_id 和 cost_price。",
-        f"问题：{question}\n计划：{plan.as_dict()}\nSchema：\n{schema_prompt()}\n"
-        f"失败 SQL：\n{previous_sql}\n错误：\n{error}",
+        f"问题：{question}\n计划：{plan.as_dict()}\n表结构：\n{compact_schema_prompt(plan.tables)}\n"
+        f"失败 SQL：\n{previous_sql}\n错误：\n{error}\n只返回修复后的 SQL。",
     )
