@@ -157,7 +157,11 @@ function renderResultBody(
       ${(result.plan?.inherited || []).map((item) => `<span class="small-pill inherited-pill">继承 · ${escapeHtml(item)}</span>`).join('')}
     </div>
     ${numericCol && rows.length ? `<div class="chart-box"><div class="chart-title">${escapeHtml(numericCol)} · 按 ${escapeHtml(firstDimension)} 展示</div><div class="chart-bars">${bars}</div></div>` : ''}
-    ${table}
+    ${
+      numericCol && rows.length
+        ? `<details class="accordion result-details"><summary><span>查看结果明细表</span><span>⌄</span></summary>${table}</details>`
+        : table
+    }
     <details class="accordion"><summary><span>查看生成的 SQL</span><span>⌄</span></summary><div class="sql-block">${escapeHtml(result.sql)}</div></details>
     <details class="accordion"><summary><span>执行轨迹与证据</span><span>⌄</span></summary><div class="trace">${attempts.map((a) => `<div class="trace-item"><span class="trace-mark ${a.status === 'failed' ? 'bad' : ''}">${a.status === 'failed' ? '!' : '✓'}</span><span>第 ${escapeHtml(a.attempt)} 次 · ${escapeHtml(a.status)} · ${escapeHtml(a.elapsed_ms)} ms${a.error ? ' · ' + escapeHtml(a.error) : ''}</span></div>`).join('')}${(result.retrieval || []).map((hit) => `<div class="trace-item"><span class="trace-mark">◎</span><span>召回 ${escapeHtml(hit.label)}（${escapeHtml(hit.table)}）· 融合 ${escapeHtml(hit.score)} · 语义 ${escapeHtml(hit.vector_score)} · 关键词 ${escapeHtml(hit.lexical_score)}</span></div>`).join('')}</div></details>`;
 }
@@ -620,6 +624,7 @@ async function submitQuery(question) {
 }
 function switchView(view) {
   if (!document.querySelector(`#view-${view}`)) view = 'workspace';
+  document.body.classList.toggle('workspace-active', view === 'workspace');
   $$('.nav-item').forEach((x) =>
     x.classList.toggle('active', x.dataset.view === view),
   );
@@ -788,7 +793,7 @@ function modelFormPayload() {
   return {
     provider: $('#model-provider').value,
     base_url: $('#model-base-url').value.trim(),
-    model: $('#model-name-manual').value.trim() || $('#model-name').value,
+    model: $('#model-name').value.trim(),
     api_key: $('#model-api-key').value.trim() || null,
   };
 }
@@ -800,17 +805,39 @@ function setModelMessage(message, kind = '') {
   el.className = `model-message ${kind}`;
 }
 
+function updateModelKeyState(configured) {
+  const input = $('#model-api-key');
+  const note = $('#model-key-note');
+  if (input) {
+    input.placeholder = configured
+      ? '已保存，不回显；留空保持现有 Key'
+      : 'sk-...';
+  }
+  if (note) {
+    note.textContent = configured
+      ? 'API Key 已保存在服务端本地配置文件，浏览器不会回显；留空可继续使用。'
+      : 'API Key 仅保存在服务端，不在浏览器回显；保存后无需重复填写。';
+  }
+}
+
+function applyModelForm(data) {
+  const provider = $('#model-provider');
+  const baseUrl = $('#model-base-url');
+  const modelName = $('#model-name');
+  const enabled = $('#model-enabled');
+  if (provider) provider.value = data.provider || 'custom';
+  if (baseUrl) baseUrl.value = data.base_url || 'https://api.openai.com/v1';
+  if (modelName) modelName.value = data.model || '';
+  if (enabled) enabled.checked = !!data.enabled;
+  updateModelKeyState(!!data.api_key_configured);
+  renderModelRuntime(data, data.active);
+}
+
 async function loadModelConfig() {
   try {
     const data = await api('/api/model/config');
     state.model = data;
-    $('#model-provider').value = data.provider || 'custom';
-    $('#model-base-url').value = data.base_url || 'https://api.openai.com/v1';
-    $('#model-name-manual').value = data.model || '';
-    $('#model-enabled').checked = !!data.enabled;
-    renderModelRuntime(data, data.active);
-    if (data.api_key_configured)
-      $('#model-api-key').placeholder = '已保存，留空保持不变';
+    applyModelForm(data);
     setModelMessage(
       data.active
         ? '模型配置已生效，查询将由当前模型生成。'
@@ -831,16 +858,18 @@ async function fetchModels() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(modelFormPayload()),
     });
-    const select = $('#model-name');
-    select.innerHTML = '<option value="">请选择模型</option>';
-    data.models.forEach((name) => {
+    const options = $('#model-options');
+    options.innerHTML = '';
+    [...new Set(data.models)].forEach((name) => {
       const option = document.createElement('option');
       option.value = name;
-      option.textContent = name;
-      select.appendChild(option);
+      options.appendChild(option);
     });
+    if (!$('#model-name').value.trim() && data.models.length === 1) {
+      $('#model-name').value = data.models[0];
+    }
     setModelMessage(
-      `读取到 ${data.models.length} 个模型，请选择后保存。`,
+      `读取到 ${data.models.length} 个模型，点击模型输入框可从列表选择。`,
       'ok',
     );
   } catch (error) {
@@ -878,13 +907,15 @@ async function saveModel(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    state.model = data;
+    applyModelForm(data);
+    $('#model-api-key').value = '';
     setModelMessage(
       data.active
         ? '配置已保存，后续查询将使用该模型。'
         : '配置已保存，当前仍使用规则生成。',
       'ok',
     );
-    $('#model-api-key').value = '';
     await loadHealth();
   } catch (error) {
     setModelMessage(error.message, 'bad');

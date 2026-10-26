@@ -166,3 +166,21 @@ textarea{width:100%;border:0;outline:0;resize:vertical;min-height:70px;color:var
 @media(max-width:900px){.topbar{margin-bottom:18px}.top-subtitle{max-width:620px}.session-rail .session-list{grid-template-columns:repeat(3,minmax(0,1fr))}.turn-card{padding:14px}.result-answer{font-size:var(--fs-body)}.result-table{font-size:var(--fs-small)}.result-table th,.result-table td{padding:8px 7px}}
 @media(max-width:760px){.main{padding:18px 14px 28px}h1{font-size:29px;letter-spacing:-.03em}.topbar{gap:10px}.top-subtitle{font-size:var(--fs-small)}.session-rail .session-list{grid-template-columns:repeat(2,minmax(0,1fr))}.conversation-panel{padding:14px}.turn-question{font-size:var(--fs-small)}.composer-foot .primary-btn{min-height:40px}}
 @media(max-width:520px){.main{padding:14px 12px 24px}.topbar{margin-bottom:16px}.top-subtitle{line-height:1.55}.session-rail{display:none}.conversation-panel{padding:12px;border-radius:13px}.turn-card{padding:11px;border-radius:11px}.turn-question{grid-template-columns:24px minmax(0,1fr);font-size:var(--fs-small);gap:8px}.turn-label{width:24px;height:24px;font-size:11px}.turn-meta{margin-left:32px;gap:6px}.result-answer{padding:13px}.result-answer strong{font-size:var(--fs-small)}.result-table th,.result-table td{padding:8px 6px}.result-meta{gap:6px}.small-pill,.narrative-tag{font-size:11px}.composer{padding:10px}.composer-foot{align-items:stretch;flex-direction:column}.primary-btn{width:100%;justify-content:center;min-height:42px}.toast{left:12px;right:12px;bottom:14px;text-align:center}}
+
+
+.result-details{margin-top:2px}.result-details .table-wrap{margin-top:0}
+.session-shell>*{min-width:0}
+@media(min-width:1251px){
+  body.workspace-active{height:100vh;overflow:hidden}
+  body.workspace-active .app-shell{height:100vh;min-height:0}
+  body.workspace-active .sidebar{min-height:0;overflow-y:auto}
+  body.workspace-active .main{height:100vh;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  body.workspace-active #view-workspace.active{flex:1;min-height:0;display:flex;overflow:hidden}
+  body.workspace-active .session-shell{flex:1;height:100%;min-height:0;align-items:stretch}
+  body.workspace-active .session-rail,body.workspace-active .context-column{min-height:0;max-height:100%;overflow-y:auto;position:static;align-self:stretch}
+  body.workspace-active .context-column{align-content:start}
+  body.workspace-active .conversation-panel{height:100%;min-height:0;overflow:hidden}
+  body.workspace-active .conversation-head{flex-shrink:0}
+  body.workspace-active .conversation-thread{flex:1;min-height:0;overflow-y:auto;scrollbar-gutter:stable}
+  body.workspace-active .composer{flex-shrink:0;margin-top:0}
+}

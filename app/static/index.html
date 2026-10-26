@@ -158,9 +158,8 @@
                 <option value="moonshot">Moonshot</option>
               </select></label>
               <label>Base URL<input id="model-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="url"></label>
-              <label>API Key<input id="model-api-key" type="password" placeholder="sk-..." autocomplete="new-password"><small>密钥只保存在服务端 data/model_config.json，不会返回浏览器。</small></label>
-              <label>模型<select id="model-name"><option value="">先拉取模型列表，或手动输入</option></select></label>
-              <label>手动指定模型<input id="model-name-manual" type="text" placeholder="例如 gpt-4.1-mini"></label>
+              <label>API Key<input id="model-api-key" type="password" placeholder="sk-..." autocomplete="new-password"><small id="model-key-note">API Key 仅保存在服务端，不在浏览器回显；留空会继续使用已保存的 Key。</small></label>
+              <label>模型<input id="model-name" type="text" list="model-options" placeholder="例如 gpt-4.1-mini" autocomplete="off"><datalist id="model-options"></datalist><small>可直接填写模型 ID，或先拉取模型列表再选择。</small></label>
               <label class="switch-row"><input id="model-enabled" type="checkbox"> 启用大模型生成与 SQL 自修复</label>
               <div class="form-actions">
                 <button type="button" class="secondary-btn" id="model-fetch-btn">获取模型</button>

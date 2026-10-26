@@ -89,6 +89,20 @@ def test_evaluation_page_explains_strict_model_policy():
     assert 'SQL 执行率' in script
     assert '规则回退' not in script
 
+
+def test_workspace_ui_contract_keeps_results_and_model_settings_consistent():
+    page = client.get('/workspace').text
+    script = client.get('/static/app.js').text
+    styles = client.get('/static/styles.css').text
+
+    assert 'id="model-name"' in page
+    assert 'list="model-options"' in page
+    assert 'id="model-name-manual"' not in page
+    assert '查看结果明细表' in script
+    assert "document.body.classList.toggle('workspace-active'" in script
+    assert 'body.workspace-active' in styles
+    assert '$(\'#model-name-manual\')' not in script
+
 def test_model_config_endpoint_masks_api_key(monkeypatch, tmp_path):
     monkeypatch.setenv("ATLAS_MODEL_CONFIG_PATH", str(tmp_path / "model.json"))
     monkeypatch.setenv("ATLAS_DISABLE_MODEL", "0")
