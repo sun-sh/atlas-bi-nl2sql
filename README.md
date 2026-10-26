@@ -25,6 +25,8 @@ Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商�
 
 ## 系统架构
 
+### 系统全景
+
 ```mermaid
 flowchart LR
     U[运营 / 商分用户] --> W[Web 分析工作台]
@@ -42,6 +44,45 @@ flowchart LR
     G --> T[结果 / 证据 / trace]
     T --> W
 ```
+
+### Agent 编排架构
+
+这里所说的 Agent 是一个**节点固定、工具固定、修复次数有上限**的 LangGraph 工作流，而不是可自主挑选工具或无限循环的开放 Agent。模型只参与 SQL 生成、SQL 修复和结果解读，所有 SQL 仍必须经过同一道 AST 安全门禁。
+
+```mermaid
+flowchart TD
+    START(["用户问题"]) --> RETRIEVE["retrieve<br/>双路 Schema 召回"]
+    RETRIEVE --> PLAN["plan<br/>意图、时间、指标、筛选与会话继承"]
+    PLAN --> GENERATE["generate<br/>模型 SQL；失败回退规则 SQL"]
+    GENERATE --> EXECUTE["execute<br/>AST 安全门禁 + 只读执行"]
+    EXECUTE --> CHECK{"执行成功?"}
+    CHECK -->|"是"| FINALIZE["finalize<br/>结果摘要与最终状态"]
+    CHECK -->|"否，仍有修复额度"| REPAIR["repair<br/>原 SQL + 错误 + Schema 反馈"]
+    REPAIR --> EXECUTE
+    CHECK -->|"否，修复额度耗尽"| FINALIZE
+    FINALIZE --> MODE{"调用方式"}
+    MODE -->|"/api/query"| SYNC["同步结果解读<br/>模型 / 确定性摘要"]
+    SYNC --> SYNC_MEMORY[("可选：保存会话快照")]
+    SYNC_MEMORY --> RESPONSE(["HTTP 响应"])
+    MODE -->|"/api/query/stream"| RESULT["result 事件<br/>rows + SQL + evidence + digest"]
+    RESULT --> STREAM["模型原生 token 流<br/>stream_result_narrative"]
+    STREAM -->|"成功"| NARRATIVE["narrative 事件<br/>最终文本 + mode"]
+    STREAM -->|"失败 / 空响应"| FALLBACK["reset / 单次 digest<br/>确定性回退"]
+    NARRATIVE --> DONE["done 事件<br/>trace + 可选会话快照"]
+    FALLBACK --> DONE
+    DONE --> SSE_END(["SSE 完成"])
+```
+
+编排边界：
+
+| 维度 | 当前实现 |
+| --- | --- |
+| 控制方式 | LangGraph 固定 DAG；只有执行失败会进入 `execute → repair → execute` 的有界回路 |
+| 可用工具 | Schema 检索、模型网关、SQL AST 门禁、只读数据库、会话存储；模型不能自行新增工具 |
+| 模型职责 | 生成候选 SQL、结合错误修复 SQL、基于确定性摘要写分析结论；不改写结果行、SQL 或证据 |
+| 记忆范围 | 会话级短期上下文；最多 20 轮、7 天过期，不保存跨会话用户画像 |
+| 停止条件 | SQL 成功，或校验/执行失败且修复额度耗尽；返回结果另受 `MAX_RESULT_ROWS` 截断边界约束 |
+| 可观测性 | `GraphState` 保存计划、Schema 命中、SQL、尝试记录、告警和 `trace_id` |
 
 ## 核心能力
 

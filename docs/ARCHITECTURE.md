@@ -73,6 +73,36 @@ flowchart TB
     Golden --> CI
 ```
 
+## Agent orchestration
+
+Atlas BI is intentionally a bounded LangGraph workflow, not an autonomous multi-agent runtime. The model can generate SQL, repair SQL and write a grounded narrative, but it cannot choose arbitrary tools, rewrite executed rows or control the loop budget.
+
+```mermaid
+flowchart TD
+    START(["Question"]) --> RETRIEVE["retrieve<br/>hybrid schema search"]
+    RETRIEVE --> PLAN["plan<br/>intent, time, metrics, filters, memory"]
+    PLAN --> GENERATE["generate<br/>LLM SQL with rule fallback"]
+    GENERATE --> EXECUTE["execute<br/>AST guard + read-only query"]
+    EXECUTE --> CHECK{"Execution succeeded?"}
+    CHECK -->|"yes"| FINALIZE["finalize<br/>digest and terminal result"]
+    CHECK -->|"no, repair budget remains"| REPAIR["repair<br/>error + original SQL + schema"]
+    REPAIR --> EXECUTE
+    CHECK -->|"no, budget exhausted"| FINALIZE
+    FINALIZE --> MODE{"Transport"}
+    MODE -->|"/api/query"| SYNC["grounded narrative<br/>model or deterministic digest"]
+    SYNC --> SYNC_MEMORY[("optional session snapshot")]
+    SYNC_MEMORY --> RESPONSE(["HTTP response"])
+    MODE -->|"/api/query/stream"| RESULT["result event<br/>rows + SQL + evidence + digest"]
+    RESULT --> STREAM["native model token stream"]
+    STREAM -->|"success"| NARRATIVE["narrative event<br/>final text + mode"]
+    STREAM -->|"failure / empty"| FALLBACK["reset or digest fallback"]
+    NARRATIVE --> DONE["done event<br/>trace + optional session snapshot"]
+    FALLBACK --> DONE
+    DONE --> SSE_END(["SSE complete"])
+```
+
+The graph has one controlled cycle: execution failure can enter `repair` and return to `execute`, capped by `MAX_REPAIR_ATTEMPTS`. Retrieval, planning, generation, execution and finalization are fixed nodes; AST validation runs inside `execute`. Session memory is explicit short-term context injected into planning and persistence, not an autonomous memory process.
+
 ## Request sequence
 
 ```mermaid
