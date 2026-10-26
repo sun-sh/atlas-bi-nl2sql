@@ -19,7 +19,7 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
 
 @dataclass(frozen=True)
 class Settings:
-    app_name: str = "Atlas BI · 电商经营分析 Copilot"
+    app_name: str = "Atlas BI · 企业级电商 NL2SQL 数据分析平台"
     root: Path = ROOT
     data_dir: Path = ROOT / "data"
     db_path: Path = ROOT / "data" / "commerce.db"

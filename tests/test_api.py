@@ -43,7 +43,7 @@ def test_secondary_routes_are_directly_accessible():
     for path in ("/workspace", "/evidence", "/evaluation", "/models"):
         response = client.get(path)
         assert response.status_code == 200
-        assert "Atlas BI" in response.text
+        assert "Atlas BI" in response.text and "NL2SQL" in response.text
 
 
 def test_model_config_endpoint_masks_api_key(monkeypatch, tmp_path):

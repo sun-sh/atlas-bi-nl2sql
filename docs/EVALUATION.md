@@ -17,4 +17,4 @@ python -m app.evaluation.run
 python -m pytest -q
 ```
 
-Measurements are produced by the included deterministic dataset and benchmark script.
+Measurements are produced by the included deterministic dataset and benchmark script. The golden runner forces rule mode to keep evaluation independent of external model availability.
