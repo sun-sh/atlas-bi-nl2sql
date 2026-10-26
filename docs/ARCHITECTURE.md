@@ -4,12 +4,14 @@
 
 Atlas BI is an NL2SQL analytics platform built around four bounded concerns:
 
-1. **Interaction layer** - FastAPI routes and a static single-page workspace.
+1. **Interaction layer** - FastAPI routes, a static single-page workspace and a session-level analysis thread.
 2. **Reasoning layer** - schema retrieval, query planning, SQL generation and bounded repair orchestration.
 3. **Control layer** - AST validation, read-only execution, model configuration and runtime policy.
 4. **Quality layer** - deterministic fixtures, golden cases and CI gates.
 
-All rule-generated, model-generated and repaired SQL passes through the same validator before execution.
+Session memory is deliberately bounded: SQLite-backed short-term state, at most 20 turns per session, expiring after 7 days. It stores structured query context, not a cross-session user profile.
+
+All rule-generated, model-generated and repaired SQL passes through the same validator before execution. Result narration runs only after a trusted SQL result exists: deterministic digest statistics constrain the prompt, and a model or streaming failure falls back to the same deterministic summary. The model may summarize trusted rows, but it never rewrites SQL, rows or evidence.
 
 ## Component diagram
 
@@ -21,6 +23,7 @@ flowchart TB
 
     subgraph API
         Routes[FastAPI Routes]
+        Sessions[Session Store]
         Health[Health and Observability]
     end
 
@@ -51,6 +54,7 @@ flowchart TB
     end
 
     UI --> Routes
+    Routes --> Sessions
     Routes --> Graph
     Graph --> Fusion
     Fusion --> Semantic
@@ -81,7 +85,7 @@ sequenceDiagram
     participant S as SQL Guard
     participant D as Database
 
-    U->>A: POST /api/query
+    U->>A: POST /api/query/stream
     A->>G: question
     G->>R: schema search
     R-->>G: ranked tables and evidence
@@ -99,12 +103,19 @@ sequenceDiagram
         G->>D: execute again
     end
     G-->>A: result, evidence, attempts, warnings, trace
-    A-->>U: structured response
+    A-->>U: result event with table-ready data
+    A->>L: summarize deterministic result digest
+    L-->>A: narrative token stream
+    A-->>U: delta events, final narrative, done
 ```
+
+## Short-term memory
+
+The session store lives in a separate SQLite file (`data/sessions.db` by default) and persists only bounded analysis state. A follow-up inherits missing intent, time range, metrics and filters from the latest turn. Explicit values in the new question take precedence; changing an explicit dimension clears stale filters from the previous turn. Sessions are isolated by ID, capped at 20 turns and pruned after 7 days. No cross-session user profile or long-term preference store is used.
 
 ## Runtime state
 
-The LangGraph state carries the question, trace ID, timer, schema hits, plan, generated SQL, execution result, warnings and attempt history. Each attempt records status, SQL, error and elapsed time. A result is finalized only after a successful execution or exhaustion of the configured repair budget.
+The LangGraph state carries the question, retrieval question, trace ID, timer, schema hits, plan, generated SQL, execution result, warnings and attempt history. Each attempt records status, SQL, error and elapsed time. A result is finalized only after a successful execution or exhaustion of the configured repair budget. The streaming endpoint runs this graph with narration disabled, emits the trusted result first, then streams a digest-grounded narrative before persisting the completed turn.
 
 ## Retrieval strategy
 
@@ -123,6 +134,8 @@ The LangGraph state carries the question, trace ID, timer, schema hits, plan, ge
 | Generated SQL fails validation | Enter repair path | Failed attempt with normalized error |
 | Execution fails | Repair with error context | Attempt history preserved |
 | Repair budget exhausted | Finalize without a successful result | Warning and trace contain all attempts |
+| Narrative model fails or returns empty content | Fall back to deterministic digest narrative | `narrative.mode=digest`, reason recorded in warnings |
+| Narrative stream fails after partial text | Reset the client text to the deterministic digest | Final narrative remains complete and persisted |
 | Retrieval adapter unavailable | Degrade to local IDF or no semantic signal | Health endpoint reports active backend |
 
 ## Extension points

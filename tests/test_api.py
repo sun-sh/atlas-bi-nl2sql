@@ -40,7 +40,7 @@ def test_invalid_query_is_rejected():
 
 
 def test_secondary_routes_are_directly_accessible():
-    for path in ("/workspace", "/evidence", "/evaluation", "/models"):
+    for path in ("/workspace", "/overview", "/evidence", "/evaluation", "/models"):
         response = client.get(path)
         assert response.status_code == 200
         assert "Atlas BI" in response.text and "NL2SQL" in response.text
@@ -112,3 +112,45 @@ def test_model_list_endpoint_does_not_require_saved_config(monkeypatch):
     assert response.status_code == 200
     assert response.json()["models"] == ["model-a", "model-b"]
     assert called == {"base_url": "https://example.com/v1", "api_key": "temporary-key"}
+
+
+
+def test_session_endpoints_and_memory_query(monkeypatch, tmp_path):
+    monkeypatch.setenv("ATLAS_SESSION_DB_PATH", str(tmp_path / "sessions.db"))
+    created = client.post("/api/sessions", json={})
+    assert created.status_code == 200
+    session = created.json()
+    assert session["id"].startswith("s_")
+    assert session["turn_count"] == 0
+    listed_empty = client.get("/api/sessions")
+    assert listed_empty.status_code == 200
+    assert any(item["id"] == session["id"] for item in listed_empty.json()["sessions"])
+
+    first = client.post(
+        "/api/query",
+        json={"question": "上个月华东地区销售额是多少？", "session_id": session["id"]},
+    )
+    assert first.status_code == 200
+    first_body = first.json()
+    assert first_body["session_id"] == session["id"]
+    assert first_body["session"]["turn_count"] == 1
+    assert first_body["session"]["context"]["region_label"] == "华东"
+
+    second = client.post(
+        "/api/query",
+        json={"question": "那华南呢", "session_id": session["id"]},
+    )
+    assert second.status_code == 200
+    second_body = second.json()
+    assert second_body["plan"]["context"]["region_label"] == "华南"
+    assert any("时间范围" in item for item in second_body["plan"]["inherited"])
+    assert first_body["plan"]["time_range"] == second_body["plan"]["time_range"]
+    assert second_body["session"]["turn_count"] == 2
+
+    listed = client.get("/api/sessions")
+    assert listed.status_code == 200
+    assert any(item["id"] == session["id"] for item in listed.json()["sessions"])
+
+    deleted = client.delete(f"/api/sessions/{session['id']}")
+    assert deleted.status_code == 200
+    assert client.get(f"/api/sessions/{session['id']}").status_code == 404

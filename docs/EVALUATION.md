@@ -7,7 +7,7 @@ Dataset: deterministic simulated e-commerce data, 2025-10-01 to 2026-02-28.
 - Result hit rate: 100%
 - Latency: the first query includes local embedding initialization; warm queries complete in tens of milliseconds. Exact timing depends on hardware and the selected retrieval backend
 - Covered intents: sales overview, category analysis, refund analysis, marketing efficiency, daily trend
-- Automated tests: 26 passing in the final repository
+- Automated tests: 39 passing in the current repository
 
 Run locally:
 

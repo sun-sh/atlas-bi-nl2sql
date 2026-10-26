@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 .env
 data/*.db
+data/*.db-*
 data/qdrant/
 data/schema_index.json
 data/model_config.json

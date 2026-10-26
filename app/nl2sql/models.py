@@ -64,6 +64,9 @@ class QueryPlan:
     time_range: str = ""
     chart_type: str = "table"
     notes: list[str] = field(default_factory=list)
+    inherited: list[str] = field(default_factory=list)
+    source_question: str = ""
+    context: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +78,9 @@ class QueryPlan:
             "time_range": self.time_range,
             "chart_type": self.chart_type,
             "notes": self.notes,
+            "inherited": self.inherited,
+            "source_question": self.source_question,
+            "context": self.context,
         }
 
 
@@ -93,6 +99,8 @@ class QueryResult:
     mode: str = "rule"
     warnings: list[str] = field(default_factory=list)
     trace_id: str = ""
+    narrative_mode: str = "digest"
+    narrative_model: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -109,4 +117,8 @@ class QueryResult:
             "mode": self.mode,
             "warnings": self.warnings,
             "trace_id": self.trace_id,
+            "narrative": {
+                "mode": self.narrative_mode,
+                "model": self.narrative_model,
+            },
         }

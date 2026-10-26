@@ -10,6 +10,13 @@ from app.nl2sql import generator
 from app.nl2sql.generator import generate_llm_repair_sql, generate_llm_sql, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
 from app.nl2sql.planner import make_plan
+from app.nl2sql.result_insight import (
+    NarrativeResult,
+    build_result_digest,
+    narrative_warnings,
+    narrate_result,
+    rule_narrative,
+)
 from app.nl2sql.retrieval import HybridSchemaRetriever
 from app.nl2sql.settings import get_settings
 from app.nl2sql.sql_engine import execute_sql, explain_error, validate_sql
@@ -17,6 +24,7 @@ from app.nl2sql.sql_engine import execute_sql, explain_error, validate_sql
 
 class GraphState(TypedDict, total=False):
     question: str
+    retrieval_question: str
     hits: list[SchemaHit]
     plan: QueryPlan
     sql: str
@@ -26,6 +34,9 @@ class GraphState(TypedDict, total=False):
     started: float
     trace_id: str
     mode: str
+    context: dict[str, Any]
+    narrate: bool
+    narrative: NarrativeResult
     final: QueryResult
 
 
@@ -39,13 +50,33 @@ def get_retriever() -> HybridSchemaRetriever:
     return _retriever
 
 
+def _context_retrieval_question(question: str, context: dict[str, Any] | None) -> str:
+    if not context:
+        return question
+    previous = str(context.get("question") or "").strip()
+    if not previous:
+        return question
+    compact_question = question.strip()
+    if compact_question == previous or compact_question in previous:
+        return previous
+    return f"{previous} {compact_question}"
+
+
 def retrieve_node(state: GraphState) -> GraphState:
-    hits = get_retriever().search(state["question"], limit=4)
-    return {"hits": hits, "attempts": [], "warnings": []}
+    retrieval_question = _context_retrieval_question(
+        state["question"], state.get("context")
+    )
+    hits = get_retriever().search(retrieval_question, limit=4)
+    return {
+        "retrieval_question": retrieval_question,
+        "hits": hits,
+        "attempts": [],
+        "warnings": [],
+    }
 
 
 def plan_node(state: GraphState) -> GraphState:
-    plan = make_plan(state["question"], state["hits"])
+    plan = make_plan(state["question"], state["hits"], state.get("context"))
     return {"plan": plan}
 
 
@@ -134,14 +165,20 @@ def finalize_node(state: GraphState) -> GraphState:
     result = state.get("result") or {"rows": [], "columns": [], "row_count": 0, "truncated": False, "elapsed_ms": 0}
     plan = state["plan"]
     rows = result.get("rows", [])
-    if rows:
-        first = rows[0]
-        answer = "查询完成。共返回 " + str(result.get("row_count", len(rows))) + " 行。"
-        for key, value in list(first.items())[:3]:
-            answer += f" {key}={value};"
+    columns = result.get("columns", [])
+    digest = build_result_digest(
+        state["question"],
+        plan,
+        rows,
+        columns,
+        int(result.get("row_count", len(rows))),
+        bool(result.get("truncated", False)),
+    )
+    if state.get("narrate", True):
+        narrative = narrate_result(state["question"], plan, digest)
     else:
-        answer = "查询执行完成，但没有匹配到数据。可以检查时间范围或筛选条件。"
-    warnings = list(state.get("warnings", []))
+        narrative = NarrativeResult(text=rule_narrative(digest), mode="digest")
+    warnings = list(state.get("warnings", [])) + narrative_warnings(narrative)
     mode = state.get("mode", "rule")
     if mode.startswith("rule"):
         warnings.append("当前离线模式使用规则 SQL 生成器；配置 LLM_ENABLED=true 可切换为模型生成。")
@@ -149,9 +186,9 @@ def finalize_node(state: GraphState) -> GraphState:
         question=state["question"],
         sql=state.get("sql", ""),
         rows=rows,
-        columns=result.get("columns", []),
+        columns=columns,
         chart_type=plan.chart_type,
-        answer=answer,
+        answer=narrative.text,
         plan=plan,
         retrieval=state["hits"],
         attempts=state.get("attempts", []),
@@ -159,6 +196,8 @@ def finalize_node(state: GraphState) -> GraphState:
         mode=mode,
         warnings=warnings,
         trace_id=state["trace_id"],
+        narrative_mode=narrative.mode,
+        narrative_model=narrative.model,
     )
     return {"final": final}
 
@@ -184,14 +223,21 @@ def build_graph():
 _GRAPH = None
 
 
-def run_query(question: str) -> QueryResult:
+def run_query(
+    question: str,
+    context: dict[str, Any] | None = None,
+    *,
+    narrate: bool = True,
+) -> QueryResult:
     global _GRAPH
     if _GRAPH is None:
         _GRAPH = build_graph()
     initial: GraphState = {
         "question": question.strip(),
+        "context": context or {},
         "started": time.perf_counter(),
         "trace_id": uuid.uuid4().hex[:12],
+        "narrate": narrate,
     }
     state = _GRAPH.invoke(initial)
     return state["final"]

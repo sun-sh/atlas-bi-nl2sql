@@ -18,7 +18,8 @@
         </div>
       </div>
       <nav class="nav">
-        <button class="nav-item active" data-view="workspace"><span class="nav-icon">◈</span><span>分析工作台</span></button>
+        <button class="nav-item active" data-view="workspace"><span class="nav-icon">◈</span><span>分析会话</span></button>
+        <button class="nav-item" data-view="overview"><span class="nav-icon">▦</span><span>经营总览</span></button>
         <button class="nav-item" data-view="evidence"><span class="nav-icon">◎</span><span>检索与证据</span></button>
         <button class="nav-item" data-view="evaluation"><span class="nav-icon">◇</span><span>评测结果</span></button>
         <button class="nav-item" data-view="models"><span class="nav-icon">⚙</span><span>模型配置</span></button>
@@ -37,62 +38,100 @@
     <main class="main">
       <header class="topbar">
         <div>
-          <div class="eyebrow">OPERATIONS INTELLIGENCE / 2026 Q1</div>
-          <h1>用自然语言完成一次可信的经营分析</h1>
+          <div class="eyebrow">ATLAS / BUSINESS ANALYSIS</div>
+          <h1>连续提问，保持分析上下文</h1>
+          <p class="top-subtitle">会话内记住分析条件；每一轮结果都能回到 SQL、召回证据与执行轨迹。</p>
         </div>
         <div class="top-actions">
-          <span class="pill"><span class="status-dot"></span>固定评测数据集</span>
-          <button class="icon-btn" id="refresh-btn" title="刷新指标">↻</button>
+          <span class="pill"><span class="status-dot"></span>短期记忆已启用</span>
+          <button class="icon-btn" id="refresh-btn" title="刷新状态">↻</button>
         </div>
       </header>
 
       <section class="view active" id="view-workspace">
+        <div class="session-shell">
+          <aside class="panel session-rail">
+            <div class="session-rail-head">
+              <div>
+                <div class="panel-kicker">CONVERSATIONS</div>
+                <h2>分析会话</h2>
+              </div>
+              <button class="new-session-btn" id="new-session-btn" title="新建会话">＋</button>
+            </div>
+            <p class="session-rail-note">会话内短期记忆仅保留 7 天，最多 20 轮。</p>
+            <div class="session-list" id="session-list">
+              <div class="session-empty">正在读取会话…</div>
+            </div>
+          </aside>
+
+          <section class="panel conversation-panel">
+            <div class="conversation-head">
+              <div>
+                <div class="panel-kicker">ANALYSIS THREAD</div>
+                <h2 id="session-title">新的分析会话</h2>
+              </div>
+              <span class="badge" id="session-count">0 轮</span>
+            </div>
+            <div class="conversation-thread" id="conversation-thread">
+              <div class="conversation-empty">
+                <div class="conversation-empty-mark">AI</div>
+                <h3>从一个经营问题开始</h3>
+                <p>例如先问“上个月华东地区销售额是多少？”，再追问“那华南呢”。系统会继承时间与指标，只替换地区。</p>
+                <div class="starter-grid" id="example-list"></div>
+              </div>
+            </div>
+            <form id="query-form" class="composer">
+              <textarea id="question" rows="2" maxlength="300" placeholder="继续追问，或输入新的经营问题…"></textarea>
+              <div class="composer-foot">
+                <span class="hint">支持时间、地区、渠道、品类、退款与 ROI；新会话会清空上下文</span>
+                <button class="primary-btn" id="submit-btn" type="submit"><span>发送问题</span><span class="arrow">↗</span></button>
+              </div>
+            </form>
+          </section>
+
+          <aside class="context-column">
+            <section class="panel context-card">
+              <div class="panel-head compact"><div><div class="panel-kicker">CURRENT CONTEXT</div><h2>当前上下文</h2></div><span class="badge">短期记忆</span></div>
+              <div class="context-list" id="context-list">
+                <div class="context-empty">提交第一条问题后生成分析上下文。</div>
+              </div>
+              <button class="context-reset" id="reset-context-btn">新建会话并清空</button>
+            </section>
+            <section class="panel context-card context-guide">
+              <div class="panel-kicker">HOW IT WORKS</div>
+              <h2>追问怎么生效</h2>
+              <div class="guide-row"><span>01</span><p><strong>显式条件优先</strong><br>新问题里的地区、渠道或时间会覆盖旧值。</p></div>
+              <div class="guide-row"><span>02</span><p><strong>缺失条件继承</strong><br>“那华南呢”只替换地区，保留时间和指标。</p></div>
+              <div class="guide-row"><span>03</span><p><strong>可随时重置</strong><br>新建会话会清空上下文，不产生跨会话记忆。</p></div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-overview">
+        <div class="page-heading overview-heading">
+          <div>
+            <div class="eyebrow">BUSINESS OVERVIEW</div>
+            <h2>经营总览</h2>
+            <p>先看全局指标，再进入分析会话追踪具体问题。</p>
+          </div>
+          <button class="secondary-btn" id="overview-refresh-btn">刷新指标</button>
+        </div>
         <div class="metrics-grid" id="metrics-grid">
           <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
           <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
         </div>
-        <div class="workspace-grid">
-          <section class="panel ask-panel">
-            <div class="panel-head">
-              <div><div class="panel-kicker">01 / ASK</div><h2>今天想了解什么？</h2></div>
-              <span class="tag">自然语言 → SQL</span>
-            </div>
-            <form id="query-form" class="query-form">
-              <textarea id="question" rows="3" maxlength="300" placeholder="例如：上个月华东地区销售额是多少？"></textarea>
-              <div class="form-foot">
-                <span class="hint">支持时间、地区、渠道、品类、退款和 ROI 分析</span>
-                <button class="primary-btn" id="submit-btn" type="submit"><span>开始分析</span><span class="arrow">↗</span></button>
-              </div>
-            </form>
-            <div class="examples"><div class="section-label">试试这些问题</div><div id="example-list" class="example-list"></div></div>
-            <div class="pipeline">
-              <div class="pipeline-step"><span>01</span>双路召回</div><div class="pipeline-arrow">→</div>
-              <div class="pipeline-step"><span>02</span>查询规划</div><div class="pipeline-arrow">→</div>
-              <div class="pipeline-step"><span>03</span>安全执行</div><div class="pipeline-arrow">→</div>
-              <div class="pipeline-step"><span>04</span>结果校验</div>
-            </div>
-          </section>
-          <section class="panel result-panel" id="result-panel">
-            <div class="empty-state">
-              <div class="empty-orbit"><div class="orbit-core">BI</div><span class="orbit-dot dot-one"></span><span class="orbit-dot dot-two"></span></div>
-              <h3>结果会在这里展开</h3>
-              <p>提交问题后，你会看到结论、图表、生成的 SQL，以及系统选择这些表和字段的依据。</p>
-              <div class="feature-row"><span>可解释召回</span><span>SQL 安全门禁</span><span>失败自动修复</span></div>
-            </div>
-          </section>
-        </div>
         <div class="bottom-grid">
           <section class="panel trend-panel">
-            <div class="panel-head compact"><div><div class="panel-kicker">02 / SIGNAL</div><h2>本月销售趋势</h2></div><span class="muted">实付口径 · 不含退款</span></div>
+            <div class="panel-head compact"><div><div class="panel-kicker">SIGNAL</div><h2>本月销售趋势</h2></div><span class="muted">实付口径 · 不含退款</span></div>
             <div id="trend-chart" class="trend-chart"></div>
           </section>
           <section class="panel channel-panel">
-            <div class="panel-head compact"><div><div class="panel-kicker">03 / MIX</div><h2>渠道销售结构</h2></div><span class="muted">按订单实付</span></div>
+            <div class="panel-head compact"><div><div class="panel-kicker">MIX</div><h2>渠道销售结构</h2></div><span class="muted">按订单实付</span></div>
             <div id="channel-list" class="channel-list"></div>
           </section>
         </div>
       </section>
-
       <section class="view" id="view-evidence">
         <div class="page-heading">
           <div class="eyebrow">EXPLAINABILITY</div><h2>每一次生成，都应该能被追问</h2>

@@ -2,7 +2,7 @@
 
 **把自然语言经营问题转化为可执行、可审计、可复现的只读 SQL 查询。**
 
-Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商品、退款、投放和客户画像。平台将 Schema 召回、意图规划、SQL 生成、安全校验、只读执行、失败修复和结果解释纳入统一编排，并以检索证据、SQL 和 trace 将每次查询完整串联。
+Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商品、退款、投放和客户画像。平台将 Schema 召回、意图规划、SQL 生成、安全校验、只读执行、失败修复和结果解释纳入统一编排，并以检索证据、SQL 和 trace 将每次查询完整串联。SQL 结果、SQL 与证据不做模型二次改写；模型只读取确定性结果摘要，生成可读的中文分析结论并通过 SSE 增量推送，模型不可用时自动回退为可复现摘要。分析工作台支持会话级短期记忆，追问可以继承时间、指标与筛选条件。
 
 [![CI](https://github.com/sun-sh/atlas-bi-nl2sql/actions/workflows/ci.yml/badge.svg)](https://github.com/sun-sh/atlas-bi-nl2sql/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
@@ -10,7 +10,7 @@ Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商�
 ![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-1f6feb)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-![Atlas BI 工作台](docs/atlas-query-final.png)
+![Atlas BI 流式分析工作台](docs/atlas-stream-final.png)
 
 ## 业务定位
 
@@ -21,6 +21,7 @@ Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商�
 | 数据层 | 订单、商品行、退款、渠道投放和客户画像五张业务表 |
 | 查询链路 | 双路 Schema 召回 → 意图规划 → SQL 生成 → AST 门禁 → 只读执行 → 有界修复 → 结果解释 |
 | 接入方式 | Web 工作台、FastAPI 查询接口、OpenAPI 文档与 OpenAI 兼容模型网关 |
+| 会话能力 | 会话级短期记忆：最多 20 轮、7 天过期；显式条件优先，缺失条件按需继承 |
 
 ## 系统架构
 
@@ -52,8 +53,10 @@ flowchart LR
 | 安全执行 | sqlglot AST 校验、单条 SELECT、表/函数白名单、敏感字段拦截、只读连接、行数限制 | 在数据库执行前落实数据访问边界 |
 | 有界修复 | LangGraph 捕获执行错误，结合原 SQL 与 Schema 反馈给模型，默认最多 2 次 | 失败可追踪，修复成本可控 |
 | 模型网关 | 在线拉取模型、测试连接、保存服务端配置、密钥脱敏 | 模型接入与业务编排解耦 |
+| 结果解读 | 先返回 SQL 结果，再以 SSE 流式输出模型分析结论；模型失败、超时或返回空内容时回退为确定性摘要 | 缩短首屏等待，结论仍可追溯和复现 |
 | 可观测性 | 召回分数、执行 SQL、尝试记录、耗时、告警和 trace ID | 从问题到结果全过程可追问 |
-| 质量门禁 | 确定性数据、6 条黄金用例、26 项自动化测试、CI | 每次变更均可回归验证 |
+| 会话记忆 | 保存近期问题、结构化查询上下文和结果；追问显示实际继承项 | 支持连续分析，同时明确条件来源 |
+| 质量门禁 | 确定性数据、6 条黄金用例、39 项自动化测试、CI | 每次变更均可回归验证 |
 
 ## 安全与治理
 
@@ -80,11 +83,38 @@ flowchart LR
 | --- | --- |
 | `GET /api/health` | 数据库、检索后端、模型激活状态与修复配置 |
 | `GET /api/overview` | 经营总览指标 |
-| `POST /api/query` | 执行完整 NL2SQL 查询链路 |
+| `POST /api/query` | 同步执行完整 NL2SQL 查询链路，返回结构化结果与最终分析结论 |
+| `POST /api/query/stream` | 先返回 SQL 结果，再通过 SSE 流式推送分析结论 |
+| `GET/POST /api/sessions` | 列出或创建分析会话 |
+| `GET/DELETE /api/sessions/{id}` | 恢复或删除会话 |
 | `GET /api/evaluation` | 运行黄金评测集 |
 | `GET /docs` | OpenAPI 交互文档 |
 
-查询响应包含 `mode`、`plan`、`retrieval`、`sql`、`attempts`、`elapsed_ms`、`warnings` 和 `trace_id`，可在工作台中查看对应的召回证据与修复轨迹。
+同步响应包含 `mode`、`plan`、`retrieval`、`sql`、`rows`、`attempts`、`elapsed_ms`、`warnings`、`trace_id`、`narrative` 和 `answer`；`answer` 是最终结论文本，`narrative.mode` 标识 `model` / `digest`。流式接口的 `result` 事件先携带完整结构化结果与首屏确定性摘要，最终结论在后续 `narrative` 事件的 `text` 字段中返回。会话查询还返回 `session_id` 与更新后的会话快照；`plan.inherited` 明确列出本轮继承的时间、指标或筛选条件。
+
+### 流式分析
+
+`POST /api/query/stream` 使用 Server-Sent Events (SSE)。标准事件顺序为：
+
+```text
+result → [thinking] → (delta* | reset?) → narrative → done
+```
+
+- `result`：SQL 已执行完成，包含完整结果、SQL、证据和首屏确定性摘要，前端可立即展示结果表。
+- `thinking`：可选，模型正在组织答案。
+- `delta`：追加模型原生流式内容；模型未启用时，确定性摘要作为单个 `delta` 推送。
+- `reset`：模型流中途失败时，用确定性摘要替换已收到的草稿。
+- `narrative`：最终结论文本及来源模式（`model` / `digest`），客户端应以该事件为准。
+- `done`：本轮完成；存在 `session_id` 时返回已持久化的会话快照。
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/api/query/stream \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -d '{"question":"上个月各渠道ROI","session_id":null}'
+```
+
+浏览器端应使用 `fetch` + `ReadableStream` 读取 POST 响应；原生 `EventSource` 只支持 GET，不适用于该接口。SSE 只覆盖结果解读阶段，SQL 生成与执行在 `result` 事件前完成。
 
 ## 数据域
 
@@ -98,7 +128,7 @@ python -m pytest -q
 python -m app.evaluation.run
 ```
 
-当前快照：**26 passed**、**6/6 黄金用例命中**、SQL 执行率 **100%**、结果命中率 **100%**。评测固定使用规则生成器，避免外部模型服务影响可复现性；CI 在每个 `main` 提交上执行测试与评测。
+当前快照：**39 passed**、**6/6 黄金用例命中**、SQL 执行率 **100%**、结果命中率 **100%**。评测固定使用规则生成器，避免外部模型服务影响可复现性；CI 在每个 `main` 提交上执行测试与评测。
 
 ![评测中心](docs/atlas-evaluation-latest.png)
 
@@ -118,13 +148,14 @@ Windows 可运行 `run.ps1`，macOS / Linux 可运行 `./run.sh`。
 
 | 页面 | 地址 |
 | --- | --- |
-| 分析工作台 | http://127.0.0.1:8000/workspace |
+| 分析会话 | http://127.0.0.1:8000/workspace |
+| 经营总览 | http://127.0.0.1:8000/overview |
 | 检索与证据 | http://127.0.0.1:8000/evidence |
 | 评测中心 | http://127.0.0.1:8000/evaluation |
 | 模型配置 | http://127.0.0.1:8000/models |
 | OpenAPI 文档 | http://127.0.0.1:8000/docs |
 
-首次启动会下载本地 BGE 模型；Qdrant 默认内存模式，应用启动时重建 5 张表的向量索引。设置 `QDRANT_URL` 可连接远端 Qdrant，设置 `ELASTICSEARCH_URL` 可启用 BM25。
+默认 `USE_BGE=true`，首次初始化检索器时会下载本地 BGE 模型；Qdrant 使用内存模式并重建 5 张表的向量索引。设置 `QDRANT_URL` 可连接远端 Qdrant，设置 `ELASTICSEARCH_URL` 可启用 BM25。
 
 ## 配置
 
@@ -132,15 +163,18 @@ Windows 可运行 `run.ps1`，macOS / Linux 可运行 `./run.sh`。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `LLM_ENABLED` | `false` | 启用模型 SQL 生成 |
+| `LLM_ENABLED` | `false` | 启用模型 SQL 生成与结果解读 |
+| `LLM_PROVIDER` | `openai` | 服务商标识，也可在 `/models` 中配置 |
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容接口 |
 | `OPENAI_API_KEY` | 空 | 模型密钥 |
 | `LLM_MODEL` | `gpt-4.1-mini` | 默认模型 |
 | `USE_BGE` | `true` | 启用本地语义检索 |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 本地向量模型 |
 | `QDRANT_URL` | 空 | 远端 Qdrant；空值使用内存模式 |
 | `ELASTICSEARCH_URL` | 空 | Elasticsearch；空值使用本地 IDF |
 | `MAX_REPAIR_ATTEMPTS` | `2` | SQL 修复上限 |
 | `MAX_RESULT_ROWS` | `200` | 结果返回上限 |
+| `ATLAS_SESSION_DB_PATH` | `data/sessions.db` | 短期会话存储路径 |
 
 ## 工程文档
 
