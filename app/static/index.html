@@ -21,6 +21,7 @@
         <button class="nav-item active" data-view="workspace"><span class="nav-icon">◈</span><span>分析工作台</span></button>
         <button class="nav-item" data-view="evidence"><span class="nav-icon">◎</span><span>检索与证据</span></button>
         <button class="nav-item" data-view="evaluation"><span class="nav-icon">◇</span><span>评测结果</span></button>
+        <button class="nav-item" data-view="models"><span class="nav-icon">⚙</span><span>模型配置</span></button>
       </nav>
       <div class="sidebar-card">
         <div class="sidebar-label">运行状态</div>
@@ -98,6 +99,45 @@
           <p>这里展示最近一次查询的 Schema 召回、候选分数、SQL 校验与执行轨迹。</p>
         </div>
         <div id="evidence-content" class="evidence-content"><div class="panel empty-small">先运行一条查询，再回到这里查看证据链。</div></div>
+      </section>
+
+      <section class="view" id="view-models">
+        <div class="page-heading">
+          <div class="eyebrow">MODEL GATEWAY</div><h2>连接你的大模型</h2>
+          <p>支持 OpenAI 兼容接口。填写 Base URL 和 API Key 后可在线拉取模型列表、测试连接并切换 SQL 生成模式。</p>
+        </div>
+        <div class="model-layout">
+          <section class="panel model-card">
+            <div class="panel-head compact"><div><div class="panel-kicker">01 / PROVIDER</div><h2>模型服务</h2></div><span id="model-status" class="badge">未配置</span></div>
+            <form id="model-form" class="model-form">
+              <label>服务商<select id="model-provider">
+                <option value="custom">自定义 / OpenAI 兼容</option>
+                <option value="openai">OpenAI</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="qwen">通义千问</option>
+                <option value="siliconflow">SiliconFlow</option>
+                <option value="moonshot">Moonshot</option>
+              </select></label>
+              <label>Base URL<input id="model-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="url"></label>
+              <label>API Key<input id="model-api-key" type="password" placeholder="sk-..." autocomplete="new-password"><small>密钥只保存在服务端 data/model_config.json，不会返回浏览器。</small></label>
+              <label>模型<select id="model-name"><option value="">先拉取模型列表，或手动输入</option></select></label>
+              <label>手动指定模型<input id="model-name-manual" type="text" placeholder="例如 gpt-4.1-mini"></label>
+              <label class="switch-row"><input id="model-enabled" type="checkbox"> 启用大模型生成与 SQL 自修复</label>
+              <div class="form-actions">
+                <button type="button" class="secondary-btn" id="model-fetch-btn">获取模型</button>
+                <button type="button" class="secondary-btn" id="model-test-btn">测试连接</button>
+                <button type="submit" class="primary-btn"><span>保存配置</span><span class="arrow">↗</span></button>
+              </div>
+            </form>
+            <div id="model-message" class="model-message">填写接口信息后先获取模型，再保存启用。</div>
+          </section>
+          <section class="panel model-card">
+            <div class="panel-kicker">02 / RUNTIME</div><h2>当前运行链路</h2>
+            <div id="model-runtime" class="model-runtime"></div>
+            <div class="model-note"><strong>查询链路</strong><span>问题 → Schema 召回 → 模型生成 SQL → AST 安全门禁 → 只读执行 → 失败反馈修复</span></div>
+            <div class="model-note"><strong>兼容范围</strong><span>支持提供 /v1/models 与 /v1/chat/completions 的 OpenAI 兼容服务。不同服务商的代理地址需包含对应 API 前缀。</span></div>
+          </section>
+        </div>
       </section>
 
       <section class="view" id="view-evaluation">

@@ -6,6 +6,8 @@ __pycache__/
 data/*.db
 data/qdrant/
 data/schema_index.json
+data/model_config.json
+data/model_config.tmp
 app/data/
 .DS_Store
 Thumbs.db

@@ -6,6 +6,7 @@ import os
 # path is exercised separately by the documented local evaluation command.
 os.environ["USE_BGE"] = "false"
 os.environ["LLM_ENABLED"] = "false"
+os.environ["ATLAS_DISABLE_MODEL"] = "1"
 
 from app.nl2sql.seed import generate_database  # noqa: E402
 from app.nl2sql.settings import get_settings  # noqa: E402

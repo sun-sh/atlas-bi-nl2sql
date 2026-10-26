@@ -1,4 +1,4 @@
-const state = { overview: null, lastResult: null, examples: [] };
+const state = { overview: null, lastResult: null, examples: [], model: null };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -77,6 +77,8 @@ async function loadHealth() {
       : '语义降级';
     const lexicalLabel = r.elasticsearch_enabled ? 'ES BM25' : '本地 IDF';
     $('#retrieval-meta').textContent = `${semanticLabel} + ${lexicalLabel} · 只读 SQL`;
+    state.model = data.model;
+    renderModelRuntime(data.model, data.llm_active);
   } catch {
     $('#health-text').textContent = '连接失败';
   }
@@ -173,13 +175,23 @@ async function submitQuery(question) {
   }
 }
 
+function switchView(view) {
+  if (!document.querySelector(`#view-${view}`)) view = 'workspace';
+  $$('.nav-item').forEach((x) => x.classList.toggle('active', x.dataset.view === view));
+  $$('.view').forEach((x) => x.classList.toggle('active', x.id === `view-${view}`));
+  if (window.location.pathname !== `/${view}`) {
+    window.history.pushState({}, '', `/${view}`);
+  }
+  if (view === 'models') loadModelConfig();
+}
+
 function bindNavigation() {
-  $$('.nav-item').forEach((item) => item.addEventListener('click', () => {
-    $$('.nav-item').forEach((x) => x.classList.remove('active'));
-    $$('.view').forEach((x) => x.classList.remove('active'));
-    item.classList.add('active');
-    $(`#view-${item.dataset.view}`).classList.add('active');
-  }));
+  $$('.nav-item').forEach((item) => item.addEventListener('click', () => switchView(item.dataset.view)));
+  const initial = window.location.pathname.replace(/^\/|\/$/g, '') || 'workspace';
+  switchView(initial);
+  window.addEventListener('popstate', () => {
+    switchView(window.location.pathname.replace(/^\/|\/$/g, '') || 'workspace');
+  });
 }
 
 async function loadEvaluation() {
@@ -203,6 +215,121 @@ async function loadEvaluation() {
   }
 }
 
+
+const MODEL_BASE_URLS = {
+  openai: 'https://api.openai.com/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  siliconflow: 'https://api.siliconflow.cn/v1',
+  moonshot: 'https://api.moonshot.cn/v1',
+};
+
+function renderModelRuntime(model, active) {
+  if (!model) return;
+  const status = $('#model-status');
+  if (status) {
+    status.textContent = active ? '已启用' : '未启用';
+    status.className = `badge ${active ? '' : 'fail'}`;
+  }
+  const runtime = $('#model-runtime');
+  if (runtime) runtime.innerHTML = [
+    ['状态', active ? '大模型生成已启用' : '规则生成模式'],
+    ['模型', model.model || '未选择'],
+    ['服务商', model.provider || '未配置'],
+    ['接口地址', model.base_url || '未配置'],
+    ['API Key', model.api_key_configured ? '已保存（服务端）' : '未配置'],
+  ].map(([k, v]) => `<div><span>${k}</span><span>${escapeHtml(v)}</span></div>`).join('');
+}
+
+function modelFormPayload() {
+  return {
+    provider: $('#model-provider').value,
+    base_url: $('#model-base-url').value.trim(),
+    model: ($('#model-name-manual').value.trim() || $('#model-name').value),
+    api_key: $('#model-api-key').value.trim() || null,
+  };
+}
+
+function setModelMessage(message, kind = '') {
+  const el = $('#model-message');
+  if (!el) return;
+  el.textContent = message;
+  el.className = `model-message ${kind}`;
+}
+
+async function loadModelConfig() {
+  try {
+    const data = await api('/api/model/config');
+    state.model = data;
+    $('#model-provider').value = data.provider || 'custom';
+    $('#model-base-url').value = data.base_url || 'https://api.openai.com/v1';
+    $('#model-name-manual').value = data.model || '';
+    $('#model-enabled').checked = !!data.enabled;
+    renderModelRuntime(data, data.active);
+    if (data.api_key_configured) $('#model-api-key').placeholder = '已保存，留空保持不变';
+    setModelMessage(data.active ? '模型配置已生效，查询将由当前模型生成。' : '当前未启用模型，查询使用规则生成器。');
+  } catch (error) { toast(error.message); }
+}
+
+async function fetchModels() {
+  const button = $('#model-fetch-btn');
+  button.disabled = true;
+  setModelMessage('正在请求模型列表…');
+  try {
+    const data = await api('/api/model/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(modelFormPayload()),
+    });
+    const select = $('#model-name');
+    select.innerHTML = '<option value="">请选择模型</option>';
+    data.models.forEach((name) => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+    setModelMessage(`读取到 ${data.models.length} 个模型，请选择后保存。`, 'ok');
+  } catch (error) {
+    setModelMessage(error.message, 'bad');
+  } finally { button.disabled = false; }
+}
+
+async function testModel() {
+  const button = $('#model-test-btn');
+  button.disabled = true;
+  setModelMessage('正在测试模型连接…');
+  try {
+    const data = await api('/api/model/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(modelFormPayload()),
+    });
+    setModelMessage(`连接成功，模型回复：${data.reply}`, 'ok');
+  } catch (error) {
+    setModelMessage(error.message, 'bad');
+  } finally { button.disabled = false; }
+}
+
+async function saveModel(event) {
+  event.preventDefault();
+  const payload = modelFormPayload();
+  payload.enabled = $('#model-enabled').checked;
+  try {
+    const data = await api('/api/model/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    setModelMessage(data.active ? '配置已保存，后续查询将使用该模型。' : '配置已保存，当前仍使用规则生成。', 'ok');
+    $('#model-api-key').value = '';
+    await loadHealth();
+  } catch (error) {
+    setModelMessage(error.message, 'bad');
+  }
+}
+
+
 function init() {
   bindNavigation();
   loadHealth();
@@ -220,6 +347,13 @@ function init() {
   });
   $('#refresh-btn').addEventListener('click', () => { loadOverview(); loadHealth(); });
   $('#run-eval-btn').addEventListener('click', loadEvaluation);
+  $('#model-provider')?.addEventListener('change', () => {
+    const baseUrl = MODEL_BASE_URLS[$('#model-provider').value];
+    if (baseUrl) $('#model-base-url').value = baseUrl;
+  });
+  $('#model-fetch-btn')?.addEventListener('click', fetchModels);
+  $('#model-test-btn')?.addEventListener('click', testModel);
+  $('#model-form')?.addEventListener('submit', saveModel);
 }
 
 document.addEventListener('DOMContentLoaded', init);
