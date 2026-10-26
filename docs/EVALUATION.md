@@ -5,9 +5,9 @@ Dataset: deterministic simulated e-commerce data, 2025-10-01 to 2026-02-28.
 - Golden cases: 6
 - SQL execution rate: 100%
 - Result hit rate: 100%
-- Average latency: about 350 ms on the local BGE run (including first-load overhead); steady-state queries around 9–31 ms
+- Latency: the first query includes local embedding initialization; warm queries complete in tens of milliseconds. Exact timing depends on hardware and the selected retrieval backend
 - Covered intents: sales overview, category analysis, refund analysis, marketing efficiency, daily trend
-- Automated tests: 24 passing in the final repository
+- Automated tests: 26 passing in the final repository
 
 Run locally:
 

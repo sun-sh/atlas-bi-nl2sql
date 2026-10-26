@@ -57,7 +57,6 @@ EXAMPLES = [
     "按日看本月销售额趋势",
     "各渠道客单价",
 ]
-VIEWS = {"workspace", "evidence", "evaluation", "models"}
 
 
 @app.get("/")

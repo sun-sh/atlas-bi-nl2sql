@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 
-from app.nl2sql.model_config import get_model_config
+from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.models import QueryPlan, SchemaHit
-from app.nl2sql.schema_catalog import compact_schema_prompt, schema_prompt
+from app.nl2sql.schema_catalog import compact_schema_prompt
 
 
 def _where(filters: list[str]) -> str:
@@ -86,13 +86,16 @@ def generate_rule_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> 
     )
 
 
+LAST_LLM_ERROR: str | None = None
+
+
 def _llm_sql(instructions: str, prompt: str) -> str | None:
+    global LAST_LLM_ERROR
+    LAST_LLM_ERROR = None
     settings = get_model_config()
     if not settings.enabled:
         return None
     try:
-        from app.nl2sql.model_config import make_client
-
         client = make_client(settings)
         response = client.chat.completions.create(
             model=settings.model,
@@ -105,8 +108,12 @@ def _llm_sql(instructions: str, prompt: str) -> str | None:
         )
         text = (response.choices[0].message.content or "").strip()
         text = re.sub(r"^```(?:sql)?\s*|\s*```$", "", text, flags=re.I).strip()
-        return text or None
-    except Exception:
+        if not text:
+            LAST_LLM_ERROR = "模型返回了空内容"
+            return None
+        return text
+    except Exception as exc:
+        LAST_LLM_ERROR = model_error_message(exc)
         return None
 
 

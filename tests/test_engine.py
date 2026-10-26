@@ -142,3 +142,29 @@ def test_every_rule_query_compiles_and_passes_validator():
         plan = make_plan(question, retriever.search(question))
         sql = generate_rule_sql(question, plan, retriever.search(question))
         assert validate_sql(sql)
+
+
+
+def test_model_failure_is_visible_when_falling_back_to_rules(monkeypatch):
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: None)
+    monkeypatch.setattr("app.nl2sql.generator.LAST_LLM_ERROR", "模拟网络失败")
+    result = run_query("各渠道销售额")
+    assert result.mode == "rule"
+    assert any("模型调用失败" in warning for warning in result.warnings)
+
+
+def test_evaluation_forces_rule_mode(monkeypatch):
+    evaluated_modes = []
+    real_run_query = run_query
+
+    def capture(question):
+        result = real_run_query(question)
+        evaluated_modes.append(result.mode)
+        return result
+
+    monkeypatch.setattr("app.nl2sql.evaluation.run_query", capture)
+    from app.nl2sql.evaluation import run_evaluation
+
+    report = run_evaluation()
+    assert report["passed"] == 6
+    assert set(evaluated_modes) == {"rule"}

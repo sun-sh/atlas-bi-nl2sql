@@ -19,3 +19,6 @@ docs/atlas-evaluation.png
 docs/atlas-final.png
 docs/RESUME.md
 docs/INTERVIEW.md
+docs/audit-*.png
+ui_audit.js
+benchmark_latency.py

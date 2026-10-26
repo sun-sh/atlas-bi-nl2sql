@@ -6,6 +6,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from app.nl2sql import generator
 from app.nl2sql.generator import generate_llm_repair_sql, generate_llm_sql, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
 from app.nl2sql.planner import make_plan
@@ -52,10 +53,13 @@ def generate_node(state: GraphState) -> GraphState:
     plan = state["plan"]
     sql = generate_llm_sql(state["question"], plan, state["hits"])
     mode = "llm"
+    warnings = list(state.get("warnings", []))
     if not sql:
         sql = generate_rule_sql(state["question"], plan, state["hits"])
         mode = "rule"
-    return {"sql": sql, "mode": mode}
+        if generator.LAST_LLM_ERROR:
+            warnings.append("模型调用失败，已回退规则 SQL：" + generator.LAST_LLM_ERROR)
+    return {"sql": sql, "mode": mode, "warnings": warnings}
 
 
 def execute_node(state: GraphState) -> GraphState:
@@ -106,10 +110,13 @@ def repair_node(state: GraphState) -> GraphState:
     sql = repaired or generate_rule_sql(question, plan, state["hits"])
     mode = "llm-repair" if repaired else "rule-repair"
     warning = f"第 {len(attempts)} 次执行失败：{last_error}"
+    extra = ["修复来源：" + mode]
+    if not repaired and generator.LAST_LLM_ERROR:
+        extra.append("模型修复失败：" + generator.LAST_LLM_ERROR)
     return {
         "sql": sql,
         "mode": mode,
-        "warnings": state.get("warnings", []) + [warning, "修复来源：" + mode],
+        "warnings": state.get("warnings", []) + [warning, *extra],
     }
 
 

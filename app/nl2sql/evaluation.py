@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -17,6 +18,18 @@ CASES = (
 
 
 def run_evaluation() -> dict[str, Any]:
+    previous_model_flag = os.environ.get("ATLAS_DISABLE_MODEL")
+    os.environ["ATLAS_DISABLE_MODEL"] = "1"
+    try:
+        return _run_evaluation()
+    finally:
+        if previous_model_flag is None:
+            os.environ.pop("ATLAS_DISABLE_MODEL", None)
+        else:
+            os.environ["ATLAS_DISABLE_MODEL"] = previous_model_flag
+
+
+def _run_evaluation() -> dict[str, Any]:
     cases = []
     executed_count = 0
     hit_count = 0
