@@ -141,17 +141,38 @@
       </section>
 
       <section class="view" id="view-evaluation">
-        <div class="page-heading">
-          <div class="eyebrow">EVALUATION</div><h2>用固定的问题集验收，而不是凭感觉说“效果不错”</h2>
-          <p>评测集覆盖销售、品类、退款、投放和趋势五类意图，计算执行成功率、结果命中率和耗时。</p>
+        <div class="page-heading eval-heading">
+          <div>
+            <div class="eyebrow">EVALUATION</div>
+            <h2>用固定的问题集验收经营分析链路</h2>
+            <p>评测覆盖销售、品类、退款、投放和趋势意图，统一检查 SQL 执行、结果命中与响应耗时。</p>
+          </div>
+          <button class="secondary-btn" id="run-eval-btn">重新运行评测</button>
+        </div>
+        <div class="eval-meta" id="eval-meta">
+          <span>评测模式 <strong>规则模式</strong></span>
+          <span>数据集 <strong>2025-10-01 至 2026-02-28</strong></span>
+          <span>结果时间 <strong>加载中…</strong></span>
         </div>
         <div class="eval-summary" id="eval-summary">
           <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
           <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
         </div>
-        <div class="panel">
-          <div class="panel-head compact"><div><div class="panel-kicker">GOLDEN SET</div><h2>语义验收用例</h2></div><button class="secondary-btn" id="run-eval-btn">运行评测</button></div>
-          <div class="table-wrap" id="eval-table"><p class="muted">点击“运行评测”生成最新结果。</p></div>
+        <div class="eval-grid">
+          <section class="panel eval-rules">
+            <div class="panel-kicker">ACCEPTANCE</div>
+            <h2>验收标准</h2>
+            <div class="rule-list">
+              <div><span class="rule-index">01</span><div><strong>SQL 可执行</strong><p>每条黄金问题必须通过 AST 安全门禁并成功执行。</p></div></div>
+              <div><span class="rule-index">02</span><div><strong>结果可命中</strong><p>返回的行数、维度值与关键指标必须符合预期。</p></div></div>
+              <div><span class="rule-index">03</span><div><strong>链路可复现</strong><p>固定数据种子与规则生成器，避免外部模型波动影响评分。</p></div></div>
+            </div>
+            <div class="eval-note">模型模式和规则模式在工作台分别验证；模型不可用时，查询告警会写入执行轨迹。</div>
+          </section>
+          <section class="panel">
+            <div class="panel-head compact"><div><div class="panel-kicker">GOLDEN SET</div><h2>逐用例结果</h2></div><span class="badge" id="eval-count">等待加载</span></div>
+            <div class="table-wrap" id="eval-table"><p class="muted">正在读取最新评测结果…</p></div>
+          </section>
         </div>
       </section>
     </main>

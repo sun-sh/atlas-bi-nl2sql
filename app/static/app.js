@@ -183,6 +183,7 @@ function switchView(view) {
     window.history.pushState({}, '', `/${view}`);
   }
   if (view === 'models') loadModelConfig();
+  if (view === 'evaluation') loadEvaluation();
 }
 
 function bindNavigation() {
@@ -194,24 +195,59 @@ function bindNavigation() {
   });
 }
 
+const EVAL_LABELS = {
+  sales_overview: '销售总览',
+  category_analysis: '品类分析',
+  refund_analysis: '退款分析',
+  marketing_efficiency: '投放效率',
+};
+
+function formatEvaluatedAt(value) {
+  if (!value) return '未提供';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function renderEvaluation(data) {
+  $('#eval-meta').innerHTML = `
+    <span>评测模式 <strong>${escapeHtml(data.mode || 'rule')}</strong></span>
+    <span>数据集 <strong>${escapeHtml(data.dataset_range || '固定数据集')}</strong></span>
+    <span>结果时间 <strong>${escapeHtml(formatEvaluatedAt(data.evaluated_at))}</strong></span>`;
+  $('#eval-summary').innerHTML = [
+    metricCard('执行成功率', data.execution_rate + '%', `${data.passed}/${data.total} 条通过`, true),
+    metricCard('结果命中率', data.hit_rate + '%', '关键结果值符合预期'),
+    metricCard('平均响应时间', data.avg_elapsed_ms + ' ms', '本地运行 · 含检索与 SQL'),
+    metricCard('覆盖意图', data.intents + ' 类', '销售 / 品类 / 退款 / ROI / 趋势'),
+  ].join('');
+  $('#eval-count').textContent = `${data.passed}/${data.total} 通过`;
+  const rows = (data.cases || []).map((item) => `
+    <tr>
+      <td>${escapeHtml(item.question)}</td>
+      <td>${escapeHtml(EVAL_LABELS[item.intent] || item.intent)}</td>
+      <td><span class="badge ${item.executed ? '' : 'fail'}">${item.executed ? '已执行' : '失败'}</span></td>
+      <td><span class="badge ${item.hit ? '' : 'fail'}">${item.hit ? '命中' : '未命中'}</span></td>
+      <td>${escapeHtml(item.attempts)} 次 / ${escapeHtml(item.elapsed_ms)} ms</td>
+      <td class="eval-result-cell">${item.error ? `<span class="eval-error">${escapeHtml(item.error)}</span>` : '<span class="eval-pass">符合验收标准</span>'}</td>
+    </tr>`).join('');
+  $('#eval-table').innerHTML = rows
+    ? `<table class="eval-table"><thead><tr><th>黄金问题</th><th>意图</th><th>执行</th><th>结果</th><th>尝试 / 耗时</th><th>验收说明</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<p class="muted">当前评测集没有返回用例。</p>';
+}
+
 async function loadEvaluation() {
   const button = $('#run-eval-btn');
   button.disabled = true;
   button.textContent = '运行中…';
   try {
     const data = await api('/api/evaluation');
-    $('#eval-summary').innerHTML = [
-      metricCard('执行成功率', data.execution_rate + '%', `${data.passed}/${data.total} 条通过`, true),
-      metricCard('结果命中率', data.hit_rate + '%', '关键结果值符合预期'),
-      metricCard('平均响应时间', data.avg_elapsed_ms + ' ms', '本地运行 · 含检索与 SQL'),
-      metricCard('覆盖意图', data.intents + ' 类', '销售 / 品类 / 退款 / ROI / 趋势'),
-    ].join('');
-    $('#eval-table').innerHTML = `<table class="eval-table"><thead><tr><th>用例</th><th>意图</th><th>执行</th><th>结果命中</th><th>耗时</th></tr></thead><tbody>${data.cases.map((x) => `<tr><td>${x.question}</td><td>${x.intent}</td><td><span class="badge ${x.executed ? '' : 'fail'}">${x.executed ? '通过' : '失败'}</span></td><td><span class="badge ${x.hit ? '' : 'fail'}">${x.hit ? '命中' : '未命中'}</span></td><td>${x.elapsed_ms} ms</td></tr>`).join('')}</tbody></table>`;
+    renderEvaluation(data);
+    toast(`评测完成 · ${data.passed}/${data.total} 通过`);
   } catch (error) {
     toast(error.message);
+    $('#eval-table').innerHTML = `<p class="muted">评测加载失败：${escapeHtml(error.message)}</p>`;
   } finally {
     button.disabled = false;
-    button.textContent = '运行评测';
+    button.textContent = '重新运行评测';
   }
 }
 

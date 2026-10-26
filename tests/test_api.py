@@ -46,6 +46,32 @@ def test_secondary_routes_are_directly_accessible():
         assert "Atlas BI" in response.text and "NL2SQL" in response.text
 
 
+def test_evaluation_endpoint_exposes_acceptance_metadata():
+    response = client.get("/api/evaluation")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "rule"
+    assert body["dataset_range"] == "2025-10-01 至 2026-02-28"
+    assert body["evaluated_at"]
+    assert body["total"] == 6
+    assert body["passed"] == 6
+    assert all(
+        {"question", "intent", "executed", "hit", "attempts", "elapsed_ms", "error"} <= set(case)
+        for case in body["cases"]
+    )
+
+
+def test_evaluation_page_contains_acceptance_and_auto_load_markup():
+    body = client.get("/evaluation").text
+    assert "验收标准" in body
+    assert "逐用例结果" in body
+    assert 'id="eval-meta"' in body
+    assert 'id="eval-count"' in body
+    script = client.get("/static/app.js").text
+    assert "if (view === 'evaluation') loadEvaluation();" in script
+    assert "renderEvaluation(data)" in script
+    assert "验收说明" in script
+
 def test_model_config_endpoint_masks_api_key(monkeypatch, tmp_path):
     monkeypatch.setenv("ATLAS_MODEL_CONFIG_PATH", str(tmp_path / "model.json"))
     monkeypatch.setenv("ATLAS_DISABLE_MODEL", "0")

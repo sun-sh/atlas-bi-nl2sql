@@ -100,6 +100,8 @@ python -m app.evaluation.run
 
 当前快照：**26 passed**、**6/6 黄金用例命中**、SQL 执行率 **100%**、结果命中率 **100%**。评测固定使用规则生成器，避免外部模型服务影响可复现性；CI 在每个 `main` 提交上执行测试与评测。
 
+![评测中心](docs/atlas-evaluation-latest.png)
+
 详见 [docs/EVALUATION.md](docs/EVALUATION.md)。
 
 ## 快速启动

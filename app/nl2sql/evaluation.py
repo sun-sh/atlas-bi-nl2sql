@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from app.nl2sql.workflow import run_query
 
 
+DATASET_RANGE = "2025-10-01 至 2026-02-28"
+MODE = "rule"
 CASES = (
     {"question": "上个月华东地区销售额是多少？", "intent": "sales_overview", "check": lambda rows: len(rows) == 1 and abs(float(rows[0].get("销售额", 0)) - 79947.85) < 1},
     {"question": "近90天各品类销售额排名", "intent": "category_analysis", "check": lambda rows: len(rows) == 4 and rows[0].get("品类") == "运动鞋服"},
@@ -57,11 +60,14 @@ def _run_evaluation() -> dict[str, Any]:
                 "hit": hit,
                 "elapsed_ms": round(elapsed, 1),
                 "attempts": len(result.attempts) if result else 0,
-                "error": None if result and executed else (error if 'error' in locals() else "结论未命中"),
+                "error": None if result and executed else (error if "error" in locals() else "结论未命中"),
             }
         )
     total = len(cases)
     return {
+        "mode": MODE,
+        "dataset_range": DATASET_RANGE,
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "total": total,
         "passed": hit_count,
         "execution_rate": round(executed_count * 100 / total, 1),

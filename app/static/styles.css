@@ -103,4 +103,17 @@ textarea{width:100%;border:0;outline:0;resize:vertical;min-height:70px;color:var
 .model-runtime span:first-child{color:var(--muted)}.model-runtime span:last-child{text-align:right;word-break:break-all}
 .model-note{display:grid;gap:5px;background:#f3f5ef;border-radius:9px;padding:12px;margin-top:10px;font-size:10px;line-height:1.6;color:var(--muted)}
 .model-note strong{color:var(--ink);font-size:11px}
-@media(max-width:1100px){.model-layout{grid-template-columns:1fr}}
+.eval-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:18px}
+.eval-meta{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.eval-meta span{border:1px solid var(--line);border-radius:100px;padding:7px 11px;background:rgba(255,255,255,.45);color:var(--muted);font-size:10px}
+.eval-meta strong{color:var(--ink);font-weight:650;margin-left:4px}
+.eval-grid{display:grid;grid-template-columns:minmax(260px,.34fr) minmax(0,1fr);gap:14px}
+.eval-rules{padding:22px}
+.rule-list{display:grid;gap:16px;margin-top:20px}
+.rule-list>div{display:flex;gap:11px;align-items:flex-start}
+.rule-index{color:var(--green);font:700 10px/1.6 Consolas,monospace}
+.rule-list strong{font-size:12px;display:block;margin-bottom:4px}
+.rule-list p{font:11px/1.65 "Aptos","Segoe UI",sans-serif;color:var(--muted);margin:0}
+.eval-note{margin-top:22px;padding:12px;border-radius:9px;background:#f3f5ef;color:var(--muted);font-size:10px;line-height:1.6}
+.eval-result-cell{max-width:230px}.eval-pass{color:var(--green);font-size:10px}.eval-error{color:var(--orange);font-size:10px;line-height:1.5;word-break:break-word}
+@media(max-width:1100px){.model-layout,.eval-grid{grid-template-columns:1fr}.eval-heading{align-items:flex-start;flex-direction:column}.eval-heading .secondary-btn{align-self:flex-start}}
