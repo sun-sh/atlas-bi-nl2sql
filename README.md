@@ -10,7 +10,9 @@ Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商�
 ![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-1f6feb)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-![Atlas BI 流式分析工作台](docs/atlas-stream-final.png)
+![Atlas BI 分析会话：用户问题、模型回答和按需展开的数据依据](docs/atlas-stream-final.png)
+
+当前工作台界面（2026-10-27）：对话为主，历史会话与分析条件按需打开，SQL 和执行证据收在回答下方。截图展示已完成的会话，模型正确率以严格评测为准。
 
 ## 业务定位
 
@@ -118,6 +120,8 @@ flowchart TD
 
 ![模型配置](docs/atlas-model-config.png)
 
+当前模型配置界面（2026-10-27）：已保存的 Key 不回显，留空保留；截图中的自定义服务地址已遮盖。
+
 ## 可观测性与 API
 
 | 接口 | 说明 |
@@ -125,7 +129,7 @@ flowchart TD
 | `GET /api/health` | 数据库、检索后端、模型激活状态与修复配置 |
 | `GET /api/overview` | 经营总览指标 |
 | `POST /api/query` | 同步执行完整 NL2SQL 查询链路，返回结构化结果与最终分析结论 |
-| `POST /api/query/stream` | 先返回 SQL 结果，再通过 SSE 流式推送分析结论 |
+| `POST /api/query/stream` | 先推送查询阶段状态，再返回 SQL 结果和模型分析文本流 |
 | `GET/POST /api/sessions` | 列出或创建分析会话 |
 | `GET/DELETE /api/sessions/{id}` | 恢复或删除会话 |
 | `GET /api/evaluation` | 运行黄金评测集 |
@@ -171,9 +175,11 @@ python -m pytest -q
 python -m app.evaluation.run
 ```
 
-当前快照：**43 passed**。严格模型评测最近一次为 **4/6 通过**（结果命中率 **66.7%**、模型 SQL 执行率 **83.3%**、模型完成率 **83.3%**、平均响应约 **5–6 秒**）。其中 1 条模型 SQL 漏掉已支付订单口径，另 1 条模型未返回 SQL，均被如实判失败，未使用规则或摘要补位。该结果依赖当前模型与网络，只代表近期真实链路快照。
+自动化测试快照：**43 passed**。保留的严格模型评测截图为 **2026-10-26** 的一次历史运行：**4/6 通过**，结果命中率 **66.7%**、模型 SQL 执行率 **83.3%**、平均响应 **3431.6 ms**。其中 1 条模型 SQL 漏掉已支付订单口径，另 1 条模型未返回 SQL，均被如实判失败，未使用规则或摘要补位。参见[历史评测结果截图](docs/atlas-evaluation-latest.png)。该结果依赖当时模型与网络，不代表当前版本重新运行后的成绩。
 
-![评测中心](docs/atlas-evaluation-latest.png)
+![当前评测中心：点击运行模型评测后开始验收](docs/atlas-evaluation-current.png)
+
+当前评测界面（2026-10-27）：进入页面不会自动运行；点击“运行模型评测”后才调用模型，完成后显示本轮真实结果。上图为未运行状态，本轮截图更新没有重新运行黄金评测。
 
 详见 [docs/EVALUATION.md](docs/EVALUATION.md)。
 
@@ -226,6 +232,7 @@ Windows 可运行 `run.ps1`，macOS / Linux 可运行 `./run.sh`。
 - [评测说明](docs/EVALUATION.md)：数据、指标、复现方式与 CI 策略。
 - [安全策略](SECURITY.md)：SQL 门禁、密钥管理与报告流程。
 - [贡献指南](CONTRIBUTING.md)：开发流程、测试要求与提交检查。
+- [用户体验检查](docs/UX_REVIEW.md)：聊天、输入、滚动与响应式布局的检查结果及剩余改进项。
 
 ## License
 
