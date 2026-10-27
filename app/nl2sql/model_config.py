@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from app.nl2sql.settings import get_settings
@@ -10,6 +12,7 @@ from app.nl2sql.settings import get_settings
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 SUPPORTED_PROVIDERS = ("openai", "deepseek", "qwen", "siliconflow", "moonshot", "custom")
+_evaluation_config: ContextVar[ModelConfig | None] = ContextVar("evaluation_config", default=None)
 
 
 class ModelConfigurationError(ValueError):
@@ -71,6 +74,9 @@ def _environment_config() -> ModelConfig:
 
 
 def get_model_config() -> ModelConfig:
+    snapshot = _evaluation_config.get()
+    if snapshot is not None:
+        return snapshot
     if os.getenv("ATLAS_DISABLE_MODEL") == "1":
         return ModelConfig(False, "disabled", "", "", "", "disabled")
     environment = _environment_config()
@@ -85,6 +91,16 @@ def get_model_config() -> ModelConfig:
         api_key=str(runtime.get("api_key") or environment.api_key),
         source="runtime",
     )
+
+
+@contextmanager
+def model_config_snapshot(config: ModelConfig):
+    """Pin model identity and credentials for one evaluation without saving."""
+    token = _evaluation_config.set(config)
+    try:
+        yield
+    finally:
+        _evaluation_config.reset(token)
 
 
 def _normalize_base_url(value: str) -> str:

@@ -43,3 +43,10 @@ def test_new_explicit_dimension_does_not_reuse_old_region():
     assert plan.context.get("region_label") == ""
     assert not any("region" in item for item in plan.filters)
     assert any("channel" in item or "o.channel" in item for item in plan.filters) is False
+
+
+def test_item_category_filter_does_not_filter_primary_order_category():
+    plan = make_plan("本月食品饮料商品行的已支付商品销量，按商品明细件数统计", [])
+    assert "oi.category = '食品饮料'" in plan.filters
+    assert "o.category = '食品饮料'" not in plan.filters
+    assert plan.context["category_filter"] == "oi.category = '食品饮料'"

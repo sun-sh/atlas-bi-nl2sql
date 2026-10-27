@@ -1,10 +1,41 @@
 from __future__ import annotations
 
 import re
+import json
 
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.models import QueryPlan, SchemaHit
-from app.nl2sql.schema_catalog import compact_schema_prompt
+from app.nl2sql.schema_catalog import semantic_schema_prompt
+
+
+SQL_INSTRUCTIONS = (
+    "你是 SQLite 电商分析专家。输出一条完整 SELECT SQL，支持 SELECT 内的子查询；不要解释或代码块。"
+    "只能查询提供的公开字段；禁止 customer_id、cost_price、SELECT *，必须聚合。"
+    "数据范围2025-10-01至2026-02-28，相对日期基准固定为2026-02-28；不得使用系统当前日期。"
+    "严格遵守已解析时间区间和当前筛选，不要因无数据擅自扩大范围。"
+    "订单状态必须用真实英文枚举：已支付为paid，已退款为refunded，取消为cancelled。"
+    "销售额SUM(orders.paid_amount)、客单价AVG(orders.paid_amount)、销量均默认仅统计paid订单。"
+    "订单主表品类用orders.category；商品行品类及件数用order_items.category和quantity，"
+    "按商品行品类筛选时不要同时筛选orders.category，也不要累加重复关联的订单金额。"
+    "退款统计默认按orders.order_date筛选，关联refunds.order_id=orders.order_id；"
+    "退款率为退款申请数/全部订单数*100，不筛paid、不排除processing退款；金额SUM(refund_amount)。"
+    "ROI=已支付订单销售额/投放花费（倍数，不乘100）；orders和marketing_spend分别按渠道聚合，"
+    "两表都使用相同日期区间，然后关联，禁止把每日花费在订单连接后重复累计。"
+    "App不变，小程序=MiniProgram，抖音=Douyin，网页=Web。"
+    "orders别名可用o，order_items可用oi，marketing_spend可用m；规划中o.order_date对应投放表spend_date。"
+    "未要求分组的总量只返回一行；按要求排序，指标保留两位小数。"
+    "输出列使用明确业务名：销售额、销量、客单价、退款率、退款单数、退款金额、ROI；"
+    "维度用地区、渠道、品类、日期、退款原因。"
+    "追问必须以当前计划的指标、时间与筛选为准，并结合前置问题理解继承项。"
+)
+
+
+def _sql_prompt(question: str, plan: QueryPlan) -> str:
+    return (
+        f"当前问题：{question}\n前置问题：{plan.source_question or '无'}\n"
+        f"当前完整计划：{json.dumps(plan.as_dict(), ensure_ascii=False)}\n"
+        f"数据库字段、枚举与表粒度：\n{semantic_schema_prompt(plan.tables)}\n只返回 SQL。"
+    )
 
 
 def _where(filters: list[str]) -> str:
@@ -104,9 +135,22 @@ def _llm_sql(instructions: str, prompt: str) -> str | None:
                 {"role": "user", "content": prompt},
             ],
             temperature=0,
-            max_tokens=800,
+            max_tokens=1800,
+            **(
+                {
+                    "extra_body": {
+                        "chat_template_kwargs": {"enable_thinking": False},
+                    }
+                }
+                if settings.provider.lower() == "qwen" or "qwen" in settings.model.lower()
+                else {}
+            ),
         )
         text = (response.choices[0].message.content or "").strip()
+        finish_reason = getattr(response.choices[0], "finish_reason", None)
+        if finish_reason == "length":
+            LAST_LLM_ERROR = "模型输出因token预算耗尽被截断（finish_reason=length），未执行残缺SQL"
+            return None
         text = re.sub(r"^```(?:sql)?\s*|\s*```$", "", text, flags=re.I).strip()
         if not text:
             LAST_LLM_ERROR = "模型返回了空内容"
@@ -120,17 +164,15 @@ def _llm_sql(instructions: str, prompt: str) -> str | None:
 def generate_llm_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> str | None:
     del hits
     return _llm_sql(
-        "你是 SQLite 电商经营分析专家。只输出一条 SELECT SQL，不要解释。"
-        "只能使用给定表和字段；禁止 customer_id 和 cost_price；必须聚合。",
-        f"问题：{question}\n表结构：\n{compact_schema_prompt(plan.tables)}\n筛选：{plan.filters}\n只返回 SQL。",
+        SQL_INSTRUCTIONS,
+        _sql_prompt(question, plan),
     )
 
 
 def generate_llm_repair_sql(question: str, plan: QueryPlan, hits: list[SchemaHit], previous_sql: str, error: str) -> str | None:
     del hits
     return _llm_sql(
-        "修复失败的 SQLite SQL。根据错误修复，只输出一条 SELECT SQL，不要解释。"
-        "禁止编造表或列；禁止 customer_id 和 cost_price。",
-        f"问题：{question}\n计划：{plan.as_dict()}\n表结构：\n{compact_schema_prompt(plan.tables)}\n"
+        SQL_INSTRUCTIONS + "根据反馈修复原SQL，保持用户要求的业务口径，不得改变筛选来制造非空结果。",
+        _sql_prompt(question, plan) + "\n"
         f"失败 SQL：\n{previous_sql}\n错误：\n{error}\n只返回修复后的 SQL。",
     )

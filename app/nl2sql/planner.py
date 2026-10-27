@@ -82,7 +82,7 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
         intent = "refund_analysis"
         chart = "bar"
     elif detected_intent == "marketing_efficiency":
-        tables = ["marketing_spend"]
+        tables = ["orders", "marketing_spend"]
         intent = "marketing_efficiency"
         chart = "bar"
     elif detected_intent == "category_analysis":
@@ -131,8 +131,10 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
         filters.append(_context_filter(context, "channel_filter"))
         inherited.append("渠道：" + str(context.get("channel_label") or "继承上一轮"))
 
+    item_category = any(term in q for term in ("商品行", "商品明细")) and any(term in q for term in ("销量", "件数"))
+    category_filter = f"{'oi' if item_category else 'o'}.category = '{category}'" if category else ""
     if category:
-        filters.append(f"o.category = '{category}'")
+        filters.append(category_filter)
     elif is_follow_up and _context_filter(context, "category_filter") and not asks_channel_dimension:
         filters.append(_context_filter(context, "category_filter"))
         inherited.append("品类：" + str(context.get("category_label") or "继承上一轮"))
@@ -140,6 +142,10 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
     metrics: list[str] = []
     if "退款率" in q:
         metrics.append("退款率")
+    elif "退款金额" in q:
+        metrics.append("退款金额")
+    elif "退款" in q and any(term in q for term in ("单数", "申请数")):
+        metrics.append("退款单数")
     if "roi" in q or "投产比" in q:
         metrics.append("ROI")
     if "客单价" in q:
@@ -179,7 +185,7 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
             "region_label": region_label,
             "channel_filter": channel or _context_filter(context, "channel_filter"),
             "channel_label": channel_label,
-            "category_filter": f"o.category = '{category}'" if category else _context_filter(context, "category_filter"),
+            "category_filter": category_filter or _context_filter(context, "category_filter"),
             "category_label": category_label,
             "metrics": metrics,
         },

@@ -17,12 +17,14 @@ class NarrativeResult:
     model: str = ""
     fallback_reason: str = ""
     elapsed_ms: float = 0.0
+    retries: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "text": self.text,
             "mode": self.mode,
             "model": self.model,
+            "retries": self.retries,
             "fallback_reason": self.fallback_reason,
             "elapsed_ms": round(self.elapsed_ms, 1),
         }
@@ -322,7 +324,7 @@ def _prompt(digest: dict[str, Any]) -> str:
         "不得补充摘要之外的数据、原因或行业知识；数据不足时要明确说明。"
         "指标名以 preferred_metric 为准，并严格沿用摘要中的单位和精度。"
         "只有 ranking_comparable=true 时才能描述占比；比率和 ROI 不得相加或计算份额。"
-        "输出 120-220 字，固定四段：结论、关键发现（2-3 条短句）、口径、建议追问（1-2 条）。"
+        "输出 80-160 字，固定四段：结论、关键发现（2 条短句）、口径、建议追问（1 条）。"
         "不要输出 SQL、JSON、Markdown 表格或代码块。\n"
         f"查询摘要：{compact}"
     )
@@ -361,67 +363,74 @@ def stream_result_narrative(
         }
         return
 
-    parts: list[str] = []
-    emitted = ""
     error = ""
-    try:
-        client = make_client(config)
-        request: dict[str, Any] = {
-            "model": config.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "只依据给定摘要回答，禁止编造数据和因果。",
-                },
-                {"role": "user", "content": _prompt(digest)},
-            ],
-            "temperature": 0.2,
-            "max_tokens": 900,
-            "stream": True,
-        }
-        provider = str(getattr(config, "provider", "")).lower()
-        if provider == "qwen" or "qwen" in str(config.model).lower():
-            request["extra_body"] = {
-                "chat_template_kwargs": {"enable_thinking": False},
+    emitted = ""
+    retries = 0
+    for attempt, budget in enumerate((1800, 3600)):
+        if attempt:
+            retries += 1
+            if emitted:
+                yield {"type": "reset", "text": ""}
+        parts: list[str] = []
+        emitted = ""
+        error = ""
+        try:
+            client = make_client(config)
+            request: dict[str, Any] = {
+                "model": config.model,
+                "messages": [
+                    {"role": "system", "content": "只依据给定摘要回答，禁止编造数据和因果。"},
+                    {"role": "user", "content": _prompt(digest)},
+                ],
+                "temperature": 0.2,
+                "max_tokens": budget,
+                "stream": True,
             }
-        response = client.chat.completions.create(**request)
-        for chunk in response:
-            if not getattr(chunk, "choices", None):
-                continue
-            choice = chunk.choices[0]
-            delta = getattr(choice.delta, "content", None)
-            if delta:
-                parts.append(delta)
-                emitted += delta
-                yield {"type": "delta", "delta": delta}
-            elif getattr(choice.delta, "reasoning", None):
-                yield {"type": "thinking"}
-    except Exception as exc:
-        error = model_error_message(exc)
+            provider = str(getattr(config, "provider", "")).lower()
+            if provider == "qwen" or "qwen" in str(config.model).lower():
+                request["extra_body"] = {
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
+            response = client.chat.completions.create(**request)
+            for chunk in response:
+                if not getattr(chunk, "choices", None):
+                    continue
+                choice = chunk.choices[0]
+                finish_reason = getattr(choice, "finish_reason", None)
+                if finish_reason == "length":
+                    error = "模型解读因token预算耗尽而截断"
+                elif finish_reason not in (None, "stop"):
+                    error = f"模型解读未正常完成：{finish_reason}"
+                delta = getattr(choice.delta, "content", None)
+                if delta:
+                    parts.append(delta)
+                    emitted += delta
+                    yield {"type": "delta", "delta": delta}
+                elif getattr(choice.delta, "reasoning", None):
+                    yield {"type": "thinking"}
+        except Exception as exc:
+            error = model_error_message(exc)
 
-    text = re.sub(r"```(?:text)?", "", "".join(parts)).replace("```", "").strip()
-    if not text:
-        if emitted:
-            yield {"type": "reset", "text": fallback}
-        else:
-            yield {"type": "delta", "delta": fallback}
-        yield {
-            "type": "done",
-            "narrative": NarrativeResult(
-                text=fallback,
-                mode="digest",
-                fallback_reason=error or "模型返回空内容",
-                elapsed_ms=(time.perf_counter() - started) * 1000,
-            ),
-        }
-        return
+        text = re.sub(r"```(?:text)?", "", "".join(parts)).replace("```", "").strip()
+        if not error and text:
+            yield {
+                "type": "done",
+                "narrative": NarrativeResult(
+                    text=text, mode="model", model=config.model, retries=retries,
+                    elapsed_ms=(time.perf_counter() - started) * 1000,
+                ),
+            }
+            return
+        error = error or "模型返回空内容"
+
+    if emitted:
+        yield {"type": "reset", "text": fallback}
+    else:
+        yield {"type": "delta", "delta": fallback}
     yield {
         "type": "done",
         "narrative": NarrativeResult(
-            text=text,
-            mode="model",
-            model=config.model,
-            fallback_reason=error,
+            text=fallback, mode="digest", fallback_reason=error, retries=retries,
             elapsed_ms=(time.perf_counter() - started) * 1000,
         ),
     }

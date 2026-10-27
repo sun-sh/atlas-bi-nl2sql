@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+
+def test_evaluation_model_snapshot_is_restored_after_scope():
+    from app.nl2sql.model_config import ModelConfig, get_model_config, model_config_snapshot
+    original = get_model_config()
+    snapshot = ModelConfig(True, "custom", "https://example.invalid/v1", "frozen-test", "fake")
+    with model_config_snapshot(snapshot):
+        assert get_model_config() is snapshot
+    assert get_model_config() == original
+
 from pathlib import Path
 
 import pytest

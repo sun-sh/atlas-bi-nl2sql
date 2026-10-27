@@ -4,9 +4,11 @@ import math
 import re
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
-from app.nl2sql.model_config import get_model_config
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+from app.nl2sql.model_config import get_model_config, model_config_snapshot
 from app.nl2sql.result_insight import METRIC_ALIASES, digest_from_result
 from app.nl2sql.sql_engine import execute_sql
 from app.nl2sql.workflow import run_query
@@ -14,7 +16,7 @@ from app.nl2sql.workflow import run_query
 
 DATASET_RANGE = "2025-10-01 至 2026-02-28"
 MODEL_MODE = "model"
-SUITE_VERSION = "strict-model-v2"
+SUITE_VERSION = "strict-model-v3-100"
 # Evaluation runs the strict model path and never invokes rule SQL fallback.
 MODEL_SQL_MODES = {"llm", "llm-repair"}
 JAN = "o.order_date BETWEEN '2026-01-01' AND '2026-01-31'"
@@ -71,7 +73,7 @@ def _case(
 
 # Relative dates use the demo dataset's reference date, 2026-02-28.
 # Wording states the business grain explicitly to avoid ambiguous gold labels.
-CASES = (
+BASE_CASES = (
     _case("sales-east", "上个月华东地区已支付订单销售额是多少？", "sales_overview",
           _sales_sql(JAN + " AND o.region = '华东'")),
     _case("category-sales", "近90天各品类已支付订单销售额排名，按订单主表品类分组，销售额降序", "category_analysis",
@@ -119,6 +121,177 @@ CASES = (
           _sales_sql(FEB + " AND o.region = '华北' AND o.channel = 'MiniProgram'"), setup="sales-north-web"),
 )
 
+
+PERIODS = {
+    "jan": ("上个月", "2026-01-01", "2026-01-31", JAN),
+    "feb": ("本月", "2026-02-01", "2026-02-28", FEB),
+    "last30": ("近30天", "2026-01-30", "2026-02-28", LAST30),
+    "last90": ("近90天", "2025-12-01", "2026-02-28", LAST90),
+}
+REGION_LABELS = ("华东", "华南", "华北", "西南")
+CHANNEL_LABELS = (("App", "App"), ("MiniProgram", "小程序"), ("Web", "Web"), ("Douyin", "抖音"))
+CATEGORY_LABELS = ("运动鞋服", "食品饮料", "数码家电", "美妆个护")
+
+
+def _matrix_cases() -> tuple[dict[str, Any], ...]:
+    cases: list[dict[str, Any]] = []
+
+    # 14 region/time scalar sales cases. Each combination has a distinct
+    # question and exercises a different time boundary and region filter.
+    for period_id, (period_label, start, end, _) in PERIODS.items():
+        for region in REGION_LABELS:
+            case_id = f"matrix-sales-{period_id}-{region}"
+            if (period_id == "jan" and region in {"华东", "华南"}):
+                continue
+            cases.append(_case(
+                case_id,
+                f"{period_label}{region}地区已支付订单销售额是多少？",
+                "sales_overview",
+                f"SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
+                f"WHERE o.status = 'paid' AND o.order_date BETWEEN '{start}' AND '{end}' AND o.region = '{region}'",
+            ))
+
+    # 16 channel/time scalar sales cases, including Chinese channel aliases.
+    for period_id, (period_label, start, end, _) in PERIODS.items():
+        for channel, label in CHANNEL_LABELS:
+            cases.append(_case(
+                f"matrix-channel-sales-{period_id}-{channel.lower()}",
+                f"{period_label}{label}渠道已支付订单销售额是多少？",
+                "sales_overview",
+                f"SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
+                f"WHERE o.status = 'paid' AND o.order_date BETWEEN '{start}' AND '{end}' AND o.channel = '{channel}'",
+            ))
+
+    # Eight order-level category sales cases. The wording fixes the business
+    # grain so the model cannot silently switch to order_items category.
+    for period_id, (period_label, start, end, _) in PERIODS.items():
+        if period_id not in {"jan", "feb"}:
+            continue
+        for category in CATEGORY_LABELS:
+            cases.append(_case(
+                f"matrix-category-sales-{period_id}-{category}",
+                f"{period_label}{category}订单主表品类的已支付销售额是多少？",
+                "category_analysis",
+                f"SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
+                f"WHERE o.status = 'paid' AND o.order_date BETWEEN '{start}' AND '{end}' AND o.category = '{category}'",
+            ))
+
+    # Eight item-level quantity cases, which deliberately use order_items and
+    # catch the common mistake of using the order's primary category.
+    for period_id, (period_label, start, end, _) in PERIODS.items():
+        if period_id not in {"last30", "last90"}:
+            continue
+        for category in CATEGORY_LABELS:
+            cases.append(_case(
+                f"matrix-category-units-{period_id}-{category}",
+                f"{period_label}{category}商品行的已支付商品销量是多少？按商品明细件数统计",
+                "category_analysis",
+                f"SELECT SUM(oi.quantity) AS 销量 FROM order_items oi JOIN orders o ON o.order_id = oi.order_id "
+                f"WHERE o.status = 'paid' AND o.order_date BETWEEN '{start}' AND '{end}' AND oi.category = '{category}'",
+                "销量",
+            ))
+
+    # Eight scalar ROI cases supplement the two base ROI shapes.
+    for period_id, (period_label, start, end, _) in PERIODS.items():
+        if period_id not in {"last30", "last90"}:
+            continue
+        for channel, label in CHANNEL_LABELS:
+            cases.append(_case(
+                f"matrix-roi-{period_id}-{channel.lower()}",
+                f"{period_label}{label}渠道ROI：已支付销售额除以投放花费，分别汇总两张表后计算",
+                "marketing_efficiency",
+                _roi_sql(start, end, channel),
+                "ROI", "channel",
+            ))
+
+    # Refund rates/reasons, AOV and follow-ups balance the scalar matrices.
+    for period_id, (period_label, start, end, filters) in PERIODS.items():
+        refund_filters = filters + (" AND o.channel = 'App'" if period_id == "jan" else "")
+        cases.append(_case(
+            f"matrix-refund-rate-{period_id}",
+            f"{period_label}{'App渠道' if period_id == 'jan' else ''}各品类退款率，退款申请数除以全部订单数乘100，退款率降序",
+            "refund_analysis", _refund_sql(refund_filters), "退款率", "category", "desc",
+        ))
+        amount = period_id == "feb"
+        metric = "退款金额" if amount else "退款单数"
+        aggregate = "ROUND(SUM(r.refund_amount), 2)" if amount else "COUNT(*)"
+        cases.append(_case(
+            f"matrix-refund-reasons-{period_id}",
+            f"{period_label}各退款原因的{metric}，按原订单下单日期筛选，{metric}降序",
+            "refund_analysis",
+            f"SELECT r.reason AS reason, {aggregate} AS {metric} FROM refunds r "
+            f"JOIN orders o ON o.order_id = r.order_id WHERE {filters} "
+            f"GROUP BY r.reason ORDER BY {metric} DESC", metric, "reason", "desc",
+        ))
+        for dimension, label in (("channel", "渠道"), ("region", "地区")):
+            cases.append(_case(
+                f"matrix-aov-{period_id}-{dimension}",
+                f"{period_label}各{label}已支付订单客单价，客单价降序",
+                "sales_overview",
+                f"SELECT o.{dimension} AS {dimension}, ROUND(AVG(o.paid_amount), 2) AS 客单价 "
+                f"FROM orders o WHERE o.status = 'paid' AND {filters} "
+                f"GROUP BY o.{dimension} ORDER BY 客单价 DESC", "客单价", dimension, "desc",
+            ))
+
+    for region in ("华东", "华北", "西南"):
+        cases.append(_case(
+            f"followup-south-to-{region}", f"同样的上月已支付销售额，改成{region}地区呢？",
+            "sales_overview", _sales_sql(JAN + f" AND o.region = '{region}'"), setup="sales-south",
+        ))
+    for channel, label in (("App", "App"), ("Douyin", "抖音"), ("Web", "网页")):
+        cases.append(_case(
+            f"followup-app-to-{channel.lower()}", f"保留上月条件，改成{label}渠道的已支付销售额呢？",
+            "sales_overview", _sales_sql(JAN + f" AND o.channel = '{channel}'"), setup="matrix-channel-sales-jan-miniprogram",
+        ))
+    for period_id in ("last30", "last90"):
+        label, _, _, filters = PERIODS[period_id]
+        cases.append(_case(
+            f"followup-period-{period_id}", f"保留华南地区，改为{label}已支付销售额呢？",
+            "sales_overview", _sales_sql(filters + " AND o.region = '华南'"), setup="sales-south",
+        ))
+
+    # Additional daily and refund-amount result shapes.
+    cases.append(_case(
+        "matrix-daily-east",
+        "本月华东地区按日查看已支付订单销售额趋势，日期升序",
+        "sales_overview",
+        "SELECT o.order_date AS order_date, ROUND(SUM(o.paid_amount), 2) AS 销售额 "
+        f"FROM orders o WHERE o.status = 'paid' AND {FEB} AND o.region = '华东' "
+        "GROUP BY o.order_date ORDER BY o.order_date",
+        dimension="order_date", order="date",
+    ))
+    cases.append(_case(
+        "matrix-daily-south",
+        "上个月华南地区按日查看已支付订单销售额趋势，日期升序",
+        "sales_overview",
+        "SELECT o.order_date AS order_date, ROUND(SUM(o.paid_amount), 2) AS 销售额 "
+        f"FROM orders o WHERE o.status = 'paid' AND {JAN} AND o.region = '华南' "
+        "GROUP BY o.order_date ORDER BY o.order_date",
+        dimension="order_date", order="date",
+    ))
+    cases.append(_case(
+        "matrix-refund-amount-reasons",
+        "上个月各退款原因的退款金额，按退款金额降序",
+        "refund_analysis",
+        "SELECT r.reason AS reason, ROUND(SUM(r.refund_amount), 2) AS 退款金额 "
+        f"FROM refunds r JOIN orders o ON o.order_id = r.order_id WHERE {JAN} "
+        "GROUP BY r.reason ORDER BY 退款金额 DESC",
+        "退款金额", "reason", "desc",
+    ))
+    cases.append(_case(
+        "matrix-refund-amount-category",
+        "本月各品类退款金额，按退款金额降序",
+        "refund_analysis",
+        "SELECT o.category AS category, ROUND(SUM(r.refund_amount), 2) AS 退款金额 "
+        f"FROM refunds r JOIN orders o ON o.order_id = r.order_id WHERE {FEB} "
+        "GROUP BY o.category ORDER BY 退款金额 DESC",
+        "退款金额", "category", "desc",
+    ))
+    return tuple(cases)
+
+
+CASES = BASE_CASES + _matrix_cases()
+
 DIMENSION_ALIASES = {
     "category": {"category", "品类", "类目", "商品品类"},
     "channel": {"channel", "渠道", "销售渠道"},
@@ -134,6 +307,7 @@ METRIC_NAME_ALIASES = {
     "退款率": {"退款率", "refund_rate", "return_rate"},
     "ROI": {"roi", "投产比", "投资回报率"},
     "退款单数": {"退款单数", "退款申请单数", "退款申请数", "退款订单数", "退款数", "refund_count", "refund_orders", "refunds", "total_refunds"},
+    "退款金额": {"退款金额", "退款总额", "refund_amount", "refund_total", "total_refund_amount"},
 }
 
 
@@ -197,20 +371,36 @@ def _check_rows(case: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             _dimension_value(row[dimension], dimension) if dimension else "total": float(row[metric])
             for row in gold
         }
+        scalar_dimension_allowed = (
+            bool(dimension)
+            and len(gold) == 1
+            and case["intent"] == "marketing_efficiency"
+        )
         seen: set[str] = set()
         values: list[float] = []
         dimensions: list[str] = []
         for row in rows:
-            key = _dimension_value(_column_value(row, dimension), dimension) if dimension else "total"
-            if key not in expected_values or key in seen:
+            if dimension:
+                try:
+                    key = _dimension_value(_column_value(row, dimension), dimension)
+                except ValueError as exc:
+                    if not scalar_dimension_allowed or not str(exc).startswith("缺少或无法唯一识别验收列"):
+                        raise
+                    key = "__scalar__"
+            else:
+                key = "total"
+            expected_key = key
+            if key == "__scalar__":
+                expected_key = next(iter(expected_values))
+            if expected_key not in expected_values or key in seen:
                 return f"分组缺失、重复或不匹配：{key}"
             seen.add(key)
             raw = _column_value(row, metric)
             if raw is None or isinstance(raw, bool):
                 return f"{key} 的{metric}不是有效数值"
             value = float(raw)
-            if not math.isfinite(value) or not math.isclose(value, expected_values[key], rel_tol=0, abs_tol=0.010001):
-                return f"{key} 的{metric}不符：期望 {expected_values[key]:g}，实际 {value:g}"
+            if not math.isfinite(value) or not math.isclose(value, expected_values[expected_key], rel_tol=0, abs_tol=0.010001):
+                return f"{expected_key} 的{metric}不符：期望 {expected_values[expected_key]:g}，实际 {value:g}"
             values.append(value)
             dimensions.append(key)
         if case["order"] == "desc" and values != sorted(values, reverse=True):
@@ -260,13 +450,118 @@ def _result_error(result: Any, case: dict[str, Any]) -> str:
     return ""
 
 
-def run_evaluation() -> dict[str, Any]:
+def _diagnostics(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    by_intent = []
+    for intent in sorted({case["intent"] for case in cases}):
+        items = [case for case in cases if case["intent"] == intent]
+        passed = sum(bool(item["hit"]) for item in items)
+        by_intent.append({"intent": intent, "total": len(items), "passed": passed,
+                          "hit_rate": round(passed * 100 / len(items), 1)})
+    failures: dict[str, int] = {}
+    for case in cases:
+        if case["hit"]:
+            continue
+        error = case.get("error") or ""
+        if error.startswith("前置问题"):
+            category = "setup"
+        elif case.get("sql_mode") == "unavailable":
+            category = "unavailable"
+        elif case.get("sql_mode") in {"model-failed", "model-repair-failed"}:
+            category = "generation"
+        elif not case.get("executed"):
+            category = "execution"
+        elif case.get("narrative_mode") != "model" or "解读" in error:
+            category = "narrative"
+        else:
+            category = "result"
+        failures[category] = failures.get(category, 0) + 1
+    repaired = [case for case in cases if case.get("repair_used") or case.get("sql_mode") == "llm-repair"]
+    return {
+        "by_intent": by_intent, "failures": failures,
+        "self_healing": {"attempted_cases": len(repaired),
+                         "passed_cases": sum(bool(case["hit"]) for case in repaired)},
+    }
+
+
+
+
+def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
+    started = time.perf_counter()
+    error = ""
+    results = []
+    result = None
+    warnings: list[str] = []
+    executed = False
+    model_used = False
+    hit = False
+    setup = next((item for item in CASES if item["id"] == case["setup"]), None)
+    try:
+        context = None
+        for step in ([setup, case] if setup else [case]):
+            result = run_query(step["question"], context=context, allow_rule_fallback=False)
+            results.append(result)
+            warnings.extend(result.warnings)
+            error = _result_error(result, step)
+            if error:
+                if step is setup:
+                    error = "前置问题未通过：" + error
+                break
+            context = {**result.plan.as_dict(), **result.plan.context, "question": step["question"]}
+        complete = len(results) == (2 if setup else 1)
+        executed = complete and all(item.attempts and item.attempts[-1]["status"] == "success" for item in results)
+        model_used = complete and all(item.mode in MODEL_SQL_MODES and getattr(item, "narrative_mode", "") == "model" for item in results)
+        hit = not error
+    except Exception as exc:
+        error = str(exc)
+
+    elapsed = (time.perf_counter() - started) * 1000
+
+    return {
+            "id": case["id"],
+            "setup_question": setup["question"] if setup else None,
+            "question": case["question"],
+            "intent": case["intent"],
+            "executed": executed,
+            "hit": hit,
+            "model_used": model_used,
+            "narrative_mode": getattr(result, "narrative_mode", "unavailable") if result else "error",
+            "elapsed_ms": round(elapsed, 1),
+            "attempts": sum(len(item.attempts) for item in results),
+            "generation_retries": sum(getattr(item, "generation_retries", 0) for item in results),
+            "narrative_retries": sum(getattr(item, "narrative_retries", 0) for item in results),
+            "repair_used": any(item.mode in {"llm-repair", "model-repair-failed"}
+                               or getattr(item, "generation_retries", 0)
+                               or getattr(item, "narrative_retries", 0)
+                               or any(attempt.get("status") == "failed" for attempt in item.attempts)
+                               for item in results),
+            "steps": [
+                {"question": item.question, "sql": item.sql, "columns": item.columns,
+                 "row_count": len(item.rows), "sample_rows": item.rows[:5],
+                 "sql_mode": item.mode, "narrative_mode": item.narrative_mode,
+                 "attempts": item.attempts, "generation_retries": getattr(item, "generation_retries", 0),
+                 "narrative_retries": getattr(item, "narrative_retries", 0)}
+                for item in results if hasattr(item, "sql")
+            ],
+            "sql_mode": result.mode if result else "error",
+            "warnings": warnings,
+            "error": error or None,
+    }
+
+
+def _evaluate_with_config(case, config):
+    with model_config_snapshot(config):
+        return _evaluate_case(case)
+
+
+def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, workers: int = 1) -> dict[str, Any]:
     """Run every golden case through the strict model path.
 
     The evaluation never invokes the runtime rule fallback. If the model does
     not return SQL, the case is recorded as a model failure instead of being
     masked by a deterministic query.
     """
+    if workers not in (1, 2, 3):
+        raise ValueError("workers must be 1, 2 or 3")
     model = _model_state()
     cases: list[dict[str, Any]] = []
     executed_count = 0
@@ -275,7 +570,7 @@ def run_evaluation() -> dict[str, Any]:
 
     if not model["active"]:
         total = len(CASES)
-        return {
+        report = {
             "suite_version": SUITE_VERSION,
             "mode": MODEL_MODE,
             "model": model,
@@ -308,62 +603,34 @@ def run_evaluation() -> dict[str, Any]:
                 for case in CASES
             ],
         }
+        report.update(_diagnostics(report["cases"]))
+        return report
 
-    for case in CASES:
-        started = time.perf_counter()
-        error = ""
-        results = []
-        result = None
-        warnings: list[str] = []
-        executed = False
-        model_used = False
-        hit = False
-        setup = next((item for item in CASES if item["id"] == case["setup"]), None)
-        try:
-            context = None
-            for step in ([setup, case] if setup else [case]):
-                result = run_query(step["question"], context=context, allow_rule_fallback=False)
-                results.append(result)
-                warnings.extend(result.warnings)
-                error = _result_error(result, step)
-                if error:
-                    if step is setup:
-                        error = "前置问题未通过：" + error
-                    break
-                context = {**result.plan.as_dict(), **result.plan.context, "question": step["question"]}
-            complete = len(results) == (2 if setup else 1)
-            executed = complete and all(item.attempts and item.attempts[-1]["status"] == "success" for item in results)
-            model_used = complete and all(item.mode in MODEL_SQL_MODES and getattr(item, "narrative_mode", "") == "model" for item in results)
-            hit = not error
-        except Exception as exc:
-            error = str(exc)
-
-        elapsed = (time.perf_counter() - started) * 1000
-        total_elapsed += elapsed
-        executed_count += int(executed)
-        hit_count += int(hit)
-
-        cases.append(
-            {
-                "id": case["id"],
-                "setup_question": setup["question"] if setup else None,
-                "question": case["question"],
-                "intent": case["intent"],
-                "executed": executed,
-                "hit": hit,
-                "model_used": model_used,
-                "narrative_mode": getattr(result, "narrative_mode", "unavailable") if result else "error",
-                "elapsed_ms": round(elapsed, 1),
-                "attempts": sum(len(item.attempts) for item in results),
-                "sql_mode": result.mode if result else "error",
-                "warnings": warnings,
-                "error": error or None,
-            }
-        )
+    config = get_model_config()
+    if workers == 1:
+        for case in CASES:
+            item = _evaluate_with_config(case, config)
+            cases.append(item)
+            if on_case:
+                on_case(item)
+    else:
+        ordered = [None] * len(CASES)
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_evaluate_with_config, case, config): index for index, case in enumerate(CASES)}
+            for future in as_completed(futures):
+                item = future.result()
+                ordered[futures[future]] = item
+                if on_case:
+                    on_case(item)
+        cases = ordered
+    executed_count = sum(bool(case['executed']) for case in cases)
+    hit_count = sum(bool(case['hit']) for case in cases)
+    total_elapsed = sum(case['elapsed_ms'] for case in cases)
 
     total = len(cases)
     model_count = sum(1 for case in cases if case["model_used"])
     return {
+        **_diagnostics(cases),
         "suite_version": SUITE_VERSION,
         "mode": MODEL_MODE,
         "model": model,

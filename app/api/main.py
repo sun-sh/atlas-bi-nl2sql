@@ -258,6 +258,7 @@ def _stream_turn(question: str, session_id: str | None, context: dict) -> Iterat
         result.answer = narrative.text
         result.narrative_mode = narrative.mode
         result.narrative_model = narrative.model
+        result.narrative_retries = narrative.retries
     elif narrative.fallback_reason:
         result.warnings.extend(narrative_warnings(narrative))
     yield _sse("narrative", narrative.as_dict())

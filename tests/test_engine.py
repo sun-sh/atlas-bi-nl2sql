@@ -168,6 +168,57 @@ def test_strict_model_query_never_calls_rule_fallback(monkeypatch):
     assert any("不回退规则" in warning for warning in result.warnings)
 
 
+def test_empty_model_sql_gets_one_strict_model_retry(monkeypatch):
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: None)
+    monkeypatch.setattr(
+        "app.nl2sql.workflow.generate_llm_repair_sql",
+        lambda *args: "SELECT COUNT(*) AS n FROM orders",
+    )
+    result = run_query("各渠道销售额", allow_rule_fallback=False)
+    assert result.mode == "llm-repair"
+    assert result.attempts[-1]["status"] == "success"
+    assert any("模型重试" in warning for warning in result.warnings)
+    assert result.generation_retries == 1
+
+
+def test_model_retry_budget_includes_empty_generation(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: None)
+    def broken(*args):
+        calls.append(args)
+        return "SELECT missing_column FROM orders"
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", broken)
+    result = run_query("上个月销售额", allow_rule_fallback=False)
+    assert len(calls) == 2
+    assert len(result.attempts) == 2
+    assert result.generation_retries == 1
+    assert all(attempt["status"] == "failed" for attempt in result.attempts)
+
+
+def test_all_null_aggregation_reenters_model_repair_without_broadening_filters(monkeypatch):
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: "SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = '支付'")
+    captured = []
+    def repair(question, plan, hits, sql, error):
+        captured.append((plan, error))
+        return "SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = 'paid' AND order_date BETWEEN '2026-01-01' AND '2026-01-31' AND region = '华东'"
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", repair)
+    result = run_query("上个月华东已支付销售额", allow_rule_fallback=False)
+    assert result.mode == "llm-repair"
+    assert [attempt["status"] for attempt in result.attempts] == ["failed", "success"]
+    assert "全为空" in captured[0][1]
+    assert result.rows[0]["销售额"] == pytest.approx(79947.85)
+
+
+def test_zero_value_is_valid_and_does_not_trigger_repair(monkeypatch):
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: "SELECT COUNT(*) AS 订单数 FROM orders WHERE status = 'absent'")
+    def forbidden(*args):
+        raise AssertionError("valid zero counts must not trigger repair")
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", forbidden)
+    result = run_query("订单数是多少", allow_rule_fallback=False)
+    assert result.attempts[-1]["status"] == "success"
+    assert result.rows == [{"订单数": 0}]
+
+
 def test_evaluation_does_not_run_when_model_is_disabled(monkeypatch):
     monkeypatch.setenv("ATLAS_DISABLE_MODEL", "1")
     from app.nl2sql.evaluation import run_evaluation

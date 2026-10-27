@@ -101,6 +101,8 @@ class QueryResult:
     trace_id: str = ""
     narrative_mode: str = "digest"
     narrative_model: str = ""
+    generation_retries: int = 0
+    narrative_retries: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -113,6 +115,7 @@ class QueryResult:
             "plan": self.plan.as_dict(),
             "retrieval": [h.as_dict() for h in self.retrieval],
             "attempts": self.attempts,
+            "generation_retries": self.generation_retries,
             "elapsed_ms": round(self.elapsed_ms, 1),
             "mode": self.mode,
             "warnings": self.warnings,
@@ -120,5 +123,6 @@ class QueryResult:
             "narrative": {
                 "mode": self.narrative_mode,
                 "model": self.narrative_model,
+                "retries": self.narrative_retries,
             },
         }

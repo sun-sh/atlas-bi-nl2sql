@@ -8,6 +8,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
 from app.nl2sql import generator
+from app.nl2sql.model_config import get_model_config
 from app.nl2sql.generator import generate_llm_repair_sql, generate_llm_sql, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
 from app.nl2sql.planner import make_plan
@@ -39,6 +40,7 @@ class GraphState(TypedDict, total=False):
     narrate: bool
     allow_rule_fallback: bool
     narrative: NarrativeResult
+    generation_retries: int
     final: QueryResult
 
 
@@ -98,16 +100,31 @@ def generate_node(state: GraphState) -> GraphState:
     mode = "llm"
     warnings = list(state.get("warnings", []))
     if not sql:
+        reason = generator.LAST_LLM_ERROR or "模型返回空内容"
+        retry_count = 0
+        if get_settings().max_repair_attempts > 0 and (get_model_config().enabled or not state.get("allow_rule_fallback", True)):
+            _emit_stage("repair")
+            retry_count = 1
+            sql = generate_llm_repair_sql(
+                state["question"], plan, state["hits"], "",
+                f"首次SQL未产出：{reason}。重新生成完整SELECT，保留原查询口径。",
+            )
+            warnings.append("首次 SQL 为空，已触发模型重试")
+            if sql:
+                return {
+                    "sql": sql, "mode": "llm-repair", "generation_retries": retry_count,
+                    "warnings": warnings + ["修复来源：llm-repair"],
+                }
         if state.get("allow_rule_fallback", True):
             sql = generate_rule_sql(state["question"], plan, state["hits"])
             mode = "rule"
             if generator.LAST_LLM_ERROR:
                 warnings.append("模型调用失败，已回退规则 SQL：" + generator.LAST_LLM_ERROR)
         else:
-            reason = generator.LAST_LLM_ERROR or "模型返回空内容"
             warnings.append("模型未生成 SQL，严格模型评测不回退规则：" + reason)
-            return {"sql": "", "mode": "model-failed", "warnings": warnings}
-    return {"sql": sql, "mode": mode, "warnings": warnings}
+            return {"sql": "", "mode": "model-failed", "warnings": warnings, "generation_retries": retry_count}
+        return {"sql": sql, "mode": mode, "warnings": warnings, "generation_retries": retry_count}
+    return {"sql": sql, "mode": mode, "warnings": warnings, "generation_retries": 0}
 
 
 def execute_node(state: GraphState) -> GraphState:
@@ -119,6 +136,12 @@ def execute_node(state: GraphState) -> GraphState:
     try:
         safe_sql = validate_sql(sql)
         result = execute_sql(safe_sql)
+        if result["rows"] and all(
+            value is None
+            for row in result["rows"]
+            for value in row.values()
+        ):
+            raise ValueError("查询返回全为空的聚合结果；请检查时间、筛选条件和聚合字段")
         attempts.append(
             {
                 "attempt": len(attempts) + 1,
@@ -188,7 +211,7 @@ def should_repair(state: GraphState) -> str:
     if result is not None:
         return "finish"
     attempts = state.get("attempts", [])
-    if len(attempts) <= get_settings().max_repair_attempts:
+    if len(attempts) + state.get("generation_retries", 0) <= get_settings().max_repair_attempts:
         return "repair"
     return "finalize"
 
@@ -231,6 +254,8 @@ def finalize_node(state: GraphState) -> GraphState:
         trace_id=state["trace_id"],
         narrative_mode=narrative.mode,
         narrative_model=narrative.model,
+        narrative_retries=narrative.retries,
+        generation_retries=state.get("generation_retries", 0),
     )
     return {"final": final}
 

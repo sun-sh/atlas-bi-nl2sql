@@ -114,3 +114,17 @@ def compact_schema_prompt(tables: list[str] | None = None) -> str:
         cols = ", ".join(c.name for c in table.columns if c.sensitivity == "public")
         lines.append(f"{table.name}({cols})")
     return "\n".join(lines)
+
+
+def semantic_schema_prompt(tables: list[str]) -> str:
+    """Public fields with their real values and grain, for model SQL calls."""
+    lines = []
+    for table in SCHEMA:
+        if table.name not in tables:
+            continue
+        lines.append(f"{table.name}（{table.label}，粒度 {table.grain}）：{table.description}")
+        lines.extend(
+            f"  {column.name} {column.type}: {column.description}"
+            for column in table.columns if column.sensitivity == "public"
+        )
+    return "\n".join(lines)

@@ -36,9 +36,11 @@ def active_model(monkeypatch):
 
 def test_suite_coverage_and_independent_business_references():
     cases = evaluation.CASES
-    assert len(cases) == len({case["id"] for case in cases}) == 18
+    assert len(cases) == len({case["id"] for case in cases}) == 100
+    assert len({case["question"] for case in cases}) == 100
     assert len({case["intent"] for case in cases}) == 4
-    assert sum(bool(case["setup"]) for case in cases) == 3
+    assert sum(bool(case["setup"]) for case in cases) == 11
+    assert {case["metric"] for case in cases} >= {"销售额", "销量", "退款率", "退款单数", "退款金额", "ROI", "客单价"}
     for case in cases:
         assert execute_sql(case["reference_sql"])["rows"]
         if case["setup"]:
@@ -91,6 +93,16 @@ def test_aliases_and_channel_labels_do_not_change_the_score():
     assert evaluation._check_rows(case, renamed) == ""
 
 
+def test_single_channel_roi_accepts_scalar_metric_without_repeating_filter():
+    case = case_named("roi-douyin")
+    expected = execute_sql(case["reference_sql"])["rows"][0]["ROI"]
+    assert evaluation._check_rows(case, [{"ROI": expected}]) == ""
+    assert evaluation._check_rows(case, [{"ROI": expected + 1}])
+    assert evaluation._check_rows(case, [{"channel": "App", "ROI": expected}])
+    assert evaluation._check_rows(case, [{"channel": "Douyin", "渠道": "App", "ROI": expected}])
+    assert evaluation._check_rows(case_named("roi-channels"), [{"ROI": expected}])
+
+
 def test_each_followup_uses_a_fresh_model_run_and_real_plan_context(monkeypatch, active_model):
     calls = []
 
@@ -107,9 +119,9 @@ def test_each_followup_uses_a_fresh_model_run_and_real_plan_context(monkeypatch,
 
     monkeypatch.setattr(evaluation, "run_query", fake_query)
     report = evaluation.run_evaluation()
-    assert report["passed"] == report["total"] == 18
+    assert report["passed"] == report["total"] == 100
     assert report["execution_rate"] == report["model_rate"] == 100
-    assert len(calls) == 21
+    assert len(calls) == 111
     followups = [case for case in report["cases"] if case["setup_question"]]
     assert all(case["attempts"] == 2 for case in followups)
 
@@ -185,3 +197,29 @@ def test_exception_does_not_abort_the_remaining_cases(monkeypatch, active_model)
     assert report["passed"] == 1
     assert report["cases"][0]["error"] == "model timeout"
     assert report["cases"][1]["hit"] is True
+
+
+def test_two_isolated_workers_can_run_without_model_or_network():
+    from concurrent.futures import ProcessPoolExecutor
+    from app.nl2sql.model_config import ModelConfig
+    config = ModelConfig(False, "disabled", "", "", "")
+    cases = [case_named("sales-east"), case_named("sales-south")]
+    with ProcessPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(evaluation._evaluate_with_config, case, config) for case in cases]
+        results = [future.result(timeout=45) for future in futures]
+    assert [result["id"] for result in results] == [case["id"] for case in cases]
+    assert all(result["hit"] is False for result in results)
+    assert all(result["sql_mode"] == "model-failed" for result in results)
+    assert all(result["generation_retries"] == 1 for result in results)
+
+
+def test_failure_diagnostics_count_setup_and_narrative_separately():
+    cases = [
+        {"intent": "sales_overview", "hit": True, "repair_used": True},
+        {"intent": "sales_overview", "hit": False, "executed": False, "error": "前置问题未通过"},
+        {"intent": "category_analysis", "hit": False, "executed": True, "narrative_mode": "digest"},
+    ]
+    report = evaluation._diagnostics(cases)
+    assert report["failures"] == {"setup": 1, "narrative": 1}
+    assert report["self_healing"] == {"attempted_cases": 1, "passed_cases": 1}
+    assert next(item for item in report["by_intent"] if item["intent"] == "sales_overview")["hit_rate"] == 50
