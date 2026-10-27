@@ -938,7 +938,7 @@ function renderEvaluation(data) {
     metricCard(
       '平均响应时间',
       `${data.avg_elapsed_ms ?? 0} ms`,
-      '真实模型 · 含检索、SQL 与修复',
+      '含检索、SQL、修复与解读；追问含前置轮次',
     ),
     metricCard(
       '覆盖意图',
@@ -956,7 +956,7 @@ function renderEvaluation(data) {
         : '<span class="badge fail">模型未完成</span>';
       return `
     <tr>
-      <td>${escapeHtml(item.question)}</td>
+      <td>${item.setup_question ? `<div class="muted">前置：${escapeHtml(item.setup_question)}</div>` : ''}${escapeHtml(item.question)}</td>
       <td>${escapeHtml(EVAL_LABELS[item.intent] || item.intent)}</td>
       <td>${modelBadge}<div class="muted">${escapeHtml(evalModeLabel(item))}</div></td>
       <td><span class="badge ${item.hit ? '' : 'fail'}">${item.hit ? '通过' : '未通过'}</span></td>

@@ -53,7 +53,9 @@ def test_evaluation_endpoint_reports_model_only_status():
     assert body["mode"] == "model"
     assert body["dataset_range"] == "2025-10-01 至 2026-02-28"
     assert body["evaluated_at"]
-    assert body["total"] == 6
+    assert body["total"] == 18
+    assert body["suite_version"] == "strict-model-v2"
+    assert sum(bool(case["setup_question"]) for case in body["cases"]) == 3
     assert body["available"] is False
     assert body["passed"] == 0
     assert body["model_rate"] == 0

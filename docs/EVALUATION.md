@@ -1,43 +1,75 @@
-# Evaluation Snapshot
+# 模型评测
 
-Dataset: deterministic simulated e-commerce data, 2025-10-01 to 2026-02-28.
+## 当前评测集
 
-The evaluation exercises the configured model end to end: schema retrieval,
-model SQL generation, SQL repair, AST validation, read-only execution, golden
-result assertions and grounded result interpretation. Rule SQL remains a
-runtime availability fallback, but the evaluation disables it. A model that
-does not produce SQL, or whose interpretation falls back to a deterministic
-digest, is recorded as a failed case and never counted as a model pass.
+`strict-model-v2` 包含 **18 条黄金用例：15 条单轮分析、3 条两轮追问链**。完整执行最多产生 21 轮模型查询；每轮均包含模型 SQL 生成与结果解读，执行失败时允许原有的有界模型修复。前置问题失败后不继续追问。
 
-## Latest local model snapshot
+数据采用固定种子的电商模拟数据，覆盖 **2025-10-01 至 2026-02-28**。相对日期以 **2026-02-28** 为基准：“上个月”为 2026 年 1 月，“本月”为 2026 年 2 月，“近 30 天”为 2026-01-30 至 2026-02-28，“近 90 天”为 2025-12-01 至 2026-02-28。
 
-- Model: `qwen/qwen3.8-flash`
-Observed runs were not stable across repeated calls: one recent run passed 5/6,
-while another returned 4/6. The table below records a representative failing
-run rather than hiding the variance behind the best result.
+| 用例 ID | 验收内容 |
+| --- | --- |
+| `sales-east` | 上月华东已支付订单销售额 |
+| `category-sales` | 近 90 天按订单主表品类汇总已支付销售额并排序 |
+| `refund-top` | 全期退款率最高的一个品类及其退款率 |
+| `roi-channels` | 上月各渠道 ROI，避免订单关联导致花费重复累计 |
+| `daily-sales` | 本月每日已支付销售额及日期升序 |
+| `channel-aov` | 全期各渠道已支付订单客单价及降序 |
+| `sales-south` | 上月华南已支付订单销售额 |
+| `sales-north-web` | 本月华北与 Web 渠道组合筛选 |
+| `sales-last30-channels` | 近 30 天各渠道销售额及降序 |
+| `sales-last90-regions` | 近 90 天各地区销售额及降序 |
+| `category-units` | 近 90 天按商品行品类汇总已支付商品件数及降序 |
+| `food-units` | 本月食品饮料商品行销量，避免订单主品类代替商品行品类 |
+| `refund-month` | 上月各品类退款率及降序 |
+| `refund-reasons` | 本月按原订单下单日期筛选的各原因退款申请单数 |
+| `roi-douyin` | 本月抖音渠道 ROI、时间与渠道筛选 |
+| `followup-region` | 从上月华东追问“那华南呢”，保留时间并替换地区 |
+| `followup-month` | 从上月华南追问“那本月呢”，保留地区并替换时间 |
+| `followup-channel` | 从本月华北 Web 追问“小程序渠道”，保留时间和地区并替换渠道 |
 
-- Golden cases: 6
-- Passed: 4/6
-- Result hit rate: 66.7%
-- Model completion rate: 83.3%
-- SQL execution rate: 83.3%
-- Average response time: about 5–6 seconds
-- Automated tests: 42 passing in the current repository
+## 严格模型链路与判分
 
-One case returned model SQL that omitted the paid-order filter and therefore
-missed the expected amount. Another returned no SQL at all and was recorded as a
-failure without invoking rule fallback. Scores depend on the selected model,
-provider latency and network and should be treated as a dated snapshot, not a
-universal benchmark.
+每轮通过 Schema 召回、查询规划、模型 SQL 生成、AST 门禁、只读执行、有界模型修复和模型结果解读。所有调用固定使用 `allow_rule_fallback=False`。模型未生成 SQL、修复失败、执行失败、解读为空或回退确定性摘要，均判失败。模型未启用时返回 `available=false`，所有用例标记未运行，不制造通过成绩。
 
-## Run locally
+结果验收使用评测器内独立维护的只读标准 SQL，**不调用运行时规则 SQL 生成器**。标准 SQL 只用于核对模型的查询结果，不代替模型作答。验收检查：
+
+- 完整行数、维度集合与唯一性，防止漏组或重复分组。
+- 每个分组的数值，绝对误差不超过 0.01；拒绝空值、布尔值和非有限数值。
+- 问题要求的指标降序或日期升序；同值分组不强制固定次序。
+- 支持明确的中英文列别名和渠道名称，允许额外的辅助列。
+- 查询结果能构建非空的确定性摘要，且模型确实输出非空解读。
+
+口径在问题中明确：销售额和客单价仅统计 `status='paid'`；品类销售额使用订单主表品类，商品件数使用商品行品类；退款率为退款申请单数除以全部订单数、以百分数返回；ROI 为已支付销售额除以投放花费，两表分别汇总再计算。标准查询也经过现有 AST 校验与只读执行。
+
+追问用例会先重新执行前置问题并验收，再将该轮真实计划与上下文传给追问；不使用伪造上下文或前一次独立用例的缓存结果。两轮都通过才记为通过。前置失败会明确显示“前置问题未通过”，整条链不记作执行完成或模型完成。耗时与尝试次数均包含前置轮次。
+
+当前验收确认查询结果正确、模型解读链路完成及存在可核对摘要，**尚未对模型解读逐句进行事实一致性或表达质量评分**。18 条用例是固定数据域回归集，不代表任意数据库或任意业务问题的通用能力。
+
+2026-10-27 使用当前已配置的 `qwen/qwen3.8-flash` 完整运行一次：**5/18 通过、命中率 27.8%、SQL 执行率 55.6%、模型完成率 44.4%、平均每条用例 15.4 秒**。本轮没有使用规则 SQL 或摘要掩盖失败。失败原因包括模型空 SQL、模型修复未产出、结果口径或数值不符、模型解读回退，以及追问前置问题失败。完整脱敏结果见 [strict-model-v2 评测 JSON](evaluation-v2-2026-10-27.json)。在线结果受模型服务、网络和随机响应影响，应视为本次运行快照。
+
+## 指标与结果记录
+
+- **模型通过率 / 结果命中率**：严格链路及标准结果验收均通过的用例数 / 18。
+- **SQL 执行率**：完整用例中所有轮次 SQL 均执行成功的用例数 / 18。
+- **模型完成率**：完整用例中所有轮次均由模型生成或修复 SQL，并由模型解读的用例数 / 18。
+- **平均响应时间**：各用例的完整耗时均值，含检索、SQL、修复、解读、标准结果核对；追问含前置轮次。
+- **覆盖意图**：规划器的 4 个意图类别；趋势和客单价归入销售，不能把场景数当作意图数。
+
+JSON 返回 `suite_version`、模型名、评测时间、各项指标与逐用例 `id`、`setup_question`、执行状态、生成来源和失败原因。页面不会在导航时自动调用模型，需点击“运行模型评测”。
+
+## 历史快照（旧版 6 条用例）
+
+2026-10-26 使用 `qwen/qwen3.8-flash` 的一次历史运行记录为 **4/6 通过、命中率 66.7%、SQL 执行率 83.3%**；截图记录平均响应 3431.6 ms。历史多次运行出现过 5/6 与 4/6 的波动。一次失败漏掉已支付订单口径，另一次未产出 SQL，均如实失败。
+
+旧版部分断言只校验行数或榜首，当前版本同时加强数值、分组与排序验收，并明确业务口径，因此旧版分数与 `strict-model-v2` **不能直接横向比较**。历史图片保留于 [旧版结果截图](atlas-evaluation-latest.png)。
+
+## 复现与离线回归
 
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m app.evaluation.run
 python -m pytest -q
+node --check app/static/app.js
 ```
 
-The benchmark requires an enabled model for a model score. Without an active
-model, the API returns `available=false` and zero scored cases rather than a
-synthetic passing result.
+真实模型评测需先在 `/models` 保存并启用模型；会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，以真实本地数据、受控模型响应验证验收器和失败边界，**离线测试通过数不等于在线模型评测通过数**。CI 未配置模型时只检查评测入口与未配置状态，不产生在线模型成绩。
