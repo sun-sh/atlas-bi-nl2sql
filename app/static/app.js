@@ -10,6 +10,7 @@ const state = {
   sessionListRequest: 0,
   sessionOpenRequest: 0,
   activeQueryCard: null,
+  threadPinned: true,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -115,9 +116,15 @@ async function loadHealth() {
     $('#retrieval-meta').textContent =
       `${semanticLabel} + ${lexicalLabel} · 只读 SQL`;
     state.model = data.model;
+    renderModelHeading(data.model, data.llm_active);
     renderModelRuntime(data.model, data.llm_active);
   } catch {
     $('#health-text').textContent = '连接失败';
+    const pill = $('#model-pill');
+    if (pill) {
+      pill.textContent = '状态连接失败';
+      pill.classList.add('offline');
+    }
   }
 }
 
@@ -149,22 +156,24 @@ function renderResultBody(
   table,
 ) {
   return `
-    <div class="result-answer"><strong>分析结论</strong> <span class="narrative-tag">${result.narrative?.mode === 'model' ? '模型解读 · 流式' : '确定性摘要'}</span><div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div></div>
+    <div class="result-answer"><strong>分析结论</strong> <span class="narrative-tag">${result.narrative?.mode === 'model' ? `模型解读 · ${escapeHtml(result.narrative.model || '已完成')}` : '确定性摘要'}</span><div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div></div>
     ${(result.warnings || []).length ? `<div class="result-meta">${result.warnings.map((w) => `<span class="small-pill">${escapeHtml(w)}</span>`).join('')}</div>` : ''}
     <div class="result-meta">
-      <span class="small-pill">${{ llm: '模型生成', 'llm-repair': '模型修复', 'model-failed': '模型未产出', 'model-repair-failed': '模型修复失败' }[result.mode] || '模型生成'}</span>
-      <span class="small-pill">${escapeHtml(result.plan?.intent || '')}</span>
+      <span class="small-pill">${{ llm: '模型生成', 'llm-repair': '模型修复', rule: '规则回退', 'rule-repair': '规则修复', 'model-failed': '模型未产出', 'model-repair-failed': '模型修复失败' }[result.mode] || '来源未知'}</span>
       <span class="small-pill">${attempts.length} 次执行 · ${escapeHtml(result.elapsed_ms)} ms</span>
       ${(result.plan?.inherited || []).map((item) => `<span class="small-pill inherited-pill">继承 · ${escapeHtml(item)}</span>`).join('')}
     </div>
-    ${numericCol && rows.length ? `<div class="chart-box"><div class="chart-title">${escapeHtml(numericCol)} · 按 ${escapeHtml(firstDimension)} 展示</div><div class="chart-bars">${bars}</div></div>` : ''}
-    ${
-      numericCol && rows.length
-        ? `<details class="accordion result-details"><summary><span>查看结果明细表</span><span>⌄</span></summary>${table}</details>`
-        : table
-    }
-    <details class="accordion"><summary><span>查看生成的 SQL</span><span>⌄</span></summary><div class="sql-block">${escapeHtml(result.sql)}</div></details>
-    <details class="accordion"><summary><span>执行轨迹与证据</span><span>⌄</span></summary><div class="trace">${attempts.map((a) => `<div class="trace-item"><span class="trace-mark ${a.status === 'failed' ? 'bad' : ''}">${a.status === 'failed' ? '!' : '✓'}</span><span>第 ${escapeHtml(a.attempt)} 次 · ${escapeHtml(a.status)} · ${escapeHtml(a.elapsed_ms)} ms${a.error ? ' · ' + escapeHtml(a.error) : ''}</span></div>`).join('')}${(result.retrieval || []).map((hit) => `<div class="trace-item"><span class="trace-mark">◎</span><span>召回 ${escapeHtml(hit.label)}（${escapeHtml(hit.table)}）· 融合 ${escapeHtml(hit.score)} · 语义 ${escapeHtml(hit.vector_score)} · 关键词 ${escapeHtml(hit.lexical_score)}</span></div>`).join('')}</div></details>`;
+    ${numericCol && firstDimension && rows.length > 1 ? `<div class="chart-box"><div class="chart-title">${escapeHtml(numericCol)} · 按 ${escapeHtml(firstDimension)} 展示${rows.length > 8 ? ' · 前 8 项，完整结果见数据依据' : ''}</div><div class="chart-bars">${bars}</div></div>` : ''}
+    <details class="accordion result-evidence"><summary><span>数据依据与 SQL</span><span>⌄</span></summary>
+      <div class="evidence-detail">
+        <div class="evidence-detail-head"><span>结果明细</span><span>${rows.length} 行${result.truncated ? ' · 已达到查询行数上限' : ''}</span></div>
+        ${table}
+        <div class="evidence-detail-head"><span>生成的只读 SQL</span><span>${escapeHtml(result.sql_mode || result.mode || '')}</span></div>
+        <div class="sql-block">${escapeHtml(result.sql)}</div>
+        <div class="evidence-detail-head"><span>执行轨迹与 Schema 召回</span><span>${attempts.length} 次执行</span></div>
+        <div class="trace">${attempts.map((a) => `<div class="trace-item"><span class="trace-mark ${a.status === 'failed' ? 'bad' : ''}">${a.status === 'failed' ? '!' : '✓'}</span><span>第 ${escapeHtml(a.attempt)} 次 · ${escapeHtml(a.status)} · ${escapeHtml(a.elapsed_ms)} ms${a.error ? ' · ' + escapeHtml(a.error) : ''}</span></div>`).join('')}${(result.retrieval || []).map((hit) => `<div class="trace-item"><span class="trace-mark">◎</span><span>召回 ${escapeHtml(hit.label)}（${escapeHtml(hit.table)}）· 融合 ${escapeHtml(hit.score)} · 语义 ${escapeHtml(hit.vector_score)} · 关键词 ${escapeHtml(hit.lexical_score)}</span></div>`).join('')}</div>
+      </div>
+    </details>`;
 }
 
 function renderPendingTurn(question) {
@@ -205,7 +214,8 @@ function renderPendingTurn(question) {
   state.activeQueryCard = thread.querySelector(
     '.turn-card[data-live-turn="true"]:last-of-type',
   );
-  scrollThreadToLatest();
+  state.threadPinned = true;
+  scrollThreadToLatest({ force: true });
   return state.activeQueryCard;
 }
 
@@ -237,7 +247,7 @@ function renderResult(result, options = {}) {
   state.lastResult = result;
   const cols = result.columns || [];
   const rows = result.rows || [];
-  const firstDimension = cols[0];
+  const firstDimension = cols.find(c => rows.some(r => typeof r[c] !== 'number' && r[c] != null));
   const preferred = [
     '销售额',
     '客单价',
@@ -268,9 +278,7 @@ function renderResult(result, options = {}) {
     ? `
     <div class="table-wrap"><table class="result-table">
       <thead><tr>${cols.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
-      <tbody>${rows
-        .slice(0, 30)
-        .map(
+      <tbody>${rows.map(
           (row) =>
             `<tr>${cols.map((c) => `<td>${escapeHtml(row[c] ?? '')}</td>`).join('')}</tr>`,
         )
@@ -303,7 +311,7 @@ function renderResult(result, options = {}) {
     liveCard.innerHTML = `
       <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(result.question)}</div></div>
       <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span></div>
-      ${body}`;
+      <div class="turn-answer"><div class="turn-label assistant-label">AI</div><div class="assistant-content">${body}</div></div>`;
     state.activeQueryCard = null;
   } else {
     thread.insertAdjacentHTML(
@@ -312,7 +320,7 @@ function renderResult(result, options = {}) {
       <article class="turn-card">
         <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(result.question)}</div></div>
         <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span></div>
-        ${body}
+        <div class="turn-answer"><div class="turn-label assistant-label">AI</div><div class="assistant-content">${body}</div></div>
       </article>`,
     );
   }
@@ -327,6 +335,43 @@ function setTurnNarrative(card, text, trailing = false) {
   }
 }
 
+function setPageHeading(view) {
+  const headings = {
+    workspace: ['ATLAS / ANALYSIS', '今天想分析什么？', '直接问经营问题，回答会留在当前会话里；需要时再查看筛选条件和数据依据。'],
+    overview: ['ATLAS / OVERVIEW', '经营总览', '演示数据覆盖 2025 年 10 月至 2026 年 2 月。需要了解指标变化，可在分析会话中继续提问。'],
+    evidence: ['ATLAS / EVIDENCE', '每条结论，都能回到数据依据', '查看最近一次查询召回的业务表、融合分数、只读 SQL 与执行轨迹。'],
+    evaluation: ['ATLAS / EVALUATION', '用黄金问题验收模型链路', '每条用例都由真实模型生成 SQL、执行查询并解读结果；没有完成就如实判失败。'],
+    models: ['ATLAS / MODELS', '选择本次分析使用的模型', '连接 OpenAI 兼容接口；保存后，后续查询会自动使用当前生效模型。'],
+  };
+  const [eyebrow, title, subtitle] = headings[view] || headings.workspace;
+  $('#page-eyebrow').textContent = eyebrow;
+  $('#page-title').textContent = title;
+  $('#page-subtitle').textContent = subtitle;
+}
+
+function toggleWorkspacePanel(panel) {
+  const workspace = $('#view-workspace');
+  if (!workspace) return;
+  const target = workspace.querySelector(`#${panel}-drawer`);
+  if (!target) return;
+  const open = target.classList.contains('is-open');
+  closeWorkspacePanels();
+  if (!open) {
+    target.classList.add('is-open');
+    workspace.classList.add('has-workspace-drawer');
+    const trigger = panel === 'session' ? $('#history-btn') : $('#context-btn');
+    trigger?.setAttribute('aria-expanded', 'true');
+    setTimeout(() => target.querySelector('button, .session-item, summary')?.focus(), 0);
+  }
+}
+
+function closeWorkspacePanels() {
+  $('#view-workspace')?.classList.remove('has-workspace-drawer');
+  $$('.workspace-drawer.is-open').forEach((panel) => panel.classList.remove('is-open'));
+  $('#history-btn')?.setAttribute('aria-expanded', 'false');
+  $('#context-btn')?.setAttribute('aria-expanded', 'false');
+}
+
 function setNarrativeTag(card, narrative) {
   const tag = card?.querySelector('.narrative-tag');
   if (!tag) return;
@@ -338,7 +383,7 @@ function setNarrativeTag(card, narrative) {
 }
 
 function escapeHtml(text) {
-  return String(text || '')
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
@@ -412,14 +457,34 @@ function contextRows(context) {
     channel_label: '渠道',
     category_label: '品类',
     metrics: '指标',
-    intent: '分析意图',
+    intent: '分析类型',
+  };
+  return Object.entries(labels)
+    .map(([key, label]) => {
+      let value = context?.[key];
+      if (key === 'intent') value = EVAL_LABELS[value] || value;
+      if (Array.isArray(value)) value = value.join(' / ');
+      if (!value) return '';
+      return `<div class="context-row"><span>${label}</span><strong>${escapeHtml(value)}</strong></div>`;
+    })
+    .filter(Boolean)
+    .join('');
+}
+
+function contextChips(context) {
+  const labels = {
+    time_range: '时间',
+    region_label: '地区',
+    channel_label: '渠道',
+    category_label: '品类',
+    metrics: '指标',
   };
   return Object.entries(labels)
     .map(([key, label]) => {
       let value = context?.[key];
       if (Array.isArray(value)) value = value.join(' / ');
       if (!value) return '';
-      return `<div class="context-row"><span>${label}</span><strong>${escapeHtml(value)}</strong></div>`;
+      return `<span class="context-chip"><span>${label}</span>${escapeHtml(value)}</span>`;
     })
     .filter(Boolean)
     .join('');
@@ -431,7 +496,12 @@ function renderContext(session) {
   const context = session?.context || {};
   const rows = contextRows(context);
   list.innerHTML =
-    rows || '<div class="context-empty">提交第一条问题后生成分析上下文。</div>';
+    rows || '<div class="context-empty">提交第一条问题后生成分析条件。</div>';
+  const summary = $('#thread-context-summary');
+  const chips = $('#thread-context-chips');
+  const chipMarkup = contextChips(context);
+  if (summary) summary.hidden = !chipMarkup;
+  if (chips) chips.innerHTML = chipMarkup;
   const title = $('#session-title');
   if (title) title.textContent = session?.title || '新的分析会话';
   const count = $('#session-count');
@@ -443,8 +513,8 @@ function renderEmptyConversation() {
   if (!thread) return;
   thread.innerHTML = `<div class="conversation-empty">
           <div class="conversation-empty-mark">AI</div>
-              <h3>从一个经营问题开始</h3>
-                  <p>例如先问“上个月华东地区销售额是多少？”，再追问“那华南呢”。系统会继承时间与指标，只替换地区。</p>
+              <h3>直接问一个经营问题</h3>
+                  <p>例如“上个月各渠道 ROI”，再追问“那华东呢”。时间、指标和筛选条件会按会话继承。</p>
                       <div class="starter-grid" id="example-list">${state.examples.map((q) => `<button class="example-chip" data-question="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}</div>
                         </div>`;
   thread.querySelectorAll('.example-chip').forEach((btn) =>
@@ -454,28 +524,68 @@ function renderEmptyConversation() {
     }),
   );
 }
-function scrollThreadToLatest() {
+function updateLatestReplyButton() {
+  const button = $('#latest-reply-btn');
+  if (!button) return;
+  button.hidden = state.threadPinned;
+}
+
+function scrollThreadToLatest({ force = false } = {}) {
   const thread = $('#conversation-thread');
   if (!thread) return;
+  if (!force && !state.threadPinned) {
+    updateLatestReplyButton();
+    return;
+  }
   requestAnimationFrame(() => {
     thread.scrollTop = thread.scrollHeight;
+    state.threadPinned = true;
+    updateLatestReplyButton();
   });
 }
 
-function scrollNarrativeIntoView(card) {
+function renderQueryError(card, message) {
+  if (!card || !card.isConnected) return;
+  card.classList.remove('is-streaming');
+  card.classList.add('has-error');
+  card.removeAttribute('data-live-turn');
+  if (card.querySelector('.result-answer')) {
+    card.querySelector('.stream-caret')?.remove();
+    card.insertAdjacentHTML('beforeend', `<div class="stream-error"><strong>回答生成中断，已保留查询结果</strong><span>${escapeHtml(message)}</span></div>`);
+    const tag = card.querySelector('.narrative-tag');
+    if (tag) tag.textContent = '回答未完成';
+    return;
+  }
+  card.innerHTML = `
+    <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(card.dataset.question || '')}</div></div>
+    <div class="turn-answer stream-error-answer">
+      <div class="turn-label assistant-label">AI</div>
+      <div class="stream-error"><strong>这次查询没有完成</strong><span>${escapeHtml(message)}</span><button type="button" class="retry-query-btn">重新尝试</button></div>
+    </div>`;
+  card.querySelector('.retry-query-btn')?.addEventListener('click', () => {
+    const question = card.querySelector('.turn-question div:last-child')?.textContent || '';
+    $('#question').value = question;
+    $('#question').focus();
+  });
+}
+
+function followNarrative(card) {
+  if (!state.threadPinned) return;
   const thread = $('#conversation-thread');
-  const box = card?.querySelector('.result-answer');
-  if (!thread || !box) return;
+  const text = card?.querySelector('.narrative-text');
+  if (!thread || !text) return;
   requestAnimationFrame(() => {
-    const threadRect = thread.getBoundingClientRect();
-    const boxRect = box.getBoundingClientRect();
-    thread.scrollTop += boxRect.top - threadRect.top - 12;
+    if (!state.threadPinned) return;
+    const bottom = text.getBoundingClientRect().bottom;
+    const edge = thread.getBoundingClientRect().bottom - 16;
+    if (bottom > edge) thread.scrollTop += bottom - edge;
   });
 }
 function renderSessionThread(session, options = {}) {
   const thread = $('#conversation-thread');
   if (!thread) return;
   state.activeQueryCard = null;
+  state.threadPinned = true;
   state.session = session;
   if (session?.id) {
     const summary = {
@@ -501,17 +611,24 @@ function renderSessionThread(session, options = {}) {
       renderResult(result, { append: true });
     });
     state.lastResult = session.turns[session.turns.length - 1]?.result || null;
-    if (options.scrollToLatest) scrollThreadToLatest();
+    if (options.scrollToLatest) {
+      const latest = thread.querySelector('.turn-card:last-child');
+      requestAnimationFrame(() => {
+        if (latest) thread.scrollTop += latest.getBoundingClientRect().top - thread.getBoundingClientRect().top - 12;
+      });
+    }
   } else {
     renderEmptyConversation();
   }
 }
 async function openSession(sessionId, options = {}) {
+  if (state.sending || state.creatingSession) return;
   const requestId = ++state.sessionOpenRequest;
   try {
     const session = await api(`/api/sessions/${encodeURIComponent(sessionId)}`);
     if (requestId !== state.sessionOpenRequest) return;
-    renderSessionThread(session, options);
+    renderSessionThread(session, { scrollToLatest: true, ...options });
+    closeWorkspacePanels();
   } catch (error) {
     if (requestId !== state.sessionOpenRequest) return;
     toast(error.message);
@@ -520,6 +637,7 @@ async function openSession(sessionId, options = {}) {
   }
 }
 async function loadSessions() {
+  if (state.sending || state.creatingSession) return;
   const requestId = ++state.sessionListRequest;
   try {
     const data = await api('/api/sessions');
@@ -539,7 +657,7 @@ async function loadSessions() {
   }
 }
 async function createSession() {
-  if (state.creatingSession) return;
+  if (state.creatingSession || state.sending) return;
   state.creatingSession = true;
   state.sessionListRequest += 1;
   state.sessionOpenRequest += 1;
@@ -556,6 +674,7 @@ async function createSession() {
     ];
     state.lastResult = null;
     renderSessionThread(session);
+    closeWorkspacePanels();
     renderEvidence({ retrieval: [], attempts: [], sql: '' });
     $('#question').value = '';
     $('#question').focus();
@@ -603,6 +722,7 @@ async function streamQuery(question, sessionId) {
   let buffer = '';
   let result = null;
   let narrative = '';
+  let completed = false;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -622,11 +742,13 @@ async function streamQuery(question, sessionId) {
           renderResult(result, { card });
           narrative = '';
           setTurnNarrative(card, '', true);
-          scrollNarrativeIntoView(card);
+          const tag = card?.querySelector('.narrative-tag');
+          if (tag) tag.textContent = '正在组织分析结论…';
+          followNarrative(card);
         } else if (event === 'delta') {
           narrative += data.delta || '';
           setTurnNarrative(card, narrative, true);
-          scrollNarrativeIntoView(card);
+          followNarrative(card);
         } else if (event === 'reset') {
           narrative = data.text || '';
           setTurnNarrative(card, narrative, true);
@@ -644,8 +766,9 @@ async function streamQuery(question, sessionId) {
           narrative = result.answer;
           setTurnNarrative(card, narrative, false);
           setNarrativeTag(card, result.narrative);
-          scrollNarrativeIntoView(card);
+          followNarrative(card);
         } else if (event === 'done') {
+          completed = true;
           if (data.session) state.session = data.session;
           if (result) {
             result.elapsed_ms = data.elapsed_ms ?? result.elapsed_ms;
@@ -664,6 +787,7 @@ async function streamQuery(question, sessionId) {
     }
   }
   if (!result) throw new Error('流式响应未返回查询结果');
+  if (!completed) throw new Error('连接提前结束，请重新尝试');
   if (state.session) {
     renderSessionList();
     renderContext(state.session);
@@ -678,10 +802,15 @@ async function submitQuery(question) {
   }
   if (state.sending) return;
   state.sending = true;
+  state.sessionListRequest += 1;
+  state.sessionOpenRequest += 1;
+  $$('#new-session-btn, #reset-context-btn, .session-item, #refresh-btn').forEach(el => { el.disabled = true; });
   const button = $('#submit-btn');
   button.disabled = true;
   button.querySelector('span').textContent = '分析中…';
-  renderPendingTurn(question);
+  const submittedQuestion = question.trim();
+  const liveCard = renderPendingTurn(submittedQuestion);
+  if (liveCard) liveCard.dataset.question = submittedQuestion;
   try {
     let sessionId = state.session?.id || null;
     if (!sessionId) {
@@ -699,7 +828,7 @@ async function submitQuery(question) {
         ...state.sessions.filter((item) => item.id !== created.id),
       ];
     }
-    const result = await streamQuery(question, sessionId);
+    const result = await streamQuery(submittedQuestion, sessionId);
     if (state.session) {
       const latest = state.session.turns?.[state.session.turns.length - 1];
       if (latest) {
@@ -707,16 +836,17 @@ async function submitQuery(question) {
         latest.result = result;
       }
     }
-    $('#question').value = '';
+    if ($('#question').value.trim() === submittedQuestion) $('#question').value = '';
     toast(`分析完成 · ${result.elapsed_ms} ms`);
   } catch (error) {
     state.activeQueryCard = null;
     toast(error.message);
-    if (state.session)
-      renderSessionThread(state.session, { scrollToLatest: true });
-    else renderEmptyConversation();
+    renderQueryError(liveCard, error.message);
+    state.threadPinned = true;
+    scrollThreadToLatest({ force: true });
   } finally {
     state.sending = false;
+    $$('#new-session-btn, #reset-context-btn, .session-item, #refresh-btn').forEach(el => { el.disabled = false; });
     button.disabled = false;
     button.querySelector('span').textContent = '发送问题';
   }
@@ -733,14 +863,18 @@ function switchView(view) {
   if (window.location.pathname !== `/${view}`) {
     window.history.pushState({}, '', `/${view}`);
   }
+  setPageHeading(view);
+  $$('.mobile-nav-item').forEach((x) =>
+    x.classList.toggle('active', x.dataset.view === view),
+  );
+  closeWorkspacePanels();
   if (view === 'models') loadModelConfig();
-  if (view === 'evaluation') loadEvaluation();
   if (view === 'overview') loadOverview();
   if (view === 'workspace') loadSessions();
 }
 
 function bindNavigation() {
-  $$('.nav-item').forEach((item) =>
+  $$('.nav-item, .mobile-nav-item').forEach((item) =>
     item.addEventListener('click', () => switchView(item.dataset.view)),
   );
   const initial =
@@ -842,6 +976,7 @@ function renderEvaluation(data) {
 
 async function loadEvaluation() {
   const button = $('#run-eval-btn');
+  if (button.disabled) return;
   button.disabled = true;
   button.textContent = '运行中…';
   try {
@@ -865,6 +1000,16 @@ const MODEL_BASE_URLS = {
   siliconflow: 'https://api.siliconflow.cn/v1',
   moonshot: 'https://api.moonshot.cn/v1',
 };
+
+function renderModelHeading(model, active) {
+  const pill = $('#model-pill');
+  if (!pill) return;
+  const label = active && model?.model
+    ? `当前模型 · ${model.model}`
+    : '规则回退 · 未启用模型';
+  pill.innerHTML = `<span class="status-dot"></span>${escapeHtml(label)}`;
+  pill.classList.toggle('offline', !active);
+}
 
 function renderModelRuntime(model, active) {
   if (!model) return;
@@ -937,6 +1082,7 @@ async function loadModelConfig() {
     const data = await api('/api/model/config');
     state.model = data;
     applyModelForm(data);
+    renderModelHeading(data, data.active);
     setModelMessage(
       data.active
         ? '模型配置已生效，查询将由当前模型生成。'
@@ -1028,6 +1174,31 @@ function init() {
   loadExamples();
   $('#new-session-btn')?.addEventListener('click', createSession);
   $('#reset-context-btn')?.addEventListener('click', createSession);
+  $('#history-btn')?.addEventListener('click', () => toggleWorkspacePanel('session'));
+  $('#context-btn')?.addEventListener('click', () => toggleWorkspacePanel('context'));
+  $('#session-drawer-close')?.addEventListener('click', closeWorkspacePanels);
+  $('#context-drawer-close')?.addEventListener('click', closeWorkspacePanels);
+  $('#workspace-backdrop')?.addEventListener('click', closeWorkspacePanels);
+  $('#latest-reply-btn')?.addEventListener('click', () => {
+    state.threadPinned = true;
+    scrollThreadToLatest({ force: true });
+  });
+  $('#conversation-thread')?.addEventListener('scroll', () => {
+    const thread = $('#conversation-thread');
+    if (!thread) return;
+    const atEnd = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 48;
+    if (atEnd || !state.sending) state.threadPinned = atEnd;
+    updateLatestReplyButton();
+  });
+  for (const eventName of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+    $('#conversation-thread')?.addEventListener(eventName, () => {
+      state.threadPinned = false;
+      updateLatestReplyButton();
+    }, { passive: true });
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeWorkspacePanels();
+  });
   $('#overview-refresh-btn')?.addEventListener('click', () => {
     loadOverview();
     loadHealth();
@@ -1037,14 +1208,18 @@ function init() {
     submitQuery($('#question').value);
   });
   $('#question').addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault();
       $('#query-form').requestSubmit();
     }
   });
   $('#refresh-btn').addEventListener('click', () => {
-    loadOverview();
+    const active = $('.view.active')?.id?.replace('view-', '') || 'workspace';
+    if (active === 'overview') loadOverview();
+    if (active === 'workspace') loadSessions();
+    if (active === 'models') loadModelConfig();
     loadHealth();
+    toast('已刷新当前页面');
   });
   $('#run-eval-btn').addEventListener('click', loadEvaluation);
   $('#model-provider')?.addEventListener('change', () => {

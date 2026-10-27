@@ -84,10 +84,12 @@ def test_evaluation_page_explains_strict_model_policy():
     assert 'id="eval-meta"' in body
     assert 'id="eval-count"' in body
     script = client.get('/static/app.js').text
-    assert "if (view === 'evaluation') loadEvaluation();" in script
+    assert "if (view === 'evaluation') loadEvaluation();" not in script
+    assert '运行模型评测' in body
     assert 'renderEvaluation(data)' in script
     assert 'SQL 执行率' in script
-    assert '规则回退' not in script
+    evaluation_renderer = script.split('function renderEvaluation(data)', 1)[1].split('async function loadEvaluation()', 1)[0]
+    assert '规则回退' not in evaluation_renderer
 
 
 def test_workspace_ui_contract_keeps_results_and_model_settings_consistent():
@@ -98,7 +100,7 @@ def test_workspace_ui_contract_keeps_results_and_model_settings_consistent():
     assert 'id="model-name"' in page
     assert 'list="model-options"' in page
     assert 'id="model-name-manual"' not in page
-    assert '查看结果明细表' in script
+    assert '数据依据与 SQL' in script
     assert "document.body.classList.toggle('workspace-active'" in script
     assert 'body.workspace-active' in styles
     assert '$(\'#model-name-manual\')' not in script

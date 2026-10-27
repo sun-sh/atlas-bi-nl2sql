@@ -36,29 +36,39 @@
     </aside>
 
     <main class="main">
+      <nav class="mobile-nav" aria-label="移动端导航">
+        <button class="mobile-nav-item active" data-view="workspace"><span>◈</span><span>分析</span></button>
+        <button class="mobile-nav-item" data-view="overview"><span>▦</span><span>总览</span></button>
+        <button class="mobile-nav-item" data-view="evidence"><span>◎</span><span>证据</span></button>
+        <button class="mobile-nav-item" data-view="evaluation"><span>◇</span><span>评测</span></button>
+        <button class="mobile-nav-item" data-view="models"><span>⚙</span><span>模型</span></button>
+      </nav>
+
       <header class="topbar">
         <div>
-          <div class="eyebrow">ATLAS / BUSINESS ANALYSIS</div>
-          <h1>连续提问，保持分析上下文</h1>
-          <p class="top-subtitle">会话内记住分析条件；每一轮结果都能回到 SQL、召回证据与执行轨迹。</p>
+          <div class="eyebrow" id="page-eyebrow">ATLAS / ANALYSIS</div>
+          <h1 id="page-title">今天想分析什么？</h1>
+          <p class="top-subtitle" id="page-subtitle">直接问经营问题，回答会留在当前会话里；需要时再查看筛选条件和数据依据。</p>
         </div>
         <div class="top-actions">
-          <span class="pill"><span class="status-dot"></span>短期记忆已启用</span>
-          <button class="icon-btn" id="refresh-btn" title="刷新状态">↻</button>
+          <span class="pill" id="model-pill"><span class="status-dot"></span>正在检查模型</span>
+          <button class="icon-btn" id="refresh-btn" title="刷新当前页面">↻</button>
         </div>
       </header>
 
       <section class="view active" id="view-workspace">
         <div class="session-shell">
-          <aside class="panel session-rail">
+          <div class="workspace-backdrop" id="workspace-backdrop" aria-hidden="true"></div>
+
+          <aside class="panel session-rail workspace-drawer" id="session-drawer" aria-label="历史会话">
             <div class="session-rail-head">
               <div>
                 <div class="panel-kicker">CONVERSATIONS</div>
-                <h2>分析会话</h2>
+                <h2>历史会话</h2>
               </div>
-              <button class="new-session-btn" id="new-session-btn" title="新建会话">＋</button>
+              <button class="drawer-close" id="session-drawer-close" title="关闭历史会话" aria-label="关闭历史会话">×</button>
             </div>
-            <p class="session-rail-note">会话内短期记忆仅保留 7 天，最多 20 轮。</p>
+            <p class="session-rail-note">短期记忆保留 7 天，每个会话最多 20 轮。</p>
             <div class="session-list" id="session-list">
               <div class="session-empty">正在读取会话…</div>
             </div>
@@ -66,44 +76,59 @@
 
           <section class="panel conversation-panel">
             <div class="conversation-head">
-              <div>
+              <div class="conversation-title">
                 <div class="panel-kicker">ANALYSIS THREAD</div>
-                <h2 id="session-title">新的分析会话</h2>
+                <div class="conversation-title-row">
+                  <h2 id="session-title">新的分析会话</h2>
+                  <span class="thread-count" id="session-count">0 轮</span>
+                </div>
               </div>
-              <span class="badge" id="session-count">0 轮</span>
+              <div class="conversation-actions">
+                <button class="chat-action" id="history-btn" type="button" aria-controls="session-drawer" aria-expanded="false">历史会话</button>
+                <button class="chat-action" id="context-btn" type="button" aria-controls="context-drawer" aria-expanded="false">分析条件</button>
+                <button class="new-session-btn" id="new-session-btn" title="新建会话">＋ 新会话</button>
+              </div>
             </div>
-            <div class="conversation-thread" id="conversation-thread">
+            <div class="thread-context-summary" id="thread-context-summary" hidden>
+              <span class="thread-context-label">当前条件</span>
+              <div class="thread-context-chips" id="thread-context-chips"></div>
+            </div>
+            <div class="conversation-thread" id="conversation-thread" role="log" aria-label="分析对话" aria-live="off">
               <div class="conversation-empty">
                 <div class="conversation-empty-mark">AI</div>
-                <h3>从一个经营问题开始</h3>
-                <p>例如先问“上个月华东地区销售额是多少？”，再追问“那华南呢”。系统会继承时间与指标，只替换地区。</p>
+                <h3>直接问一个经营问题</h3>
+                <p>例如“上个月各渠道 ROI”，再追问“那华东呢”。时间、指标和筛选条件会按会话继承。</p>
                 <div class="starter-grid" id="example-list"></div>
               </div>
             </div>
+            <button id="latest-reply-btn" class="latest-reply-btn" type="button" hidden>↓ 回到最新回答</button>
+            <div class="dataset-note">演示数据：2025.10–2026.02 · “本月 / 上个月”以 2026.02.28 为基准</div>
             <form id="query-form" class="composer">
-              <textarea id="question" rows="2" maxlength="300" placeholder="继续追问，或输入新的经营问题…"></textarea>
+              <textarea id="question" aria-label="输入经营问题" rows="2" maxlength="300" placeholder="问销售额、品类、退款率、渠道 ROI，或继续追问…"></textarea>
               <div class="composer-foot">
-                <span class="hint">支持时间、地区、渠道、品类、退款与 ROI；新会话会清空上下文</span>
+                <span class="hint">Enter 发送 · Shift + Enter 换行 · 只读查询</span>
                 <button class="primary-btn" id="submit-btn" type="submit"><span>发送问题</span><span class="arrow">↗</span></button>
               </div>
             </form>
           </section>
 
-          <aside class="context-column">
-            <section class="panel context-card">
-              <div class="panel-head compact"><div><div class="panel-kicker">CURRENT CONTEXT</div><h2>当前上下文</h2></div><span class="badge">短期记忆</span></div>
-              <div class="context-list" id="context-list">
-                <div class="context-empty">提交第一条问题后生成分析上下文。</div>
+          <aside class="panel context-column workspace-drawer" id="context-drawer" aria-label="当前分析条件">
+            <section class="context-card">
+              <div class="panel-head compact">
+                <div><div class="panel-kicker">CURRENT CONTEXT</div><h2>当前分析条件</h2></div>
+                <button class="drawer-close" id="context-drawer-close" title="关闭分析条件" aria-label="关闭分析条件">×</button>
               </div>
-              <button class="context-reset" id="reset-context-btn">新建会话并清空</button>
+              <div class="context-list" id="context-list">
+                <div class="context-empty">提交第一条问题后生成分析条件。</div>
+              </div>
+              <button class="context-reset" id="reset-context-btn">新建会话并清空条件</button>
             </section>
-            <section class="panel context-card context-guide">
-              <div class="panel-kicker">HOW IT WORKS</div>
-              <h2>追问怎么生效</h2>
+            <details class="context-guide">
+              <summary>追问如何使用上下文？</summary>
               <div class="guide-row"><span>01</span><p><strong>显式条件优先</strong><br>新问题里的地区、渠道或时间会覆盖旧值。</p></div>
               <div class="guide-row"><span>02</span><p><strong>缺失条件继承</strong><br>“那华南呢”只替换地区，保留时间和指标。</p></div>
-              <div class="guide-row"><span>03</span><p><strong>可随时重置</strong><br>新建会话会清空上下文，不产生跨会话记忆。</p></div>
-            </section>
+              <div class="guide-row"><span>03</span><p><strong>可随时重置</strong><br>新建会话会清空条件，不产生跨会话记忆。</p></div>
+            </details>
           </aside>
         </div>
       </section>
@@ -123,7 +148,7 @@
         </div>
         <div class="bottom-grid">
           <section class="panel trend-panel">
-            <div class="panel-head compact"><div><div class="panel-kicker">SIGNAL</div><h2>本月销售趋势</h2></div><span class="muted">实付口径 · 不含退款</span></div>
+            <div class="panel-head compact"><div><div class="panel-kicker">SIGNAL</div><h2>2026 年 2 月销售趋势</h2></div><span class="muted">已支付订单实付 · 未扣减退款</span></div>
             <div id="trend-chart" class="trend-chart"></div>
           </section>
           <section class="panel channel-panel">
@@ -185,23 +210,22 @@
             <h2>用黄金问题验收模型分析链路</h2>
             <p>每条用例都走严格模型链路：模型生成 SQL、执行查询并生成解读；生成或解读未完成时直接判失败，不用规则或摘要补位。</p>
           </div>
-          <button class="secondary-btn" id="run-eval-btn">重新运行评测</button>
+          <button class="secondary-btn" id="run-eval-btn">运行模型评测</button>
         </div>
         <div class="eval-meta" id="eval-meta">
           <span>评测模式 <strong>严格模型链路</strong></span>
           <span>数据集 <strong>2025-10-01 至 2026-02-28</strong></span>
-          <span>结果时间 <strong>加载中…</strong></span>
+          <span>状态 <strong>尚未运行 · 点击后调用当前模型</strong></span>
         </div>
         <div class="eval-flow" aria-label="评测链路">
           <span>黄金问题</span><i>→</i><span>Schema 召回</span><i>→</i><span>模型 SQL</span><i>→</i><span>安全门禁</span><i>→</i><span>结果验收</span><i>→</i><span>模型解读</span>
         </div>
         <div class="eval-summary" id="eval-summary">
-          <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
-          <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
+          <div class="panel evaluation-empty">点击“运行模型评测”开始 6 条黄金用例验收。将调用当前配置的模型，运行需要一些时间。</div>
         </div>
         <section class="panel eval-results">
           <div class="panel-head compact"><div><div class="panel-kicker">GOLDEN SET</div><h2>逐用例结果</h2></div><span class="badge" id="eval-count">等待加载</span></div>
-          <div class="table-wrap" id="eval-table"><p class="muted">正在读取评测结果…</p></div>
+          <div class="table-wrap" id="eval-table"><p class="muted">尚未运行，完成后在这里查看逐条结果。</p></div>
         </section>
       </section>
     </main>
