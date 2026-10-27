@@ -39,10 +39,16 @@ def test_query_stream_returns_result_digest_and_done(monkeypatch, tmp_path):
     created = client.post('/api/sessions', json={}).json()
     events = _query_stream(client, '上个月各渠道ROI', created['id'])
     names = [name for name, _ in events]
-    assert names[0] == 'result'
-    assert 'delta' in names
-    assert 'narrative' in names
+    assert names[0] == 'start'
+    assert names.count('status') >= 5
+    assert names.index('status') < names.index('result')
+    assert names.index('result') < names.index('delta')
     assert names[-1] == 'done'
+
+    stage_names = [
+        data['stage'] for name, data in events if name == 'status'
+    ]
+    assert stage_names == ['retrieve', 'plan', 'generate', 'execute', 'finalize']
 
     result_event = next(data for name, data in events if name == 'result')
     result = result_event['result']

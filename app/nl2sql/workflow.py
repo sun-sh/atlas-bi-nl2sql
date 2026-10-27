@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, TypedDict
+from typing import Any, Iterator, TypedDict
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
 from app.nl2sql import generator
@@ -44,6 +45,13 @@ class GraphState(TypedDict, total=False):
 _retriever: HybridSchemaRetriever | None = None
 
 
+def _emit_stage(stage: str) -> None:
+    try:
+        get_stream_writer()({"stage": stage})
+    except RuntimeError:
+        pass
+
+
 def get_retriever() -> HybridSchemaRetriever:
     global _retriever
     if _retriever is None:
@@ -64,6 +72,7 @@ def _context_retrieval_question(question: str, context: dict[str, Any] | None) -
 
 
 def retrieve_node(state: GraphState) -> GraphState:
+    _emit_stage("retrieve")
     retrieval_question = _context_retrieval_question(
         state["question"], state.get("context")
     )
@@ -77,11 +86,13 @@ def retrieve_node(state: GraphState) -> GraphState:
 
 
 def plan_node(state: GraphState) -> GraphState:
+    _emit_stage("plan")
     plan = make_plan(state["question"], state["hits"], state.get("context"))
     return {"plan": plan}
 
 
 def generate_node(state: GraphState) -> GraphState:
+    _emit_stage("generate")
     plan = state["plan"]
     sql = generate_llm_sql(state["question"], plan, state["hits"])
     mode = "llm"
@@ -100,6 +111,7 @@ def generate_node(state: GraphState) -> GraphState:
 
 
 def execute_node(state: GraphState) -> GraphState:
+    _emit_stage("execute")
     started = time.perf_counter()
     sql = state["sql"]
     attempts = list(state.get("attempts", []))
@@ -133,6 +145,7 @@ def execute_node(state: GraphState) -> GraphState:
 
 
 def repair_node(state: GraphState) -> GraphState:
+    _emit_stage("repair")
     plan = state["plan"]
     question = state["question"]
     attempts = state.get("attempts", [])
@@ -181,6 +194,7 @@ def should_repair(state: GraphState) -> str:
 
 
 def finalize_node(state: GraphState) -> GraphState:
+    _emit_stage("finalize")
     result = state.get("result") or {"rows": [], "columns": [], "row_count": 0, "truncated": False, "elapsed_ms": 0}
     plan = state["plan"]
     rows = result.get("rows", [])
@@ -242,6 +256,60 @@ def build_graph():
 _GRAPH = None
 
 
+def _initial_state(
+    question: str,
+    context: dict[str, Any] | None,
+    *,
+    narrate: bool,
+    allow_rule_fallback: bool,
+) -> GraphState:
+    return {
+        "question": question.strip(),
+        "context": context or {},
+        "started": time.perf_counter(),
+        "trace_id": uuid.uuid4().hex[:12],
+        "narrate": narrate,
+        "allow_rule_fallback": allow_rule_fallback,
+    }
+
+
+def query_stream_events(
+    question: str,
+    context: dict[str, Any] | None = None,
+    *,
+    narrate: bool = False,
+    allow_rule_fallback: bool = True,
+) -> Iterator[dict[str, Any]]:
+    """Yield graph stage updates followed by the finalized QueryResult."""
+    global _GRAPH
+    if _GRAPH is None:
+        _GRAPH = build_graph()
+    initial = _initial_state(
+        question,
+        context,
+        narrate=narrate,
+        allow_rule_fallback=allow_rule_fallback,
+    )
+    state: GraphState = {}
+    for mode, chunk in _GRAPH.stream(
+        initial,
+        stream_mode=["custom", "updates"],
+    ):
+        if mode == "custom":
+            if isinstance(chunk, dict) and chunk.get("stage"):
+                yield {
+                    "type": "stage",
+                    "node": chunk["stage"],
+                    "state": state,
+                }
+            continue
+        if mode == "updates" and isinstance(chunk, dict):
+            for values in chunk.values():
+                if isinstance(values, dict):
+                    state.update(values)
+    yield {"type": "result", "result": state["final"]}
+
+
 def run_query(
     question: str,
     context: dict[str, Any] | None = None,
@@ -252,13 +320,11 @@ def run_query(
     global _GRAPH
     if _GRAPH is None:
         _GRAPH = build_graph()
-    initial: GraphState = {
-        "question": question.strip(),
-        "context": context or {},
-        "started": time.perf_counter(),
-        "trace_id": uuid.uuid4().hex[:12],
-        "narrate": narrate,
-        "allow_rule_fallback": allow_rule_fallback,
-    }
+    initial = _initial_state(
+        question,
+        context,
+        narrate=narrate,
+        allow_rule_fallback=allow_rule_fallback,
+    )
     state = _GRAPH.invoke(initial)
     return state["final"]

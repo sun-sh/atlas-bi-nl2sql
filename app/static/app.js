@@ -9,6 +9,7 @@ const state = {
   creatingSession: false,
   sessionListRequest: 0,
   sessionOpenRequest: 0,
+  activeQueryCard: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -166,7 +167,73 @@ function renderResultBody(
     <details class="accordion"><summary><span>执行轨迹与证据</span><span>⌄</span></summary><div class="trace">${attempts.map((a) => `<div class="trace-item"><span class="trace-mark ${a.status === 'failed' ? 'bad' : ''}">${a.status === 'failed' ? '!' : '✓'}</span><span>第 ${escapeHtml(a.attempt)} 次 · ${escapeHtml(a.status)} · ${escapeHtml(a.elapsed_ms)} ms${a.error ? ' · ' + escapeHtml(a.error) : ''}</span></div>`).join('')}${(result.retrieval || []).map((hit) => `<div class="trace-item"><span class="trace-mark">◎</span><span>召回 ${escapeHtml(hit.label)}（${escapeHtml(hit.table)}）· 融合 ${escapeHtml(hit.score)} · 语义 ${escapeHtml(hit.vector_score)} · 关键词 ${escapeHtml(hit.lexical_score)}</span></div>`).join('')}</div></details>`;
 }
 
-function renderResult(result) {
+function renderPendingTurn(question) {
+  const thread = $('#conversation-thread');
+  if (!thread) return null;
+  thread.querySelector('.conversation-empty')?.remove();
+  const stages = [
+    ['retrieve', '召回 Schema'],
+    ['plan', '理解意图'],
+    ['generate', '生成 SQL'],
+    ['execute', '只读执行'],
+    ['finalize', '组织结论'],
+  ];
+  thread.insertAdjacentHTML(
+    'beforeend',
+    `<article class="turn-card is-streaming" data-live-turn="true">
+      <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(question)}</div></div>
+      <div class="turn-answer">
+        <div class="turn-label assistant-label">AI</div>
+        <div class="assistant-content">
+          <div class="stream-head">
+            <span class="stream-pulse"></span>
+            <strong class="stream-title">正在分析</strong>
+            <span class="stream-detail">准备检索 Schema</span>
+          </div>
+          <div class="stream-stage-list" aria-live="polite">
+            ${stages
+              .map(
+                ([stage, label], index) =>
+                  `<span class="stream-stage" data-stage="${stage}"><i>${index + 1}</i><span>${label}</span></span>`,
+              )
+              .join('')}
+          </div>
+        </div>
+      </div>
+    </article>`,
+  );
+  state.activeQueryCard = thread.querySelector(
+    '.turn-card[data-live-turn="true"]:last-of-type',
+  );
+  scrollThreadToLatest();
+  return state.activeQueryCard;
+}
+
+function updateStreamStage(card, data = {}) {
+  if (!card || !card.isConnected) return;
+  const detail = card.querySelector('.stream-detail');
+  if (detail && data.message) detail.textContent = data.message;
+  const stages = [...card.querySelectorAll('.stream-stage')];
+  const order = ['retrieve', 'plan', 'generate', 'execute', 'finalize'];
+  if (data.stage === 'repair') {
+    detail?.classList.add('is-warning');
+    const execute = card.querySelector('.stream-stage[data-stage="execute"]');
+    execute?.classList.add('is-retrying');
+    return;
+  }
+  const index = order.indexOf(data.stage);
+  if (index < 0) return;
+  stages.forEach((item, itemIndex) => {
+    item.classList.toggle('is-current', itemIndex === index);
+    item.classList.toggle('is-done', itemIndex < index);
+    if (itemIndex === index) item.classList.remove('is-retrying');
+  });
+  const title = card.querySelector('.stream-title');
+  if (title) title.textContent = index === order.length - 1 ? '正在整理回答' : '正在分析';
+  scrollThreadToLatest();
+}
+
+function renderResult(result, options = {}) {
   state.lastResult = result;
   const cols = result.columns || [];
   const rows = result.rows || [];
@@ -211,17 +278,44 @@ function renderResult(result) {
     </table></div>`
     : '<p class="muted">没有匹配数据。</p>';
   const attempts = result.attempts || [];
+  const body = renderResultBody(
+    result,
+    cols,
+    rows,
+    firstDimension,
+    numericCol,
+    max,
+    attempts,
+    bars,
+    table,
+  );
   const thread = $('#conversation-thread');
+  if (!thread) return;
   if (thread.querySelector('.conversation-empty')) thread.innerHTML = '';
-  thread.insertAdjacentHTML(
-    'beforeend',
-    `
-    <article class="turn-card">
+  const liveCard =
+    options.card ||
+    (!options.append && state.activeQueryCard && state.activeQueryCard.isConnected
+      ? state.activeQueryCard
+      : null);
+  if (liveCard) {
+    liveCard.classList.remove('is-streaming');
+    liveCard.removeAttribute('data-live-turn');
+    liveCard.innerHTML = `
       <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(result.question)}</div></div>
       <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span></div>
-      ${renderResultBody(result, cols, rows, firstDimension, numericCol, max, attempts, bars, table)}
-    </article>`,
-  );
+      ${body}`;
+    state.activeQueryCard = null;
+  } else {
+    thread.insertAdjacentHTML(
+      'beforeend',
+      `
+      <article class="turn-card">
+        <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(result.question)}</div></div>
+        <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span></div>
+        ${body}
+      </article>`,
+    );
+  }
   renderEvidence(result);
 }
 function setTurnNarrative(card, text, trailing = false) {
@@ -362,16 +456,26 @@ function renderEmptyConversation() {
 }
 function scrollThreadToLatest() {
   const thread = $('#conversation-thread');
-  requestAnimationFrame(() =>
-    thread?.lastElementChild?.scrollIntoView({
-      block: 'nearest',
-      behavior: 'smooth',
-    }),
-  );
+  if (!thread) return;
+  requestAnimationFrame(() => {
+    thread.scrollTop = thread.scrollHeight;
+  });
+}
+
+function scrollNarrativeIntoView(card) {
+  const thread = $('#conversation-thread');
+  const box = card?.querySelector('.result-answer');
+  if (!thread || !box) return;
+  requestAnimationFrame(() => {
+    const threadRect = thread.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    thread.scrollTop += boxRect.top - threadRect.top - 12;
+  });
 }
 function renderSessionThread(session, options = {}) {
   const thread = $('#conversation-thread');
   if (!thread) return;
+  state.activeQueryCard = null;
   state.session = session;
   if (session?.id) {
     const summary = {
@@ -392,9 +496,9 @@ function renderSessionThread(session, options = {}) {
   if (session?.turns?.length) {
     thread.innerHTML = '';
     session.turns.forEach((turn) => {
-      const result = turn.result || {};
+      const result = { ...(turn.result || {}) };
       result.question = turn.question;
-      renderResult(result);
+      renderResult(result, { append: true });
     });
     state.lastResult = session.turns[session.turns.length - 1]?.result || null;
     if (options.scrollToLatest) scrollThreadToLatest();
@@ -480,6 +584,7 @@ function parseSseFrame(frame) {
 }
 
 async function streamQuery(question, sessionId) {
+  const card = state.activeQueryCard;
   const response = await fetch('/api/query/stream', {
     method: 'POST',
     headers: {
@@ -497,7 +602,6 @@ async function streamQuery(question, sessionId) {
   const decoder = new TextDecoder();
   let buffer = '';
   let result = null;
-  let card = null;
   let narrative = '';
   while (true) {
     const { value, done } = await reader.read();
@@ -510,19 +614,19 @@ async function streamQuery(question, sessionId) {
       const parsed = parseSseFrame(frame);
       if (parsed) {
         const { event, data } = parsed;
-        if (event === 'result') {
-          $('#thinking-card')?.remove();
+        if (event === 'start' || event === 'status') {
+          updateStreamStage(card, data);
+        } else if (event === 'result') {
           result = data.result;
           result.session_id = data.session_id;
-          renderResult(result);
-          card = $('#conversation-thread .turn-card:last-of-type');
+          renderResult(result, { card });
           narrative = '';
           setTurnNarrative(card, '', true);
-          scrollThreadToLatest();
+          scrollNarrativeIntoView(card);
         } else if (event === 'delta') {
           narrative += data.delta || '';
           setTurnNarrative(card, narrative, true);
-          scrollThreadToLatest();
+          scrollNarrativeIntoView(card);
         } else if (event === 'reset') {
           narrative = data.text || '';
           setTurnNarrative(card, narrative, true);
@@ -540,6 +644,7 @@ async function streamQuery(question, sessionId) {
           narrative = result.answer;
           setTurnNarrative(card, narrative, false);
           setNarrativeTag(card, result.narrative);
+          scrollNarrativeIntoView(card);
         } else if (event === 'done') {
           if (data.session) state.session = data.session;
           if (result) {
@@ -550,6 +655,7 @@ async function streamQuery(question, sessionId) {
           if (turnMeta && result) {
             turnMeta.innerHTML = `<span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span>`;
           }
+          card?.classList.remove('is-streaming');
         } else if (event === 'error') {
           throw new Error(data.message || '流式查询失败');
         }
@@ -575,13 +681,7 @@ async function submitQuery(question) {
   const button = $('#submit-btn');
   button.disabled = true;
   button.querySelector('span').textContent = '分析中…';
-  const thread = $('#conversation-thread');
-  thread.querySelector('.conversation-empty')?.remove();
-  thread.insertAdjacentHTML(
-    'beforeend',
-    '<div id="thinking-card" class="thinking-card"><span class="thinking-dot"></span><span>正在检索 Schema、生成 SQL 并执行安全校验</span></div>',
-  );
-  scrollThreadToLatest();
+  renderPendingTurn(question);
   try {
     let sessionId = state.session?.id || null;
     if (!sessionId) {
@@ -600,7 +700,6 @@ async function submitQuery(question) {
       ];
     }
     const result = await streamQuery(question, sessionId);
-    $('#thinking-card')?.remove();
     if (state.session) {
       const latest = state.session.turns?.[state.session.turns.length - 1];
       if (latest) {
@@ -611,7 +710,7 @@ async function submitQuery(question) {
     $('#question').value = '';
     toast(`分析完成 · ${result.elapsed_ms} ms`);
   } catch (error) {
-    $('#thinking-card')?.remove();
+    state.activeQueryCard = null;
     toast(error.message);
     if (state.session)
       renderSessionThread(state.session, { scrollToLatest: true });

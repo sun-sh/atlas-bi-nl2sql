@@ -27,7 +27,7 @@ from app.nl2sql.result_insight import (
 from app.nl2sql.seed import generate_database
 from app.nl2sql.session_store import append_turn, create_session, delete_session, get_session, list_sessions
 from app.nl2sql.settings import get_settings
-from app.nl2sql.workflow import get_retriever, run_query
+from app.nl2sql.workflow import get_retriever, query_stream_events, run_query
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -122,7 +122,7 @@ def health() -> dict:
         "llm_active": model.enabled and model.active,
         "model": model.public(),
         "max_repair_attempts": settings.max_repair_attempts,
-        "streaming": {"query": True, "narrative": True},
+        "streaming": {"query": True, "stages": True, "narrative": True},
     }
 
 
@@ -187,8 +187,55 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+STREAM_STAGE_LABELS = {
+    "retrieve": "正在召回相关 Schema",
+    "plan": "正在解析分析意图",
+    "generate": "正在生成 SQL",
+    "execute": "正在执行只读查询",
+    "repair": "正在修复 SQL 并重试",
+    "finalize": "正在校验结果并组织回答",
+}
+
+
+def _stream_stage(node: str, state: dict) -> dict:
+    payload = {
+        "stage": node,
+        "message": STREAM_STAGE_LABELS.get(node, "正在分析"),
+    }
+    if node == "plan" and state.get("plan") is not None:
+        plan = state["plan"]
+        payload["time_range"] = plan.time_range
+    if node in {"retrieve", "plan"} and state.get("hits"):
+        payload["schema_count"] = len(state["hits"])
+    if node in {"generate", "repair"} and state.get("mode"):
+        payload["sql_mode"] = state["mode"]
+    if node == "execute":
+        attempts = state.get("attempts") or []
+        if attempts:
+            payload["attempt"] = attempts[-1].get("attempt")
+            payload["attempt_status"] = attempts[-1].get("status")
+            if attempts[-1].get("status") == "failed" and attempts[-1].get("error"):
+                payload["error"] = attempts[-1]["error"]
+    return payload
+
+
 def _stream_turn(question: str, session_id: str | None, context: dict) -> Iterator[str]:
-    result = run_query(question, context=context, narrate=False)
+    yield _sse("start", {"session_id": session_id, "message": "正在分析问题"})
+    result = None
+    for event in query_stream_events(
+        question,
+        context=context,
+        narrate=False,
+    ):
+        if event.get("type") == "stage":
+            yield _sse(
+                "status",
+                _stream_stage(event["node"], event.get("state") or {}),
+            )
+        elif event.get("type") == "result":
+            result = event["result"]
+    if result is None:
+        raise RuntimeError("查询工作流未返回结果")
     yield _sse("result", {"result": result.as_dict(), "session_id": session_id})
     digest = digest_from_result(result)
     narrative = None
