@@ -2,7 +2,7 @@
 
 **把自然语言经营问题转化为可执行、可审计、可复现的只读 SQL 查询。**
 
-Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商品、退款、投放和客户画像。平台将 Schema 召回、意图规划、SQL 生成、安全校验、只读执行、失败修复和结果解释纳入统一编排，并以检索证据、SQL 和 trace 将每次查询完整串联。模型负责理解问题、生成 SQL、基于错误自修复并解读确定性结果；SQL 结果、SQL 与证据不做模型二次改写。数据中台统一管理数据源接入、同步快照、资产目录、质量规则、指标口径、字段血缘、受控数据服务和操作审计；评测中台以数据集版本、实验和队列任务组织严格模型评测，保留进度、历史、取消重试、结果对比和 bad case 回流，模型未完成时直接判失败，不用规则补位。
+Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商品、退款、投放和客户画像。平台把 Schema 召回、意图规划、模型 SQL 生成、AST 安全校验、只读执行、有界自愈和结果解读串成一条可追踪链路，并以检索证据、SQL、尝试记录和 `trace_id` 还原每次查询。数据中台负责数据源接入、快照、质量、血缘、指标和审计；评测中台负责数据集版本、模型实验、队列任务、结果对比和 bad case 回流。严格评测不使用规则 SQL 或确定性摘要补位。
 
 [![CI](https://github.com/sun-sh/atlas-bi-nl2sql/actions/workflows/ci.yml/badge.svg)](https://github.com/sun-sh/atlas-bi-nl2sql/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
@@ -12,7 +12,7 @@ Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商�
 
 ![Atlas BI 分析会话：用户问题、模型回答和按需展开的数据依据](docs/images/atlas-stream-final.png)
 
-当前工作台界面（2026-10-27）：对话为主，历史会话与分析条件按需打开，SQL 和执行证据收在回答下方。截图展示已完成的会话，模型正确率以严格评测为准。
+当前工作台界面（截图更新于 2026-10-27）：对话为主，历史会话与分析条件按需打开，SQL 和执行证据收在回答下方。
 
 ## 业务定位
 
@@ -20,37 +20,62 @@ Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商�
 | --- | --- |
 | 使用对象 | 电商运营、商业分析、数据支持与业务管理团队 |
 | 分析域 | 销售额、品类、退款率、ROI、客单价、趋势与渠道结构 |
-| 数据中台 | 多源接入与同步、资产目录、字段血缘、质量规则、指标目录、受控数据服务和审计 |
-| 查询链路 | 双路 Schema 召回 → 意图规划 → SQL 生成 → AST 门禁 → 只读执行 → 有界修复 → 结果解释 |
-| 接入方式 | Web 工作台、FastAPI 查询接口、受控数据服务、OpenAPI 文档与 OpenAI 兼容模型网关 |
-| 评测运营 | 后台评测任务、运行进度、脱敏报告留存、历史任务与用例级结果对比 |
-| 会话能力 | 会话级短期记忆：最多 20 轮、7 天过期；显式条件优先，缺失条件按需继承 |
+| 查询链路 | 双路 Schema 召回 → 意图规划 → 模型 SQL 生成 → AST 门禁 → 只读执行 → 有界自愈 → 结果解读 |
+| 接入方式 | Web 工作台、FastAPI 查询接口、受控数据服务、OpenAPI 与 OpenAI 兼容模型网关 |
+| 数据治理 | SQLite/CSV 多源接入、快照、资产目录、质量规则、指标口径、字段血缘和审计 |
+| 评测运营 | 数据集版本、模型实验、优先级队列、取消重试、任务对比和 bad case 回流 |
+| 会话能力 | 最多 20 轮、7 天过期；显式条件优先，缺失条件按需继承 |
 
 ## 系统架构
 
-### 系统全景
+平台不是单一的聊天页面，而是三个可独立观察的控制面：NL2SQL Agent 负责一次查询，数据中台负责数据从哪里来、是否可信，评测中台负责模型改动有没有变好。三者共享 FastAPI 进程和本地 SQLite 存储，属于**可运行的项目级控制面**，不是拆分成微服务的企业生产平台。
 
 ```mermaid
 flowchart LR
     U[运营 / 商分用户] --> W[Web 分析工作台]
     W --> A[FastAPI API]
-    A --> G[LangGraph 查询编排]
-    G --> R[混合 Schema 召回]
+
+    subgraph Query[查询控制面]
+        G[LangGraph Agent]
+        R[混合 Schema 召回]
+        P[意图与筛选规划]
+        S[模型 SQL 生成 / 运行时回退]
+        V[SQL AST 安全门禁]
+        D[(只读业务库)]
+    end
+
+    subgraph Data[数据中台]
+        DS[SQLite / CSV 数据源]
+        SN[快照与资产目录]
+        QR[质量规则 / 指标 / 血缘]
+        DQ[受控只读数据服务]
+    end
+
+    subgraph Eval[评测中台]
+        EDT[版本化数据集]
+        EQ[SQLite 任务队列]
+        EX[模型实验 / Bad Case]
+        ER[脱敏报告 / 两次运行对比]
+    end
+
+    A --> G
+    G --> R --> P --> S --> V --> D
     R --> Q[(Qdrant + BGE)]
     R --> E[(BM25 / 本地 IDF)]
-    G --> P[意图与筛选规划]
-    P --> S[LLM SQL 生成 / 运行时回退]
     S <--> M[OpenAI 兼容模型网关]
-    S --> V[SQL AST 安全门禁]
-    V --> D[(只读数据库)]
-    D --> G
-    G --> T[结果 / 证据 / trace]
-    T --> W
+    D --> G --> T[结果 / 证据 / trace] --> W
+
+    A --> Data
+    DS --> SN --> QR --> DQ
+    A --> Eval
+    EDT --> EQ --> EX --> ER
+    DQ -.可信数据资源.-> Query
+    ER -.质量反馈.-> Query
 ```
 
-### Agent 编排架构
+### Agent 编排
 
-这里所说的 Agent 是一个**节点固定、工具固定、修复次数有上限**的 LangGraph 工作流，而不是可自主挑选工具或无限循环的开放 Agent。模型只参与 SQL 生成、SQL 修复和结果解读，所有 SQL 仍必须经过同一道 AST 安全门禁。
+这里的 Agent 是**节点固定、工具固定、修复预算固定**的 LangGraph 工作流，而不是可自主挑选工具或无限循环的开放多 Agent。模型只参与 SQL 生成、SQL 修复和基于可信摘要的结果解读；它不能改写已执行的行、SQL 或证据，也不能自行扩大循环预算。
 
 ```mermaid
 flowchart TD
@@ -68,7 +93,7 @@ flowchart TD
     SYNC --> SYNC_MEMORY[("可选：保存会话快照")]
     SYNC_MEMORY --> RESPONSE(["HTTP 响应"])
     MODE -->|"/api/query/stream"| RESULT["result 事件<br/>rows + SQL + evidence + digest"]
-    RESULT --> STREAM["模型原生 token 流<br/>stream_result_narrative"]
+    RESULT --> STREAM["模型原生 token 流"]
     STREAM -->|"成功"| NARRATIVE["narrative 事件<br/>最终文本 + mode"]
     STREAM -->|"失败 / 空响应"| FALLBACK["reset / 单次 digest<br/>确定性回退"]
     NARRATIVE --> DONE["done 事件<br/>trace + 可选会话快照"]
@@ -76,132 +101,170 @@ flowchart TD
     DONE --> SSE_END(["SSE 完成"])
 ```
 
-编排边界：
-
 | 维度 | 当前实现 |
 | --- | --- |
-| 控制方式 | LangGraph 固定 DAG；只有执行失败会进入 `execute → repair → execute` 的有界回路 |
+| 控制方式 | 固定节点 `retrieve → plan → generate → execute → finalize`；只有失败会进入 `execute → repair → execute` 的有界回路 |
 | 可用工具 | Schema 检索、模型网关、SQL AST 门禁、只读数据库、会话存储；模型不能自行新增工具 |
 | 模型职责 | 生成候选 SQL、结合错误修复 SQL、基于确定性摘要写分析结论；不改写结果行、SQL 或证据 |
+| 失败信号 | 首次空 SQL 重试一次；AST 校验/执行错误进入修复；全空聚合结果按失败处理；默认最多修复 2 次 |
+| 结果解读 | 空响应或截断按 `1800 → 3600` token 重试一次；生产链路失败回退确定性摘要，严格评测判失败 |
 | 记忆范围 | 会话级短期上下文；最多 20 轮、7 天过期，不保存跨会话用户画像 |
-| 停止条件 | SQL 成功，或校验/执行失败且修复额度耗尽；返回结果另受 `MAX_RESULT_ROWS` 截断边界约束 |
-| 可观测性 | `GraphState` 保存计划、Schema 命中、SQL、尝试记录、告警和 `trace_id` |
+| 严格评测 | `allow_rule_fallback=False`；规则 SQL 和摘要回退均不能算模型通过 |
 
 ## 核心能力
 
-| 模块 | 工程实现 | 价值 |
-| --- | --- | --- |
-| 混合召回 | BGE 语义向量与关键词召回融合；Qdrant 默认内存模式，Elasticsearch BM25 可选 | 兼顾自然语言近义表达与业务字段精确匹配 |
-| 查询规划 | 识别销售、品类、退款、投放和趋势意图，解析时间、地区、渠道、品类条件 | 将开放问题收敛为可验证的查询计划 |
-| SQL 生成 | 模型生成 SQL；运行时保留确定性规则作为可用性保底，严格评测禁止回退补位 | 同时兼顾真实模型能力与降级可用性 |
-| 安全执行 | sqlglot AST 校验、单条 SELECT、表/函数白名单、敏感字段拦截、只读连接、行数限制 | 在数据库执行前落实数据访问边界 |
-| 有界修复 | LangGraph 捕获执行错误，结合原 SQL 与 Schema 反馈给模型，默认最多 2 次 | 失败可追踪，修复成本可控 |
-| 模型网关 | 在线拉取模型、测试连接、保存服务端配置、密钥脱敏 | 模型接入与业务编排解耦 |
-| 结果解读 | 先返回 SQL 结果，再以 SSE 流式输出模型分析结论；运行时可回退确定性摘要，严格评测要求模型解读也成功 | 首屏快、运行稳，同时不把摘要回退算成模型能力 |
-| 可观测性 | 召回分数、执行 SQL、尝试记录、耗时、告警和 trace ID | 从问题到结果全过程可追问 |
-| 会话记忆 | 保存近期问题、结构化查询上下文和结果；追问显示实际继承项 | 支持连续分析，同时明确条件来源 |
-| 数据资产 | Schema 统一清单、主键与关联检查、覆盖范围、字段敏感级别和指标口径 | 查询前先确认数据是否可用、口径是否一致 |
-| 数据中台 | SQLite/CSV 多源接入、快照同步、字段血缘、质量规则、指标目录、受控数据服务、调度入口和审计 | 把数据接入、治理和服务串成可运行控制面 |
-| 评测中台 | 数据集版本、实验、任务队列、取消重试、脱敏报告、双运行差异和 bad case 回流 | 把模型评测变成可追踪、可比较、可复用的质量服务 |
-| 质量门禁 | 确定性数据、100 条 strict-model-v3-100 严格模型评测集、自动化测试与 CI | 每次变更均可回归验证 |
-
-## 安全与治理
-
-模型输出被视为不可信输入。规则、模型与修复生成的 SQL 都必须经过同一套门禁：只允许单条 `SELECT`；校验授权表和函数；拒绝 `SELECT *`；拦截敏感字段；使用只读数据库连接；限制结果集与修复次数。模型密钥只保存在服务端，读取接口不返回明文；模型调用或修复失败会进入响应告警和查询轨迹。
-
-详见 [SECURITY.md](SECURITY.md)。
+| 模块 | 工程实现 |
+| --- | --- |
+| Schema 召回 | BGE + Qdrant 语义检索与 Elasticsearch BM25 / 本地 IDF 双路召回，最终得分 `0.56 × semantic + 0.44 × lexical` |
+| SQL 安全 | sqlglot AST、单条 SELECT、表/函数白名单、拒绝 `SELECT *`、敏感字段拦截、只读连接和结果行数限制 |
+| 流式结果 | SSE 先推送可信 rows / SQL / evidence / digest，再流式生成模型结论；失败可 `reset` 为确定性摘要 |
+| 数据中台 | SQLite/CSV 多源注册、快照/ingest、资产目录、质量规则、指标口径、字段血缘、受控只读服务和审计 |
+| 评测中台 | 数据集版本、模型实验、优先级队列、取消/重试、1–3 个隔离进程、任务对比和 bad case 回流 |
+| 会话与追踪 | 20 轮 / 7 天短期上下文；每次查询保留 plan、召回证据、SQL、attempts、warnings 和 `trace_id` |
 
 ## 模型接入
 
-打开 `/models` 即可完成模型接入：配置 OpenAI 兼容 Base URL 与 API Key、在线拉取模型、运行连通性测试、保存并启用。配置写入被 Git 忽略的 `data/model_config.json`，读取接口仅返回脱敏状态。
+打开 `/models` 即可完成模型接入：配置 OpenAI 兼容 Base URL 与 API Key、在线拉取模型、运行连通性测试、保存并启用。配置写入被 Git 忽略的 `data/model_config.json`（可用 `ATLAS_MODEL_CONFIG_PATH` 覆盖）；读取接口只隐藏 API Key，会返回保存的 Base URL、模型名和 `api_key_configured`。
 
 | 接口 | 用途 |
 | --- | --- |
-| `GET /api/model/config` | 获取脱敏配置 |
-| `PUT /api/model/config` | 保存服务端配置 |
+| `GET /api/model/config` | 获取模型配置；API Key 不回显，Base URL 可见 |
+| `PUT /api/model/config` | 保存服务端配置；API Key 留空表示保留原值 |
 | `POST /api/model/models` | 拉取可用模型 |
 | `POST /api/model/test` | 验证端点、密钥与模型 |
 
 ![模型配置](docs/images/atlas-model-config.png)
 
-当前模型配置界面（2026-10-27）：已保存的 Key 不回显，留空保留；截图中的自定义服务地址已遮盖。
+模型配置界面（2026-10-27）：已保存的 Key 不回显，留空保留。截图用于展示交互，不包含真实密钥。
 
-## 可观测性与 API
+## 严格模型评测
 
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/health` | 数据库、检索后端、模型激活状态与修复配置 |
-| `GET /api/overview` | 经营总览指标 |
-| `POST /api/query` | 同步执行完整 NL2SQL 查询链路，返回结构化结果与最终分析结论 |
-| `POST /api/query/stream` | 先推送查询阶段状态，再返回 SQL 结果和模型分析文本流 |
-| `GET/POST /api/sessions` | 列出或创建分析会话 |
-| `GET/DELETE /api/sessions/{id}` | 恢复或删除会话 |
-| `GET /api/evaluation` | 运行黄金评测集 |
-| `GET /docs` | OpenAPI 交互文档 |
+`strict-model-v3-100` 使用固定的 100 条用例和最多 111 个查询轮次，覆盖时间窗口、地区、渠道、品类、销售额、销量、退款、ROI、趋势、组合筛选和 11 条两轮连续追问。每条用例用评测器中独立维护的只读基准 SQL 核对行数、维度集合、数值、排序和业务别名；评测固定 `allow_rule_fallback=False`，模型 SQL 或结果解读失败时不能用规则结果补位。
 
-同步响应包含 `mode`、`plan`、`retrieval`、`sql`、`rows`、`attempts`、`elapsed_ms`、`warnings`、`trace_id`、`narrative` 和 `answer`；`answer` 是最终结论文本，`narrative.mode` 标识 `model` / `digest`。流式接口的 `result` 事件先携带完整结构化结果与首屏确定性摘要，最终结论在后续 `narrative` 事件的 `text` 字段中返回。会话查询还返回 `session_id` 与更新后的会话快照；`plan.inherited` 明确列出本轮继承的时间、指标或筛选条件。
+| 同一套件阶段 | 通过 | SQL 执行率 | 模型完成率 | 平均耗时 |
+| --- | ---: | ---: | ---: | ---: |
+| 首轮 | **79/100** | 100% | 88% | 32,545.6 ms |
+| 修正后再评测 | **100/100** | 100% | 100% | 31,846.3 ms |
 
-### 流式分析
+首轮 21 条失败包含 **12 条模型解读问题**和 **9 条结果口径问题**。修正 SQL 指令、业务口径、空 SQL / 全空聚合 / 解读重试与验收逻辑后，同套件完整复跑达到 100/100：修复 21 条，回归 0 条。这里的 21 条不能全部归因于运行时自愈；准确说法是**评测发现 → 修正约束和重试逻辑 → 独立验收再评测**的工程自愈闭环。
 
-`POST /api/query/stream` 使用 Server-Sent Events (SSE)。标准事件顺序为：
+最终轮实际运行时 SQL 自愈触发 **2/2 成功**，首轮记录为 **1/1**。最终结果由 3 个隔离模型进程完成，使用 `deepseek/deepseek-v4.1-flash`；报告保留运行时、源码校验和与评测契约，属于带日期的在线能力快照，不是每次 CI 都能复现的固定分数。
 
-```text
-start → status* → result → [thinking] → (delta* | reset?) → narrative → done
-```
+该套件主要是由时间、地区、渠道、品类矩阵展开的**模板化回归集**，用于验证固定业务域内的链路稳定性，不等同于开放域真实问题的泛化评测。
 
-- `start`：已接收问题，在聊天区创建本轮回复。
-- `status`：召回、规划、SQL 生成、执行、修复和整理结果的阶段状态；在对应节点开始时发送。
-- `result`：SQL 已执行完成，包含完整结果、SQL、证据和首屏确定性摘要；在同一条 AI 回复中展示，明细和 SQL 按需展开。
-- `thinking`：可选，模型正在组织答案。
-- `delta`：追加模型原生流式内容；模型未启用时，确定性摘要作为单个 `delta` 推送。
-- `reset`：模型流中途失败时，用确定性摘要替换已收到的草稿。
-- `narrative`：最终结论文本及来源模式（`model` / `digest`），客户端应以该事件为准。
-- `done`：本轮完成；存在 `session_id` 时返回已持久化的会话快照。
+2026-11-03 另做了一次当前配置的实时抽查：100 条中 **99/100 通过**，`roi-channels` 首次 SQL 为空导致该次失败；单独复跑该用例时触发一次模型重试并通过。因此 README 将 **2026-10-27 的 100/100** 标为归档快照，而不是当前稳定承诺。报告：[首轮](docs/evaluations/evaluation-v3-100-initial-2026-10-27.json)、[最终轮](docs/evaluations/evaluation-v3-100-2026-10-27.json)。旧版 18 条与 6 条快照仅保留在 [评测文档](docs/EVALUATION.md) 的历史部分。
 
-```bash
-curl -N -X POST http://127.0.0.1:8000/api/query/stream \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: text/event-stream' \
-  -d '{"question":"上个月各渠道ROI","session_id":null}'
-```
+## 数据中台
 
-浏览器端使用 `fetch` + `ReadableStream` 读取 POST 响应。SQL 生成与执行期间推送阶段状态，结果解读使用模型原生文本流。用户上翻时暂停自动跟随，可点击“回到最新回答”继续查看。进入评测页面不会自动运行模型评测，需点击“提交评测任务”。
+数据中台把项目内可访问的 SQLite/CSV 源接入为可治理资产，核心控制面包括：
 
-## 数据域与数据中台
+- 数据源注册、`snapshot` / `ingest` 同步、工作区与 viewer / analyst / admin 函数级角色检查。
+- 快照、资产目录、38 条字段血缘、5 个指标和 6 条质量规则；默认巡检 6/6 通过。
+- 到期同步入口、只读数据服务、操作审计，以及独立的数据资产巡检页面。
+- 内置业务库包含 `orders`、`order_items`、`refunds`、`marketing_spend`、`customers` 五张表，覆盖 2025-10 至 2026-02。
 
-数据中台默认接入电商业务库，支持注册项目内可访问的 SQLite/CSV 数据源、快照同步、字段血缘、质量规则、指标目录、只读数据服务、到期同步和操作审计。内置确定性数据集覆盖 2025-10 至 2026-02，包含 `orders`、`order_items`、`refunds`、`marketing_spend` 和 `customers` 五张业务表，支持销售、品类、退款、投放效率、客单价和趋势分析。
-
-## 质量门禁
-
-```bash
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
-python -m app.evaluation.run
-```
-
-当前严格模型评测集为 **100 条 strict-model-v3-100 用例**，由时间窗口、地区、渠道、品类、销量、退款、ROI、趋势、交叉筛选和连续追问矩阵组成；每条用例用独立只读 SQL 基准核对行数、维度、数值和排序。评测要求模型生成 SQL 并完成结果解读，禁止规则 SQL 或确定性摘要补位。
-
-2026-10-27 使用当前配置模型完成的一次 **strict-model-v2 旧版 18 条评测**为 **5/18 通过**，命中率 **27.8%**，SQL 执行率 **55.6%**，模型完成率 **44.4%**，平均每条用例 **15.4 秒**。该结果用于定位自愈和模型问题，不能代表新增 100 条套件的成绩；完整脱敏结果见 [strict-model-v2 评测 JSON](docs/evaluations/evaluation-v2-2026-10-27.json)。
-
-2026-10-27 使用当前配置的 `deepseek/deepseek-v4.1-flash` 完成 strict-model-v3-100 在线评测：**100/100 通过，命中率 100.0%，SQL 执行率 100.0%，模型完成率 100.0%**；3 个隔离进程运行，90% 质量门槛通过。共 2 条用例触发模型自愈，均修复成功。完整脱敏结果见 [strict-model-v3-100 评测 JSON](docs/evaluations/evaluation-v3-100-2026-10-27.json)。
-
-完整的在线运行最多处理 111 个查询轮次，包含 11 条两轮追问链；每个查询轮次可能包含 SQL 生成、有限修复和结果解读请求。在评测页提交任务后会进入队列，单执行槽保证并发调用和额度消耗可控。页面会轮询进度；数据集版本、实验、历史任务、取消重试、两次运行的差异和 bad case 回流都可在控制面中查看。
-
-这些用例主要是由时间、地区、渠道、品类矩阵展开的**模板化回归集**，用于验证固定业务域内的链路稳定性，不等同于开放域真实问题的泛化评测。
+当前是可运行的项目级控制面：单工作区、默认本地管理员，不包含 SSO、多租户隔离、跨机房调度或生产数据集群。
 
 ![数据中台：数据源、资产目录、质量规则、指标、血缘和审计](docs/images/atlas-data-platform.png)
 
 数据中台控制面（2026-11-02）：数据源注册与同步、资产目录、质量规则、指标口径、字段血缘和审计记录。
 
+## 评测中台
+
+评测中台把一次模型运行保存为可追踪任务，而不是一次阻塞请求：
+
+- 数据集版本、实验假设、bad case 反馈和归档任务统一存入 SQLite。
+- 队列按优先级原子领取，单执行槽保证同时只运行一条评测；任务内部可启动 1–3 个隔离模型进程。
+- 支持运行进度、取消、重试、脱敏报告、逐用例结果和两次运行 compare。
+- 提交任务由 FastAPI `BackgroundTasks` 执行；也可以显式调用 claim worker。当前没有 Celery 类常驻分布式 worker，进程重启后排队记录仍在，但需要再次 claim 才能继续。
+
 ![评测中台：任务队列、数据集版本、实验和 bad case 回流](docs/images/atlas-evaluation-platform.png)
 
-评测中台（2026-11-02）：展示任务队列、数据集版本、模型实验、bad case 回流和双运行差异。
+评测中台（2026-11-02）：任务队列、数据集版本、模型实验、bad case 回流和双运行差异。
 
-详见 [docs/EVALUATION.md](docs/EVALUATION.md)。
+## 自愈机制
+
+模型输出是不可信输入。运行时的自愈不是无限重试，也不是规则替模型过评测：
+
+1. **生成阶段**：首次空 SQL 触发一次模型重试；Qwen 系列在 SQL 生成和结果解读时都关闭 thinking。
+2. **执行阶段**：SQL 校验错误、未知字段、语法/执行错误和全空聚合进入 `repair`，默认最多 2 次修复。
+3. **解读阶段**：空响应或截断按 `1800 → 3600` token 再试一次；生产链路仍失败则回退确定性摘要，严格评测判失败。
+4. **安全边界**：原始 SQL、修复 SQL 和规则 SQL 都经过同一道 AST 门禁；模型不能修改已执行的行、证据或 SQL。
+
+可修复的是有明确错误信号的 SQL；对于能执行但口径算错的问题，依赖业务约束、独立验收器或人工发现，不能宣称运行时自动纠正所有语义错误。
+
+## 流式分析
+
+`POST /api/query/stream` 使用 Server-Sent Events。标准事件顺序为：
+
+```text
+start  status*  result  [thinking]  (delta* | reset?)  narrative  done
+```
+
+- `start`：开始本轮回复。
+- `status`：推送召回、规划、SQL 生成、执行、修复和整理状态。
+- `result`：SQL 已执行完成，先返回可信 rows、SQL、evidence 和首屏确定性摘要。
+- `thinking` / `delta`：模型组织答案及原生增量文本。
+- `reset`：流中途失败时，用确定性摘要替换不完整草稿。
+- `narrative`：最终结论文本和 `model` / `digest` 来源。
+- `done`：本轮完成；有 `session_id` 时返回已持久化会话快照。
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/api/query/stream \
+  -H 'Content-Type: application/json' \
+    -H 'Accept: text/event-stream' \
+      -d '{"question":"上个月各渠道ROI","session_id":null}'
+      ```
+
+浏览器端使用 `fetch` + `ReadableStream` 读取 POST 响应。结果先进入同一条 AI 回复，SQL、明细和证据按需展开；模型文本再以 `delta` 增量追加。用户上翻时暂停自动跟随，可点击回到最新回答。
+
+## API 概览
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/health` | 数据库、检索后端、模型状态与修复配置 |
+| `GET /api/overview` | 经营总览指标 |
+| `POST /api/query` | 同步执行完整 NL2SQL 查询 |
+| `POST /api/query/stream` | SSE 流式查询与结果解读 |
+| `GET/POST /api/sessions` | 列出或创建会话 |
+| `GET/DELETE /api/sessions/{id}` | 恢复或删除会话 |
+| `GET /api/data-assets` | 固定业务域的数据资产巡检 |
+| `GET /api/data-platform` | 数据中台概览、质量、血缘和审计 |
+| `GET/POST /api/data-platform/sources` | 数据源列表与注册 |
+| `POST /api/data-platform/sources/{id}/sync` | 执行快照 / ingest 同步 |
+| `GET/POST /api/data-platform/metrics` | 指标目录 |
+| `GET/POST /api/data-platform/quality-rules` | 质量规则 |
+| `POST /api/data-platform/sources/{id}/quality` | 执行质量巡检 |
+| `GET /api/data-platform/data-service` | 受控只读数据服务 |
+| `POST /api/data-platform/scheduler/run` | 显式执行到期同步 |
+| `GET/POST /api/evaluation/datasets` | 评测数据集版本 |
+| `GET/POST /api/evaluation/experiments` | 评测实验 |
+| `GET/POST /api/evaluation/feedback` | bad case 回流 |
+| `GET/POST /api/evaluation/tasks` | 查看 / 提交队列任务 |
+| `GET /api/evaluation/tasks/{id}` | 任务进度与报告 |
+| `POST /api/evaluation/tasks/{id}/cancel` | 取消任务 |
+| `POST /api/evaluation/tasks/{id}/retry` | 重试已结束任务 |
+| `POST /api/evaluation/queue/claim` | 显式领取一个排队任务 |
+| `GET /api/evaluation/compare` | 对比两次运行 |
+| `GET /api/evaluation` | **同步兼容入口**：直接运行一次严格评测 |
+| `GET /docs` | OpenAPI 交互文档 |
+
+同步查询响应包含 `mode`、`plan`、`retrieval`、`sql`、`rows`、`attempts`、`elapsed_ms`、`warnings`、`trace_id`、`narrative` 和 `answer`；`narrative.mode` 标识 `model` / `digest`。会话查询额外返回 `session_id` 和更新后的快照，`plan.inherited` 明确列出继承条件。评测任务的正常入口是 `POST /api/evaluation/tasks`；`GET /api/evaluation` 会阻塞到同步评测结束，不适合作为页面或生产任务入口。
+
+## 工程验证
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+python -m app.evaluation.run
+node --check app/static/app.js
+```
+
+`pytest` 固定关闭在线模型和 BGE 下载，使用真实本地数据与受控模型响应验证 API、SQL 门禁、自愈边界、会话、数据中台和评测任务。当前报告为 **97 passed**；CI 在 Python 3.12 上运行测试，并在 `LLM_ENABLED=false` 下执行模型评测冒烟检查，不产生在线模型成绩。真实 `strict-model-v3-100` 结果需要模型密钥和在线 API，是带日期的能力快照，不作为每次 CI 的确定性分数。
 
 ## 快速启动
 
-要求 Python 3.10+，已在 Python 3.12 和 3.13 验证。
+要求 Python 3.10+；CI 在 Python 3.12 验证，当前开发环境为 Python 3.13。
 
 ```bash
 python -m pip install -r requirements.txt
@@ -243,18 +306,21 @@ Windows 可运行 `run.ps1`，macOS / Linux 可运行 `./run.sh`。
 | `ATLAS_SESSION_DB_PATH` | `data/sessions.db` | 短期会话存储路径 |
 | `ATLAS_EVALUATION_DB_PATH` | `data/evaluation_tasks.db` | 评测任务、数据集、实验和反馈存储路径 |
 | `ATLAS_DATA_PLATFORM_DB_PATH` | `data/data_platform.db` | 数据中台控制面元数据与审计存储路径 |
+| `ATLAS_PLATFORM_WAREHOUSE_DB_PATH` | `data/platform_warehouse.db` | 数据中台快照/ingest 的本地仓储路径 |
+| `ATLAS_MODEL_CONFIG_PATH` | `data/model_config.json` | 服务端模型配置；不会返回 API Key |
+| `ATLAS_DISABLE_MODEL` | `0` | 设为 `1` 时强制禁用模型，便于离线验证 |
 
 ## 项目目录
 
 ```text
 app/
-  api/              # FastAPI 接口、数据资产与任务 API
+  api/              # FastAPI 接口、数据中台与评测任务 API
   evaluation/       # 严格模型评测命令入口
-  nl2sql/           # Agent、数据资产、评测任务、检索与 SQL 执行
+  nl2sql/           # Agent、数据中台、评测任务、检索与 SQL 执行
   static/           # 工作台前端资源
 data/               # 本地数据库、会话与模型配置（不入库）
 docs/
-  images/           # 数据中台和评测中台截图
+  images/           # 工作台、数据中台和评测中台截图
   evaluations/      # 脱敏评测报告，包含首轮与最终结果
   EVALUATION.md     # 回归集、严格口径、数据集、实验与任务说明
   *.md              # 架构、运行、评测与体验说明
@@ -263,12 +329,12 @@ tests/              # 自动化测试
 
 ## 能力边界
 
-数据侧是**可运行的项目级数据中台**：支持 SQLite/CSV 多源接入、快照同步、资产目录、字段血缘、质量规则、指标目录、受控数据服务、调度入口和审计；默认是单工作区本地部署，通过工作区与角色接口预留多团队扩展，但不等同于已接入企业级 SSO、跨机房调度或生产数据集群。评测侧是**可运行的项目级评测中台**：支持数据集版本、实验、队列任务、取消重试、结果对比和 bad case 回流，不等同于跨组织标注平台或线上流量评测平台。
+数据侧是**可运行的项目级数据中台**：支持 SQLite/CSV 多源接入、快照同步、资产目录、字段血缘、质量规则、指标目录、受控数据服务、调度入口和审计；默认是单工作区本地部署，已提供工作区与角色检查，但不等同于已接入企业级 SSO、多租户认证或生产数据集群。评测侧是**可运行的项目级评测中台**：支持数据集版本、实验、队列任务、取消重试、结果对比和 bad case 回流，不等同于跨组织标注平台或线上流量评测平台。
 
 ## 工程文档
 
-- [架构设计](docs/ARCHITECTURE.md)：组件边界、查询时序、失败模型与扩展点。
-- [运行手册](docs/OPERATIONS.md)：启动、健康检查、模型接入、故障定位与部署检查。
+- [架构设计](docs/ARCHITECTURE.md)：组件边界、Agent 状态机、失败模型与扩展点。
+- [运行手册](docs/OPERATIONS.md)：启动、健康检查、模型接入、平台存储与故障定位。
 - [评测说明](docs/EVALUATION.md)：回归集、严格判分、数据集版本、实验、任务队列、bad case 回流与 CI 策略。
 - [安全策略](SECURITY.md)：SQL 门禁、密钥管理与报告流程。
 - [贡献指南](CONTRIBUTING.md)：开发流程、测试要求与提交检查。

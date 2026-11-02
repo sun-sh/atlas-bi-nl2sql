@@ -2,29 +2,33 @@
 
 ## Overview
 
-Atlas BI is an NL2SQL analytics platform built around four bounded concerns:
+Atlas BI has three runnable control planes plus bounded quality guardrails:
 
-1. **Interaction layer** - FastAPI routes, a static single-page workspace and a session-level analysis thread.
-2. **Reasoning layer** - schema retrieval, query planning, SQL generation and bounded repair orchestration.
-3. **Control layer** - AST validation, read-only execution, model configuration and runtime policy.
-4. **Quality layer** - deterministic fixtures, golden cases and CI gates.
+1. **Query control plane** - FastAPI routes, the analysis workspace, session context and the bounded LangGraph SQL agent.
+2. **Data platform** - SQLite/CSV source registration, snapshots, asset catalog, lineage, quality rules, metrics, read-only data service and audit.
+3. **Evaluation platform** - versioned datasets, experiments, a SQLite task queue, isolated model processes, run comparison and bad-case feedback.
+4. **Quality guardrails** - independent acceptance SQL, strict model mode, deterministic tests and CI gates.
 
 Session memory is deliberately bounded: SQLite-backed short-term state, at most 20 turns per session, expiring after 7 days. It stores structured query context, not a cross-session user profile.
 
 All rule-generated, model-generated and repaired SQL passes through the same validator before execution. Result narration runs only after a trusted SQL result exists: deterministic digest statistics constrain the prompt, and a model or streaming failure falls back to the same deterministic summary. The model may summarize trusted rows, but it never rewrites SQL, rows or evidence.
+
+On the model path, an empty first SQL response triggers one model retry. Validation or execution failures enter the bounded `repair` node; an all-empty aggregate result is also treated as a failure signal. Narration empty/truncated responses receive one retry at a larger token budget, after which production falls back to the deterministic digest while strict evaluation fails the case.
 
 ## Component diagram
 
 ```mermaid
 flowchart TB
     subgraph Presentation
-        UI[Workspace / Evidence / Evaluation / Models]
+        UI[Workspace / Evidence / Data Assets / Evaluation / Models]
     end
 
     subgraph API
         Routes[FastAPI Routes]
         Sessions[Session Store]
         Health[Health and Observability]
+        Tasks[Evaluation Queue API]
+        Platform[Data Platform API]
     end
 
     subgraph Orchestration
@@ -47,15 +51,28 @@ flowchart TB
         Gateway[Model Gateway]
     end
 
+    subgraph DataPlatform
+        Sources[SQLite / CSV Sources]
+        Snapshots[Snapshots and Asset Catalog]
+        Governance[Metrics / Lineage / Quality / Audit]
+    end
+
     subgraph Quality
         Fixtures[Seeded Dataset]
-        Golden[Golden Cases]
+        Golden[Strict Model Regression Cases]
         CI[GitHub Actions]
+        TaskStore[(Evaluation Task Store)]
     end
 
     UI --> Routes
     Routes --> Sessions
     Routes --> Graph
+    Routes --> Tasks
+    Routes --> Platform
+    Platform --> Sources
+    Sources --> Snapshots
+    Snapshots --> Governance
+    Tasks --> TaskStore
     Graph --> Fusion
     Fusion --> Semantic
     Fusion --> Lexical
@@ -160,7 +177,8 @@ The LangGraph state carries the question, retrieval question, trace ID, timer, s
 | Failure | Behavior | Visible outcome |
 | --- | --- | --- |
 | Model disabled or unavailable | Fall back to rule SQL | `mode=rule`, warning with reason when applicable |
-| Model returns empty content | Fall back to rule SQL | Warning records empty response |
+| Model returns empty content | Retry once with an explicit empty-SQL prompt; production can then fall back to rule SQL | Warning and generation-retry count recorded |
+| Aggregate result is entirely null | Treat as an execution failure and enter repair | Failed attempt and repair history preserved |
 | Generated SQL fails validation | Enter repair path | Failed attempt with normalized error |
 | Execution fails | Repair with error context | Attempt history preserved |
 | Repair budget exhausted | Finalize without a successful result | Warning and trace contain all attempts |
@@ -170,7 +188,7 @@ The LangGraph state carries the question, retrieval question, trace ID, timer, s
 
 ## Extension points
 
-- Add a table by updating the schema catalog, seed fixture and golden cases.
+- Add a table by updating the schema catalog, seed fixture and strict regression cases.
 - Add a model provider through an OpenAI-compatible endpoint; orchestration remains unchanged.
 - Add a database adapter behind the execution boundary while retaining the AST validator contract.
 - Add authorization context to the schema catalog and validator before connecting multiple tenants.

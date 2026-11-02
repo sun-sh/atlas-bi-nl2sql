@@ -173,7 +173,7 @@ def data_assets_overview() -> dict[str, Any]:
             "semantic_layer": {"source": "app/nl2sql/schema_catalog.py", "metrics": list(METRICS)},
             "boundary": {
                 "level": "project-level-data-asset-layer",
-                "description": "单数据源、固定业务域的可审计数据资产层；不包含多源接入、租户隔离或企业级调度。",
+                "description": "独立资产巡检入口；多源接入、快照与审计由 data_platform 控制面管理。仍不包含租户隔离或企业级调度。",
             },
         }
     finally:
