@@ -11,6 +11,18 @@ const state = {
   sessionOpenRequest: 0,
   activeQueryCard: null,
   threadPinned: true,
+  evalTasksData: null,
+  evalSelectedTask: null,
+  evalBaseline: null,
+  evalCandidate: null,
+  evalPollTimer: null,
+  dataPlatform: null,
+  platformTab: 'catalog',
+  evaluationTab: 'runs',
+  evalTasks: [],
+  datasets: [],
+  experiments: [],
+  feedback: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -340,7 +352,8 @@ function setPageHeading(view) {
     workspace: ['ATLAS / ANALYSIS', '今天想分析什么？', '直接问经营问题，回答会留在当前会话里；需要时再查看筛选条件和数据依据。'],
     overview: ['ATLAS / OVERVIEW', '经营总览', '演示数据覆盖 2025 年 10 月至 2026 年 2 月。需要了解指标变化，可在分析会话中继续提问。'],
     evidence: ['ATLAS / EVIDENCE', '每条结论，都能回到数据依据', '查看最近一次查询召回的业务表、融合分数、只读 SQL 与执行轨迹。'],
-    evaluation: ['ATLAS / EVALUATION', '用黄金问题验收模型链路', '每条用例都由真实模型生成 SQL、执行查询并解读结果；没有完成就如实判失败。'],
+    'data-assets': ['ATLAS / DATA PLATFORM', '先确认真实可用的数据与口径', '管理数据源、同步、资产目录、字段血缘、质量规则、指标口径、数据服务和审计。'],
+    evaluation: ['ATLAS / EVALUATION PLATFORM', '把模型评测变成可复用的质量服务', '以数据集版本、实验和队列任务组织严格模型评测，支持取消重试、结果对比和 bad case 回流。'],
     models: ['ATLAS / MODELS', '选择本次分析使用的模型', '连接 OpenAI 兼容接口；保存后，后续查询会自动使用当前生效模型。'],
   };
   const [eyebrow, title, subtitle] = headings[view] || headings.workspace;
@@ -869,6 +882,8 @@ function switchView(view) {
   );
   closeWorkspacePanels();
   if (view === 'models') loadModelConfig();
+  if (view === 'data-assets') loadDataAssets();
+  if (view === 'evaluation') loadEvaluationTasks();
   if (view === 'overview') loadOverview();
   if (view === 'workspace') loadSessions();
 }
@@ -883,6 +898,109 @@ function bindNavigation() {
   window.addEventListener('popstate', () => {
     switchView(window.location.pathname.replace(/^\/|\/$/g, '') || 'workspace');
   });
+}
+
+async function loadDataAssets() {
+  const container = $('#asset-table-list');
+  if (!container) return;
+  try {
+    const data = await api('/api/data-platform');
+    state.dataPlatform = data;
+    renderDataPlatform(data);
+    renderDataAssets(await api('/api/data-assets'));
+  } catch (error) {
+    toast(error.message);
+    container.innerHTML = `<p class="muted">数据中台读取失败：${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function platformTab(name) {
+  state.platformTab = name;
+  $$('#data-platform-tabs .platform-tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.platformTab === name));
+  $$('#view-data-assets .platform-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `platform-panel-${name}`));
+}
+
+function statusBadge(status) {
+  const map = { ready: ['已就绪', ''], registered: ['待同步', 'warn'], error: ['异常', 'fail'], running: ['运行中', 'pending'], queued: ['排队中', 'pending'], completed: ['已完成', ''], failed: ['失败', 'fail'], cancelled: ['已取消', 'cancel'] };
+  const [label, cls] = map[status] || [status || '未知', ''];
+  return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function renderDataPlatform(data) {
+  const summary = data.summary || {};
+  $('#asset-summary').innerHTML = [
+    metricCard('数据源', `${summary.source_count || 0} 个`, `${summary.ready_sources || 0} 个已同步 · 只读数据服务`, summary.source_count > 0),
+    metricCard('质量规则', `${summary.rule_count || 0} 条`, `${summary.last_quality ? `${summary.last_quality.passed} 通过 / ${summary.last_quality.failed} 失败` : '尚未运行巡检'}`),
+    metricCard('指标目录', `${summary.metric_count || 0} 个`, `${summary.published_metrics || 0} 个已发布`),
+    metricCard('字段血缘', `${summary.lineage_edges || 0} 条`, '源系统字段 → 平台资产字段'),
+  ].join('');
+  $('#source-count').textContent = `${(data.sources || []).length} 个`;
+  $('#source-table').innerHTML = (data.sources || []).map((source) => `<tr><td><strong>${escapeHtml(source.name)}</strong><div class="muted">${escapeHtml(source.kind)} · ${escapeHtml(source.location)}</div></td><td>${statusBadge(source.status)}<div class="muted">${escapeHtml(source.last_sync_at || '尚未同步')}</div></td><td>${fmtNum(source.row_count)} 行</td><td>${source.schedule_minutes ? `${source.schedule_minutes} 分钟` : '手动'}</td><td><button class="secondary-btn compact-btn" data-sync-source="${escapeHtml(source.id)}">同步</button></td></tr>`).join('');
+  $$('[data-sync-source]').forEach((btn) => btn.addEventListener('click', () => syncPlatformSource(btn.dataset.syncSource)));
+  $('#quality-rule-table').innerHTML = `<table class="eval-table"><thead><tr><th>规则</th><th>类型</th><th>对象</th><th>状态</th></tr></thead><tbody>${(data.rules || []).map((rule) => `<tr><td>${escapeHtml(rule.name)}</td><td><code>${escapeHtml(rule.rule_type)}</code></td><td>${escapeHtml(rule.table_name)}.${escapeHtml(rule.column_name || '')}</td><td>${rule.enabled ? '<span class="badge">启用</span>' : '<span class="badge cancel">停用</span>'}</td></tr>`).join('')}</tbody></table>`;
+  $('#quality-run-table').innerHTML = (data.quality_runs || []).length ? `<table class="eval-table"><thead><tr><th>时间</th><th>数据源</th><th>结果</th></tr></thead><tbody>${data.quality_runs.map((run) => `<tr><td>${escapeHtml(formatEvaluatedAt(run.started_at))}</td><td>${escapeHtml(run.source_id)}</td><td><span class="badge ${run.failed ? 'fail' : ''}">${run.passed} 通过 / ${run.failed} 失败</span></td></tr>`).join('')}</tbody></table>` : '<p class="muted">尚无巡检记录。</p>';
+  $('#metric-count').textContent = `${(data.metrics || []).length} 个`;
+  $('#metric-table').innerHTML = `<table class="eval-table"><thead><tr><th>指标</th><th>粒度</th><th>口径</th><th>负责人</th><th>状态</th></tr></thead><tbody>${(data.metrics || []).map((metric) => `<tr><td><strong>${escapeHtml(metric.name)}</strong></td><td>${escapeHtml(metric.grain)}</td><td>${escapeHtml(metric.definition)}</td><td>${escapeHtml(metric.owner || '—')}</td><td>${statusBadge(metric.status === 'published' ? 'ready' : metric.status === 'deprecated' ? 'cancelled' : 'queued')}</td></tr>`).join('')}</tbody></table>`;
+  $('#lineage-count').textContent = `${(data.lineage || []).length} 条`;
+  $('#lineage-table').innerHTML = (data.lineage || []).length ? `<table class="eval-table"><thead><tr><th>上游字段</th><th></th><th>平台资产字段</th><th>关系</th></tr></thead><tbody>${data.lineage.slice(0, 100).map((edge) => `<tr><td><code>${escapeHtml(edge.upstream_node)}</code></td><td class="muted">→</td><td><code>${escapeHtml(edge.downstream_node)}</code></td><td>${escapeHtml(edge.relation)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">同步数据源后生成字段级血缘。</p>';
+  $('#audit-list').innerHTML = (data.audit || []).map((item) => `<div class="audit-item"><strong>${escapeHtml(item.action)}</strong><small>${escapeHtml(item.actor)} · ${escapeHtml(formatEvaluatedAt(item.created_at))}</small><code>${escapeHtml(item.resource_type)} / ${escapeHtml(item.resource_id)}</code><small>${item.role}</small></div>`).join('');
+  $('#asset-boundary').innerHTML = `<strong>数据中台控制面</strong><span>多源接入、只读数据服务、字段血缘、质量规则、指标目录与操作审计。</span><small>当前工作区：${escapeHtml(data.workspace?.name || '默认')} · 数据服务角色：viewer</small>`;
+}
+
+async function syncPlatformSource(sourceId) {
+  try {
+    await api(`/api/data-platform/sources/${encodeURIComponent(sourceId)}/sync`, { method: 'POST' });
+    toast('数据源已同步');
+    await loadDataAssets();
+  } catch (error) { toast(`同步失败：${error.message}`); }
+}
+
+async function runPlatformQuality() {
+  try {
+    const data = await api('/api/data-platform/sources/ds_commerce/quality', { method: 'POST' });
+    toast(`质量巡检完成 · ${data.passed} 通过 / ${data.failed} 失败`);
+    await loadDataAssets();
+  } catch (error) { toast(error.message); }
+}
+
+async function runScheduler() {
+  try {
+    const data = await api('/api/data-platform/scheduler/run', { method: 'POST' });
+    toast(`到期同步完成 · ${data.count} 个数据源`);
+    await loadDataAssets();
+  } catch (error) { toast(error.message); }
+}
+
+function renderDataAssets(data) {
+  const summary = data.summary || {};
+  const quality = data.quality || {};
+  const health = summary.status === 'healthy';
+  $('#asset-summary').innerHTML = [
+    metricCard('资产健康度', health ? '通过' : '需检查', `${summary.passed_checks || 0}/${summary.check_count || 0} 项质量检查通过`, health),
+    metricCard('业务表', `${summary.table_count || 0} 张`, `${summary.column_count || 0} 个字段 · ${summary.total_rows || 0} 行`, false),
+    metricCard('关联关系', `${(data.relations || []).length} 条`, '外键语义与孤儿记录检查', false),
+    metricCard('指标口径', `${(data.semantic_layer?.metrics || []).length} 个`, '销售额 / 退款 / ROI / 客单价', false),
+  ].join('');
+  $('#asset-table-count').textContent = `${summary.table_count || 0} 张表`;
+  $('#asset-quality-status').textContent = health ? '全部通过' : `${summary.failed_checks || 0} 项失败`;
+  $('#asset-quality-status').className = `badge ${health ? '' : 'fail'}`;
+  $('#asset-table-list').innerHTML = (data.tables || []).map((table) => `
+    <details class="asset-table-card" ${table.name === 'orders' ? 'open' : ''}>
+      <summary>
+        <span><strong>${escapeHtml(table.label)}</strong><small>${escapeHtml(table.name)} · ${escapeHtml(table.grain)}</small></span>
+        <span class="asset-table-meta">${fmtNum(table.row_count)} 行 · ${table.column_count} 字段</span>
+      </summary>
+      <p>${escapeHtml(table.description)}</p>
+      <div class="asset-range">${table.date_range?.start ? `覆盖 ${escapeHtml(table.date_range.start)} 至 ${escapeHtml(table.date_range.end)}` : '无独立日期字段'}</div>
+      <div class="table-wrap"><table class="eval-table asset-column-table"><thead><tr><th>字段</th><th>类型</th><th>含义</th><th>敏感级别</th></tr></thead><tbody>${(table.columns || []).map((column) => `<tr><td><code>${escapeHtml(column.name)}</code></td><td>${escapeHtml(column.type)}</td><td>${escapeHtml(column.description)}</td><td>${column.sensitivity === 'restricted' ? '<span class="badge fail">受限</span>' : '<span class="badge">公开</span>'}</td></tr>`).join('')}</tbody></table></div>
+    </details>`).join('');
+  $('#asset-quality-list').innerHTML = (quality.checks || []).map((check) => `
+    <div class="asset-check ${check.passed ? 'pass' : 'fail'}"><span class="asset-check-icon">${check.passed ? '✓' : '!'}</span><span>${escapeHtml(check.label)}</span><strong>${check.passed ? '通过' : escapeHtml(check.value)}</strong></div>`).join('');
+  $('#asset-metric-list').innerHTML = (data.semantic_layer?.metrics || []).map((metric) => `
+    <div class="asset-metric"><strong>${escapeHtml(metric.name)}</strong><span>${escapeHtml(metric.grain)}</span><small>${escapeHtml(metric.definition)}</small></div>`).join('');
+  $('#asset-relation-count').textContent = `${(data.relations || []).length} 条`;
+  $('#asset-relation-table').innerHTML = `<table class="eval-table"><thead><tr><th>源表</th><th>关系</th><th>目标表</th><th>孤儿记录</th></tr></thead><tbody>${(data.relations || []).map((r) => `<tr><td><code>${escapeHtml(r.source)}.${escapeHtml(r.source_column)}</code></td><td>${escapeHtml(r.description)}</td><td><code>${escapeHtml(r.target)}.${escapeHtml(r.target_column)}</code></td><td><span class="badge ${r.orphan_count ? 'fail' : ''}">${r.orphan_count}</span></td></tr>`).join('')}</tbody></table>`;
+  $('#asset-boundary').innerHTML = `<strong>数据中台控制面</strong><span>数据源注册与快照、资产目录、质量规则、指标目录、字段血缘和审计。</span><small>巡检时间：${escapeHtml(formatEvaluatedAt(data.generated_at))}</small>`;
 }
 
 const EVAL_LABELS = {
@@ -913,83 +1031,294 @@ function evalModeLabel(item) {
   );
 }
 
-function renderEvaluation(data) {
-  const model = data.model || {};
-  const modelLabel = model.model
-    ? `${model.model}${model.active ? '' : ' · 未启用'}`
-    : '未配置模型';
+const EVAL_STATUS_LABELS = {
+  queued: '排队中',
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败',
+};
+
+function evalTaskStatusBadge(status) {
+  return `<span class="badge ${status === 'failed' ? 'fail' : status === 'running' || status === 'queued' ? 'pending' : ''}">${escapeHtml(EVAL_STATUS_LABELS[status] || status)}</span>`;
+}
+
+function renderEvaluationTaskList(data) {
+  const tasks = data.tasks || [];
+  state.evalTasks = tasks;
+  $('#eval-history-count').textContent = `${tasks.length} 个任务`;
+  $('#eval-task-list').innerHTML = tasks.length
+    ? tasks.map((task) => {
+      const selected = state.evalSelectedTask === task.id;
+      const progress = task.progress || {};
+      return `<button type="button" class="eval-task-item ${selected ? 'selected' : ''}" data-eval-task="${escapeHtml(task.id)}">
+        <span class="eval-task-main"><strong>${escapeHtml(task.label)}</strong><small>${escapeHtml(task.model_name || '未记录模型')} · ${escapeHtml(formatEvaluatedAt(task.created_at))}</small></span>
+        <span class="eval-task-side">${evalTaskStatusBadge(task.status)}<small>${task.status === 'running' ? `${progress.completed || 0}/${progress.total || 0}` : task.total ? `${task.passed}/${task.total} 通过` : '—'}</small></span>
+        ${task.status === 'running' ? `<span class="eval-progress"><i style="width:${progress.percent || 0}%"></i></span>` : ''}
+        ${task.status === 'queued' ? `<span class="eval-task-actions"><button type="button" class="secondary-btn compact-btn" data-eval-cancel="${escapeHtml(task.id)}">取消</button></span>` : ''}
+        ${['failed','cancelled','completed'].includes(task.status) ? `<span class="eval-task-actions"><button type="button" class="secondary-btn compact-btn" data-eval-retry="${escapeHtml(task.id)}">重试</button></span>` : ''}
+      </button>`;
+    }).join('')
+    : '<p class="muted">暂无评测任务。</p>';
+  $('#eval-task-list').querySelectorAll('[data-eval-task]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      if (event.target.closest('[data-eval-cancel], [data-eval-retry]')) return;
+      selectEvaluationTask(button.dataset.evalTask);
+    });
+  });
+  $('#eval-task-list').querySelectorAll('[data-eval-cancel]').forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); cancelEvaluation(button.dataset.evalCancel); }));
+  $('#eval-task-list').querySelectorAll('[data-eval-retry]').forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); retryEvaluation(button.dataset.evalRetry); }));
+  const completed = tasks.filter((task) => task.status === 'completed' && task.report);
+  const baseline = $('#eval-baseline');
+  const candidate = $('#eval-candidate');
+  if (baseline && candidate) {
+    const options = completed.map((task) => `<option value="${escapeHtml(task.id)}">${escapeHtml(task.label)}</option>`).join('');
+    baseline.innerHTML = options;
+    candidate.innerHTML = options;
+    if (completed.length >= 2) {
+      baseline.value = state.evalBaseline || completed[1].id;
+      candidate.value = state.evalCandidate || completed[0].id;
+      state.evalBaseline = baseline.value;
+      state.evalCandidate = candidate.value;
+    }
+  }
+}
+
+function renderEvaluationTaskSummary(task) {
+  if (!task) {
+    $('#eval-meta').innerHTML = '<span>执行方式 <strong>任务队列 · 单执行槽</strong></span><span>数据集 <strong>2025-10-01 至 2026-02-28</strong></span><span>状态 <strong>暂无任务</strong></span>';
+    $('#eval-count').textContent = '等待加载';
+    return;
+  }
+  const progress = task.progress || {};
   $('#eval-meta').innerHTML = `
-    <span>评测模式 <strong>严格模型链路</strong></span>
-    <span>模型 <strong>${escapeHtml(modelLabel)}</strong></span>
-    <span>数据集 <strong>${escapeHtml(data.dataset_range || '固定数据集')}</strong></span>
-    <span>结果时间 <strong>${escapeHtml(formatEvaluatedAt(data.evaluated_at))}</strong></span>`;
-  $('#eval-summary').innerHTML = [
-    metricCard(
-      '模型通过率',
-      `${data.hit_rate ?? 0}%`,
-      `${data.passed}/${data.total} 条模型结果通过`,
-      true,
-    ),
-    metricCard(
-      'SQL 执行率',
-      `${data.execution_rate ?? 0}%`,
-      `${(data.cases || []).filter((item) => item.executed).length}/${data.total} 条模型 SQL 成功执行`,
-    ),
-    metricCard(
-      '平均响应时间',
-      `${data.avg_elapsed_ms ?? 0} ms`,
-      '含检索、SQL、修复与解读；追问含前置轮次',
-    ),
-    metricCard(
-      '覆盖意图',
-      `${data.intents ?? 0} 类`,
-      '销售 / 品类 / 退款 / ROI / 趋势',
-    ),
-  ].join('');
-  $('#eval-count').textContent = data.available
-    ? `${data.passed}/${data.total} 通过`
-    : '尚未运行';
-  const rows = (data.cases || [])
-    .map((item) => {
-      const modelBadge = item.model_used
-        ? '<span class="badge">模型完成</span>'
-        : '<span class="badge fail">模型未完成</span>';
-      return `
-    <tr>
+    <span>任务 <strong>${escapeHtml(task.id)}</strong></span>
+    <span>模型 <strong>${escapeHtml(task.model_name || '未记录')}</strong></span>
+    <span>状态 <strong>${escapeHtml(EVAL_STATUS_LABELS[task.status] || task.status)}${task.status === 'running' ? ` · ${progress.completed || 0}/${progress.total || 0}` : ''}</strong></span>
+    <span>创建时间 <strong>${escapeHtml(formatEvaluatedAt(task.created_at))}</strong></span>`;
+  if (task.status === 'failed') {
+    $('#eval-summary').innerHTML = `<div class="panel evaluation-empty eval-failed"><strong>任务执行失败</strong><span>${escapeHtml(task.error || '未知错误')}</span></div>`;
+  } else if (task.status === 'queued' || task.status === 'running') {
+    $('#eval-summary').innerHTML = `<div class="panel evaluation-empty eval-running"><strong>${task.status === 'queued' ? '等待后台执行' : '严格模型评测运行中'}</strong><span>已完成 ${progress.completed || 0} / ${progress.total || 0} 条用例；页面每 3 秒刷新任务状态。</span><div class="eval-progress wide"><i style="width:${progress.percent || 0}%"></i></div></div>`;
+  } else {
+    const report = task.report || {};
+    const model = report.model || {};
+    $('#eval-summary').innerHTML = [
+      metricCard('模型通过率', `${task.hit_rate ?? 0}%`, `${task.passed}/${task.total} 条模型结果通过`, true),
+      metricCard('SQL 执行率', `${task.execution_rate ?? 0}%`, '严格模型链路，不使用规则补位'),
+      metricCard('平均响应时间', `${task.avg_elapsed_ms ?? 0} ms`, '含检索、SQL、修复与解读'),
+      metricCard('覆盖意图', `${report.intents ?? 0} 类`, `${escapeHtml(model.model || task.model_name || '模型')} · ${escapeHtml(report.suite_version || task.suite_version || '')}`),
+    ].join('');
+  }
+}
+
+async function cancelEvaluation(taskId) {
+  try { await api(`/api/evaluation/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' }); toast('已请求取消'); await loadEvaluationTasks(); }
+  catch (error) { toast(error.message); }
+}
+
+async function retryEvaluation(taskId) {
+  try { const task = await api(`/api/evaluation/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' }); toast('已加入重试队列'); state.evalSelectedTask = task.id; await loadEvaluationTasks(); }
+  catch (error) { toast(error.message); }
+}
+
+async function submitDataset(event) {
+  event.preventDefault();
+  const ids = $('#dataset-cases').value.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+  try {
+    await api('/api/evaluation/datasets', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: $('#dataset-name').value, version: $('#dataset-version').value, description: $('#dataset-description').value, case_ids: ids }) });
+    $('#dataset-message').textContent = '数据集版本已发布。';
+    await loadEvaluationTasks();
+  } catch (error) { $('#dataset-message').textContent = error.message; }
+}
+
+async function submitExperiment(event) {
+  event.preventDefault();
+  try {
+    await api('/api/evaluation/experiments', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: $('#experiment-name').value, dataset_id: $('#experiment-dataset').value, hypothesis: $('#experiment-hypothesis').value }) });
+    $('#experiment-message').textContent = '实验已创建。';
+    await loadEvaluationTasks();
+  } catch (error) { $('#experiment-message').textContent = error.message; }
+}
+
+async function submitFeedback(event) {
+  event.preventDefault();
+  try {
+    await api('/api/evaluation/feedback', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ task_id: $('#feedback-task').value, case_id: $('#feedback-case').value, category: $('#feedback-category').value, note: $('#feedback-note').value }) });
+    $('#feedback-message').textContent = '已加入 bad case 队列。';
+    await loadEvaluationTasks();
+  } catch (error) { $('#feedback-message').textContent = error.message; }
+}
+
+function renderEvaluationReport(task) {
+  const report = task?.report;
+  if (!report || !report.cases) {
+    $('#eval-count').textContent = task?.status === 'running' ? '运行中' : '暂无结果';
+    $('#eval-table').innerHTML = `<p class="muted">${task ? escapeHtml(EVAL_STATUS_LABELS[task.status] || task.status) + '，完成后在这里查看逐条结果。' : '选择一份评测任务后查看。'}</p>`;
+    return;
+  }
+  $('#eval-count').textContent = report.available ? `${report.passed}/${report.total} 通过` : '模型未就绪';
+  const rows = report.cases.map((item) => {
+    const modelBadge = item.model_used ? '<span class="badge">模型完成</span>' : '<span class="badge fail">模型未完成</span>';
+    return `<tr>
       <td>${item.setup_question ? `<div class="muted">前置：${escapeHtml(item.setup_question)}</div>` : ''}${escapeHtml(item.question)}</td>
       <td>${escapeHtml(EVAL_LABELS[item.intent] || item.intent)}</td>
       <td>${modelBadge}<div class="muted">${escapeHtml(evalModeLabel(item))}</div></td>
       <td><span class="badge ${item.hit ? '' : 'fail'}">${item.hit ? '通过' : '未通过'}</span></td>
       <td>${escapeHtml(item.attempts)} 次 / ${escapeHtml(item.elapsed_ms)} ms</td>
-      <td class="eval-result-cell">${
-        item.error
-          ? `<span class="eval-error">${escapeHtml(item.error)}</span>`
-          : '<span class="eval-pass">模型结果符合验收值</span>'
-      }</td>
+      <td class="eval-result-cell">${item.error ? `<span class="eval-error">${escapeHtml(item.error)}</span>` : '<span class="eval-pass">模型结果符合验收值</span>'}</td>
     </tr>`;
-    })
-    .join('');
-  $('#eval-table').innerHTML = rows
-    ? `<table class="eval-table"><thead><tr><th>黄金问题</th><th>意图</th><th>SQL 来源</th><th>模型验收</th><th>执行 / 耗时</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>`
-    : '<p class="muted">当前评测集没有返回用例。</p>';
+  }).join('');
+  $('#eval-table').innerHTML = `<table class="eval-table"><thead><tr><th>黄金问题</th><th>意图</th><th>SQL 来源</th><th>模型验收</th><th>执行 / 耗时</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-async function loadEvaluation() {
+async function selectEvaluationTask(taskId, options = {}) {
+  state.evalSelectedTask = taskId;
+  const task = await api(`/api/evaluation/tasks/${encodeURIComponent(taskId)}`);
+  renderEvaluationTaskSummary(task);
+  renderEvaluationReport(task);
+  if (!options.silent) renderEvaluationTaskList(state.evalTasksData || { tasks: [] });
+  return task;
+}
+
+async function submitSource(event) {
+  event.preventDefault();
+  const message = $('#source-message');
+  try {
+    await api('/api/data-platform/sources', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: $('#source-name').value, kind: $('#source-kind').value, location: $('#source-location').value, sync_mode: $('#source-kind').value === 'csv' ? 'ingest' : 'snapshot', sensitivity: $('#source-sensitivity').value, schedule_minutes: Number($('#source-schedule').value || 0) }),
+    });
+    message.textContent = '数据源已注册，可点击“同步”建立首批快照。';
+    $('#source-form').reset();
+    await loadDataAssets();
+  } catch (error) { message.textContent = error.message; }
+}
+
+async function submitQualityRule(event) {
+  event.preventDefault();
+  const message = $('#rule-message');
+  try {
+    await api('/api/data-platform/quality-rules', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ source_id: 'ds_commerce', name: $('#rule-name').value, rule_type: $('#rule-type').value, table_name: $('#rule-table').value, column_name: $('#rule-column').value, expression: $('#rule-expression').value }),
+    });
+    message.textContent = '质量规则已注册。';
+    $('#quality-rule-form').reset();
+    await loadDataAssets();
+  } catch (error) { message.textContent = error.message; }
+}
+
+async function submitMetric(event) {
+  event.preventDefault();
+  try {
+    await api('/api/data-platform/metrics', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: $('#metric-name').value, grain: $('#metric-grain').value, definition: $('#metric-definition').value, owner: $('#metric-owner').value, status: $('#metric-status').value }),
+    });
+    $('#metric-form').reset();
+    toast('指标口径已保存');
+    await loadDataAssets();
+  } catch (error) { toast(error.message); }
+}
+
+async function loadEvaluationTasks(options = {}) {
+  try {
+    const [data, datasets, experiments, feedback] = await Promise.all([
+      api('/api/evaluation/tasks'), api('/api/evaluation/datasets'),
+      api('/api/evaluation/experiments'), api('/api/evaluation/feedback'),
+    ]);
+    state.datasets = datasets.datasets || [];
+    state.experiments = experiments.experiments || [];
+    state.feedback = feedback.feedback || [];
+    renderEvaluationPlatform(data);
+    state.evalTasksData = data;
+    renderEvaluationTaskList(data);
+    const active = data.active;
+    const preferred = active?.id || state.evalSelectedTask || data.tasks?.[0]?.id;
+    if (preferred) {
+      await selectEvaluationTask(preferred, { silent: true });
+    } else {
+      renderEvaluationTaskSummary(null);
+      renderEvaluationReport(null);
+    }
+    const button = $('#run-eval-btn');
+    if (button) {
+      button.disabled = Boolean(active);
+      button.textContent = active ? '评测运行中…' : '提交评测任务';
+    }
+    if (active || state.evalPollTimer) {
+      if (state.evalPollTimer) clearTimeout(state.evalPollTimer);
+      if (active) state.evalPollTimer = setTimeout(() => loadEvaluationTasks({ polled: true }), 3000);
+    }
+    if (!options.polled && !data.tasks?.length) toast('暂无评测历史任务');
+  } catch (error) {
+    toast(error.message);
+    $('#eval-table').innerHTML = `<p class="muted">评测任务读取失败：${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function runEvaluation() {
   const button = $('#run-eval-btn');
   if (button.disabled) return;
   button.disabled = true;
-  button.textContent = '运行中…';
+  button.textContent = '正在入队…';
   try {
-    const data = await api('/api/evaluation');
-    renderEvaluation(data);
-    toast(data.available ? `模型评测完成 · ${data.passed}/${data.total} 通过` : "模型未启用，无法运行模型评测");
+    const task = await api('/api/evaluation/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workers: 3, dataset_id: $('#eval-dataset')?.value || 'dataset_v3_100' }),
+    });
+    state.evalSelectedTask = task.id;
+    toast('评测任务已创建，后台运行中');
+    await loadEvaluationTasks();
   } catch (error) {
     toast(error.message);
-    $('#eval-table').innerHTML =
-      `<p class="muted">评测加载失败：${escapeHtml(error.message)}</p>`;
-  } finally {
     button.disabled = false;
-    button.textContent = '重新运行评测';
+    button.textContent = '提交评测任务';
+  }
+}
+
+function evaluationTab(name) {
+  state.evaluationTab = name;
+  $$('#eval-platform-tabs .platform-tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.evalTab === name));
+  $$('#view-evaluation .platform-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `eval-panel-${name}`));
+}
+
+function renderEvaluationPlatform(data) {
+  const datasets = state.datasets || [];
+  const experiments = state.experiments || [];
+  const feedback = state.feedback || [];
+  $('#dataset-count').textContent = `${datasets.length} 个版本`;
+  $('#dataset-table').innerHTML = datasets.length ? `<table class="eval-table"><thead><tr><th>数据集</th><th>版本</th><th>用例数</th><th>状态</th></tr></thead><tbody>${datasets.map((item) => `<tr><td>${escapeHtml(item.name)}<div class="muted">${escapeHtml(item.description || '')}</div></td><td><code>${escapeHtml(item.version)}</code></td><td>${item.case_count}</td><td>${statusBadge(item.status === 'published' ? 'ready' : 'cancelled')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无数据集版本。</p>';
+  $('#experiment-dataset').innerHTML = datasets.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(item.version)}</option>`).join('');
+  $('#experiment-count').textContent = `${experiments.length} 个实验`;
+  $('#experiment-list').innerHTML = experiments.length ? experiments.map((exp) => `<div class="experiment-card"><strong>${escapeHtml(exp.name)}</strong><p>${escapeHtml(exp.hypothesis || '暂无实验假设')}</p><small>${escapeHtml(exp.dataset_id)} · ${escapeHtml(formatEvaluatedAt(exp.created_at))}</small><div class="experiment-runs">${(exp.tasks || []).map((task) => `<span>${escapeHtml(task.model_name || '待运行')} · ${task.hit_rate}%</span>`).join('') || '<span>尚未关联评测任务</span>'}</div></div>`).join('') : '<p class="muted">暂无实验记录。</p>';
+  $('#feedback-count').textContent = `${feedback.length} 条`;
+  $('#feedback-table').innerHTML = feedback.length ? `<table class="eval-table"><thead><tr><th>用例</th><th>任务</th><th>分类</th><th>状态</th></tr></thead><tbody>${feedback.map((item) => `<tr><td>${escapeHtml(item.case_id)}<div class="muted">${escapeHtml(item.note || '')}</div></td><td><code>${escapeHtml(item.task_id)}</code></td><td>${escapeHtml(item.category)}</td><td>${statusBadge(item.status === 'open' ? 'queued' : 'ready')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无 bad case。</p>';
+  const activeTask = data.active;
+  const selected = state.evalSelectedTask;
+  const runSelect = $('#eval-dataset');
+  if (runSelect) {
+    const current = runSelect.value;
+    runSelect.innerHTML = datasets.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(item.version)}（${item.case_count} 条）</option>`).join('');
+    if (current) runSelect.value = current;
+  }
+}
+
+async function compareEvaluationTasks() {
+  const baseline = $('#eval-baseline')?.value;
+  const candidate = $('#eval-candidate')?.value;
+  if (!baseline || !candidate) return toast('至少需要两份已完成评测任务');
+  if (baseline === candidate) return toast('请选择两份不同任务');
+  try {
+    const data = await api(`/api/evaluation/compare?baseline=${encodeURIComponent(baseline)}&candidate=${encodeURIComponent(candidate)}`);
+    const results = [];
+    if (data.fixed?.length) results.push(`<div class="eval-diff-group fixed"><strong>新增修复 ${data.fixed.length}</strong>${data.fixed.map((item) => `<span>${escapeHtml(item.question)}</span>`).join('')}</div>`);
+    if (data.regressed?.length) results.push(`<div class="eval-diff-group regressed"><strong>新增回归 ${data.regressed.length}</strong>${data.regressed.map((item) => `<span>${escapeHtml(item.question)}</span>`).join('')}</div>`);
+    if (!results.length) results.push('<p class="muted">两份任务的逐用例通过状态没有变化。</p>');
+    $('#eval-compare-result').innerHTML = `<div class="eval-compare-metrics"><span>通过数 <strong>${data.delta.passed >= 0 ? '+' : ''}${data.delta.passed}</strong></span><span>通过率 <strong>${data.delta.hit_rate >= 0 ? '+' : ''}${data.delta.hit_rate}%</strong></span><span>执行率 <strong>${data.delta.execution_rate >= 0 ? '+' : ''}${data.delta.execution_rate}%</strong></span><span>平均耗时 <strong>${data.delta.avg_elapsed_ms >= 0 ? '+' : ''}${data.delta.avg_elapsed_ms} ms</strong></span></div>${results.join('')}`;
+  } catch (error) {
+    toast(error.message);
   }
 }
 
@@ -1218,10 +1547,26 @@ function init() {
     if (active === 'overview') loadOverview();
     if (active === 'workspace') loadSessions();
     if (active === 'models') loadModelConfig();
+    if (active === 'data-assets') loadDataAssets();
+    if (active === 'evaluation') loadEvaluationTasks();
     loadHealth();
     toast('已刷新当前页面');
   });
-  $('#run-eval-btn').addEventListener('click', loadEvaluation);
+  $('#assets-refresh-btn')?.addEventListener('click', loadDataAssets);
+  $('#scheduler-run-btn')?.addEventListener('click', runScheduler);
+  $('#quality-run-btn')?.addEventListener('click', runPlatformQuality);
+  $$('#data-platform-tabs .platform-tab').forEach((tab) => tab.addEventListener('click', () => platformTab(tab.dataset.platformTab)));
+  $$('#eval-platform-tabs .platform-tab').forEach((tab) => tab.addEventListener('click', () => evaluationTab(tab.dataset.evalTab)));
+  $('#source-form')?.addEventListener('submit', submitSource);
+  $('#quality-rule-form')?.addEventListener('submit', submitQualityRule);
+  $('#metric-form')?.addEventListener('submit', submitMetric);
+  $('#dataset-form')?.addEventListener('submit', submitDataset);
+  $('#experiment-form')?.addEventListener('submit', submitExperiment);
+  $('#feedback-form')?.addEventListener('submit', submitFeedback);
+  $('#run-eval-btn').addEventListener('click', runEvaluation);
+  $('#compare-eval-btn')?.addEventListener('click', compareEvaluationTasks);
+  $('#eval-baseline')?.addEventListener('change', () => { state.evalBaseline = $('#eval-baseline').value; });
+  $('#eval-candidate')?.addEventListener('change', () => { state.evalCandidate = $('#eval-candidate').value; });
   $('#model-provider')?.addEventListener('change', () => {
     const baseUrl = MODEL_BASE_URLS[$('#model-provider').value];
     if (baseUrl) $('#model-base-url').value = baseUrl;

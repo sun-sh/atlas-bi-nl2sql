@@ -3,12 +3,52 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.nl2sql.analytics import overview_metrics
+from app.nl2sql.data_assets import data_assets_overview
+from app.nl2sql.data_platform import (
+    DEFAULT_WORKSPACE,
+    DataPlatformError,
+    PermissionDenied,
+    create_metric,
+    create_quality_rule,
+    create_workspace,
+    data_service_query,
+    dispatch_due_syncs,
+    ensure_data_platform,
+    list_data_sources,
+    list_metrics,
+    list_quality_rules,
+    list_workspaces,
+    platform_overview,
+    register_data_source,
+    run_quality,
+    sync_data_source,
+)
+from app.nl2sql.evaluation_tasks import (
+    ActiveEvaluationTaskError,
+    DatasetNotFound,
+    ModelUnavailableError,
+    TaskStateError,
+    add_feedback,
+    cancel_evaluation_task,
+    claim_next_evaluation_task,
+    compare_evaluation_tasks,
+    create_dataset,
+    create_evaluation_task,
+    create_experiment,
+    execute_evaluation_task,
+    get_evaluation_task,
+    list_datasets,
+    list_evaluation_tasks,
+    list_experiments,
+    list_feedback,
+    retry_evaluation_task,
+)
 from app.nl2sql.model_config import (
     ModelConfigurationError,
     available_models,
@@ -34,7 +74,7 @@ ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "app" / "static"
 settings = get_settings()
 
-app = FastAPI(title=settings.app_name, version="1.2.0")
+app = FastAPI(title=settings.app_name, version="1.3.0")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
@@ -61,6 +101,64 @@ class ModelProbeRequest(BaseModel):
     base_url: str = "https://api.openai.com/v1"
     model: str = ""
     api_key: str | None = None
+
+
+class EvaluationTaskCreateRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=80)
+    workers: int = Field(default=3, ge=1, le=3)
+    dataset_id: str = "dataset_v3_100"
+    experiment_id: str | None = None
+    priority: int = Field(default=5, ge=1, le=9)
+
+
+class DatasetCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    version: str = Field(default="v1", max_length=40)
+    description: str = Field(default="", max_length=240)
+    case_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class ExperimentCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    dataset_id: str
+    hypothesis: str = Field(default="", max_length=240)
+
+
+class FeedbackCreateRequest(BaseModel):
+    task_id: str
+    case_id: str
+    category: str
+    note: str = Field(default="", max_length=500)
+
+
+class SourceCreateRequest(BaseModel):
+    workspace_id: str = DEFAULT_WORKSPACE
+    name: str = Field(min_length=2, max_length=80)
+    kind: str
+    location: str
+    sync_mode: str = "snapshot"
+    sensitivity: str = "internal"
+    schedule_minutes: int = Field(default=0, ge=0, le=10080)
+
+
+class MetricCreateRequest(BaseModel):
+    workspace_id: str = DEFAULT_WORKSPACE
+    name: str = Field(min_length=2, max_length=60)
+    grain: str = Field(default="", max_length=60)
+    definition: str = Field(min_length=1, max_length=500)
+    owner: str = Field(default="", max_length=60)
+    status: str = "draft"
+
+
+class QualityRuleCreateRequest(BaseModel):
+    workspace_id: str = DEFAULT_WORKSPACE
+    source_id: str
+    name: str = Field(min_length=2, max_length=80)
+    rule_type: str
+    table_name: str
+    column_name: str = ""
+    expression: str = ""
+    severity: str = "error"
 
 
 EXAMPLES = [
@@ -106,6 +204,7 @@ def _persist_turn(session_id: str | None, question: str, result) -> dict | None:
 @app.get("/evidence")
 @app.get("/evaluation")
 @app.get("/models")
+@app.get("/data-assets")
 def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
 
@@ -289,14 +388,239 @@ def query_stream(payload: QueryRequest) -> StreamingResponse:
     )
 
 
+@app.get("/api/data-assets")
+def data_assets() -> dict:
+    return data_assets_overview()
+
+
+@app.get("/api/data-platform")
+def data_platform(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+    try:
+        return platform_overview(workspace_id)
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/data-platform/workspaces")
+def data_platform_workspaces() -> dict:
+    return {"workspaces": list_workspaces()}
+
+
+@app.post("/api/data-platform/workspaces", status_code=201)
+def create_data_workspace(payload: dict) -> dict:
+    try:
+        return create_workspace(name=str(payload.get("name", "")), description=str(payload.get("description", "")))
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/data-platform/sources")
+def data_platform_sources(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+    return {"sources": list_data_sources(workspace_id)}
+
+
+@app.post("/api/data-platform/sources", status_code=201)
+def register_platform_source(payload: SourceCreateRequest) -> dict:
+    try:
+        return register_data_source(**payload.model_dump())
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/data-platform/sources/{source_id}/sync")
+def sync_platform_source(source_id: str) -> dict:
+    try:
+        return sync_data_source(source_id)
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/data-platform/metrics")
+def data_platform_metrics(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+    return {"metrics": list_metrics(workspace_id)}
+
+
+@app.post("/api/data-platform/metrics", status_code=201)
+def add_data_platform_metric(payload: MetricCreateRequest) -> dict:
+    try:
+        return create_metric(**payload.model_dump())
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/data-platform/quality-rules")
+def data_platform_quality_rules(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+    return {"rules": list_quality_rules(workspace_id)}
+
+
+@app.post("/api/data-platform/quality-rules", status_code=201)
+def add_data_platform_quality_rule(payload: QualityRuleCreateRequest) -> dict:
+    try:
+        return create_quality_rule(**payload.model_dump())
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/data-platform/sources/{source_id}/quality")
+def run_platform_quality(source_id: str, workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+    try:
+        return run_quality(workspace_id, source_id)
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/data-platform/data-service")
+def query_data_service(source_id: str, table: str, limit: int = 100, workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+    try:
+        return data_service_query(workspace_id, source_id, table, limit=limit)
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/data-platform/scheduler/run")
+def run_data_scheduler() -> dict:
+    try:
+        return dispatch_due_syncs()
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get("/api/evaluation/datasets")
+def evaluation_datasets() -> dict:
+    return {"datasets": list_datasets()}
+
+
+@app.post("/api/evaluation/datasets", status_code=201)
+def create_evaluation_dataset(payload: DatasetCreateRequest) -> dict:
+    try:
+        return create_dataset(**payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/evaluation/experiments")
+def evaluation_experiments() -> dict:
+    return {"experiments": list_experiments()}
+
+
+@app.post("/api/evaluation/experiments", status_code=201)
+def create_evaluation_experiment(payload: ExperimentCreateRequest) -> dict:
+    try:
+        return create_experiment(**payload.model_dump())
+    except DatasetNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/evaluation/feedback")
+def evaluation_feedback(status: str | None = None) -> dict:
+    return {"feedback": list_feedback(status)}
+
+
+@app.post("/api/evaluation/feedback", status_code=201)
+def create_evaluation_feedback(payload: FeedbackCreateRequest) -> dict:
+    try:
+        return add_feedback(**payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/evaluation/tasks/{task_id}/cancel")
+def cancel_evaluation(task_id: str) -> dict:
+    try:
+        return cancel_evaluation_task(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TaskStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/evaluation/tasks/{task_id}/retry", status_code=202)
+def retry_evaluation(task_id: str, background_tasks: BackgroundTasks) -> dict:
+    try:
+        task = retry_evaluation_task(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TaskStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    background_tasks.add_task(execute_evaluation_task, task["id"])
+    return task
+
+
+@app.post("/api/evaluation/queue/claim")
+def claim_evaluation_queue() -> dict:
+    task = claim_next_evaluation_task()
+    return {"task": task, "claimed": bool(task)}
+
+
 @app.get("/api/evaluation")
 def evaluation() -> dict:
+    """Compatibility endpoint: synchronously run one strict evaluation."""
     from app.nl2sql.evaluation import run_evaluation
 
     if not settings.db_path.exists():
         generate_database(settings.db_path)
     return run_evaluation()
 
+
+@app.get("/api/evaluation/tasks")
+def evaluation_tasks(limit: int = 20) -> dict:
+    return list_evaluation_tasks(limit)
+
+
+@app.post("/api/evaluation/tasks", status_code=202)
+def start_evaluation_task(payload: EvaluationTaskCreateRequest, background_tasks: BackgroundTasks) -> dict:
+    try:
+        task = create_evaluation_task(
+            label=payload.label,
+            workers=payload.workers,
+            dataset_id=payload.dataset_id,
+            experiment_id=payload.experiment_id,
+            priority=payload.priority,
+        )
+    except ModelUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ActiveEvaluationTaskError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DatasetNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # The explicit id only executes this newly queued task. Other pending
+    # tasks are consumed by the queue worker / claim endpoint.
+    background_tasks.add_task(execute_evaluation_task, task["id"])
+    return task
+
+
+@app.get("/api/evaluation/tasks/{task_id}")
+def evaluation_task_detail(task_id: str) -> dict:
+    task = get_evaluation_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="评测任务不存在")
+    return task
+
+
+@app.get("/api/evaluation/compare")
+def evaluation_compare(baseline: str, candidate: str) -> dict:
+    try:
+        return compare_evaluation_tasks(baseline, candidate)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"评测任务不存在：{exc.args[0]}") from exc
 
 @app.get("/api/model/config")
 def model_config() -> dict:

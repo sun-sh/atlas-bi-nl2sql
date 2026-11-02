@@ -553,7 +553,7 @@ def _evaluate_with_config(case, config):
         return _evaluate_case(case)
 
 
-def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, workers: int = 1) -> dict[str, Any]:
+def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, workers: int = 1, cases: tuple[dict[str, Any], ...] | None = None, cancel_check: Callable[[], bool] | None = None) -> dict[str, Any]:
     """Run every golden case through the strict model path.
 
     The evaluation never invokes the runtime rule fallback. If the model does
@@ -562,14 +562,17 @@ def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, w
     """
     if workers not in (1, 2, 3):
         raise ValueError("workers must be 1, 2 or 3")
+    selected_cases = tuple(cases or CASES)
+    if not selected_cases:
+        raise ValueError("evaluation cases cannot be empty")
     model = _model_state()
-    cases: list[dict[str, Any]] = []
+    results_by_case: list[dict[str, Any]] = []
     executed_count = 0
     hit_count = 0
     total_elapsed = 0.0
 
     if not model["active"]:
-        total = len(CASES)
+        total = len(selected_cases)
         report = {
             "suite_version": SUITE_VERSION,
             "mode": MODEL_MODE,
@@ -583,11 +586,11 @@ def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, w
             "hit_rate": 0.0,
             "model_rate": 0.0,
             "avg_elapsed_ms": 0.0,
-            "intents": len({case["intent"] for case in CASES}),
+            "intents": len({case["intent"] for case in selected_cases}),
             "cases": [
                 {
                     "id": case["id"],
-                    "setup_question": next((item["question"] for item in CASES if item["id"] == case["setup"]), None),
+                    "setup_question": next((item["question"] for item in selected_cases if item["id"] == case["setup"]), None),
                     "question": case["question"],
                     "intent": case["intent"],
                     "executed": False,
@@ -600,7 +603,7 @@ def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, w
                     "warnings": ["模型未配置或未启用"],
                     "error": "模型未配置或未启用，评测未运行",
                 }
-                for case in CASES
+                for case in selected_cases
             ],
         }
         report.update(_diagnostics(report["cases"]))
@@ -608,29 +611,34 @@ def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, w
 
     config = get_model_config()
     if workers == 1:
-        for case in CASES:
+        for case in selected_cases:
+            if cancel_check and cancel_check():
+                raise RuntimeError("evaluation cancelled")
             item = _evaluate_with_config(case, config)
-            cases.append(item)
+            results_by_case.append(item)
             if on_case:
                 on_case(item)
     else:
-        ordered = [None] * len(CASES)
+        ordered = [None] * len(selected_cases)
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_evaluate_with_config, case, config): index for index, case in enumerate(CASES)}
+            futures = {pool.submit(_evaluate_with_config, case, config): index for index, case in enumerate(selected_cases)}
             for future in as_completed(futures):
+                if cancel_check and cancel_check():
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    raise RuntimeError("evaluation cancelled")
                 item = future.result()
                 ordered[futures[future]] = item
                 if on_case:
                     on_case(item)
-        cases = ordered
-    executed_count = sum(bool(case['executed']) for case in cases)
-    hit_count = sum(bool(case['hit']) for case in cases)
-    total_elapsed = sum(case['elapsed_ms'] for case in cases)
+        results_by_case = ordered
+    executed_count = sum(bool(case['executed']) for case in results_by_case)
+    hit_count = sum(bool(case['hit']) for case in results_by_case)
+    total_elapsed = sum(case['elapsed_ms'] for case in results_by_case)
 
-    total = len(cases)
-    model_count = sum(1 for case in cases if case["model_used"])
+    total = len(results_by_case)
+    model_count = sum(1 for case in results_by_case if case["model_used"])
     return {
-        **_diagnostics(cases),
+        **_diagnostics(results_by_case),
         "suite_version": SUITE_VERSION,
         "mode": MODEL_MODE,
         "model": model,
@@ -643,6 +651,6 @@ def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, w
         "hit_rate": round(hit_count * 100 / total, 1),
         "model_rate": round(model_count * 100 / total, 1),
         "avg_elapsed_ms": round(total_elapsed / total, 1),
-        "intents": len({case["intent"] for case in CASES}),
-        "cases": cases,
+        "intents": len({case["intent"] for case in selected_cases}),
+        "cases": results_by_case,
     }

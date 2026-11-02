@@ -40,7 +40,7 @@ def test_invalid_query_is_rejected():
 
 
 def test_secondary_routes_are_directly_accessible():
-    for path in ("/workspace", "/overview", "/evidence", "/evaluation", "/models"):
+    for path in ("/workspace", "/overview", "/evidence", "/data-assets", "/evaluation", "/models"):
         response = client.get(path)
         assert response.status_code == 200
         assert "Atlas BI" in response.text and "NL2SQL" in response.text
@@ -81,16 +81,19 @@ def test_evaluation_endpoint_reports_model_only_status():
 def test_evaluation_page_explains_strict_model_policy():
     body = client.get('/evaluation').text
     assert '严格模型链路' in body
-    assert '生成或解读未完成时直接判失败' in body
+    assert '数据集版本、实验和队列任务' in body
     assert '逐用例结果' in body
     assert 'id="eval-meta"' in body
     assert 'id="eval-count"' in body
     script = client.get('/static/app.js').text
-    assert "if (view === 'evaluation') loadEvaluation();" not in script
-    assert '运行模型评测' in body
-    assert 'renderEvaluation(data)' in script
+    assert "if (view === 'evaluation') loadEvaluationTasks();" in script
+    assert '任务队列' in body
+    assert 'id="eval-baseline"' in body
+    assert 'id="eval-task-list"' in body
+    assert '提交评测任务' in body
+    assert 'renderEvaluationTaskList(data)' in script
     assert 'SQL 执行率' in script
-    evaluation_renderer = script.split('function renderEvaluation(data)', 1)[1].split('async function loadEvaluation()', 1)[0]
+    evaluation_renderer = script.split('function renderEvaluationReport(task)', 1)[1].split('async function selectEvaluationTask', 1)[0]
     assert '规则回退' not in evaluation_renderer
 
 
@@ -189,3 +192,92 @@ def test_session_endpoints_and_memory_query(monkeypatch, tmp_path):
     deleted = client.delete(f"/api/sessions/{session['id']}")
     assert deleted.status_code == 200
     assert client.get(f"/api/sessions/{session['id']}").status_code == 404
+
+
+def test_data_assets_endpoint_reports_catalog_quality_and_relations():
+    response = client.get('/api/data-assets')
+    assert response.status_code == 200
+    body = response.json()
+    assert body['summary']['status'] == 'healthy'
+    assert body['summary']['table_count'] == 5
+    assert body['summary']['failed_checks'] == 0
+    assert {table['name'] for table in body['tables']} == {
+        'orders', 'order_items', 'refunds', 'marketing_spend', 'customers'
+    }
+    assert len(body['relations']) == 3
+    assert all(relation['orphan_count'] == 0 for relation in body['relations'])
+    assert {metric['name'] for metric in body['semantic_layer']['metrics']} >= {
+        '销售额', '退款率', 'ROI', '客单价'
+    }
+    assert body['boundary']['level'] == 'project-level-data-asset-layer'
+    assert client.get('/data-assets').status_code == 200
+
+
+def test_evaluation_task_history_and_comparison(monkeypatch, tmp_path):
+    monkeypatch.setenv('ATLAS_EVALUATION_DB_PATH', str(tmp_path / 'evaluation_tasks.db'))
+    history = client.get('/api/evaluation/tasks')
+    assert history.status_code == 200
+    body = history.json()
+    assert {task['id'] for task in body['tasks']} == {
+        'ev_archive_v3_final', 'ev_archive_v3_initial', 'ev_archive_v2'
+    }
+    assert body['active'] is None
+    detail = client.get('/api/evaluation/tasks/ev_archive_v3_final')
+    assert detail.status_code == 200
+    assert detail.json()['report']['passed'] == 100
+    comparison = client.get(
+        '/api/evaluation/compare',
+        params={'baseline': 'ev_archive_v3_initial', 'candidate': 'ev_archive_v3_final'},
+    )
+    assert comparison.status_code == 200
+    diff = comparison.json()
+    assert diff['shared_cases'] == 100
+    assert diff['delta']['passed'] == 21
+    assert len(diff['fixed']) == 21
+    assert diff['regressed'] == []
+
+
+def test_evaluation_task_creation_rejects_disabled_model(monkeypatch, tmp_path):
+    monkeypatch.setenv('ATLAS_EVALUATION_DB_PATH', str(tmp_path / 'evaluation_tasks.db'))
+    response = client.post('/api/evaluation/tasks', json={'workers': 3})
+    assert response.status_code == 409
+    assert '模型未启用' in response.json()['detail']
+
+def test_data_platform_control_plane_endpoints(monkeypatch, tmp_path):
+    monkeypatch.setenv('ATLAS_DATA_PLATFORM_DB_PATH', str(tmp_path / 'platform.db'))
+    monkeypatch.setenv('ATLAS_PLATFORM_WAREHOUSE_DB_PATH', str(tmp_path / 'warehouse.db'))
+    overview = client.get('/api/data-platform')
+    assert overview.status_code == 200
+    body = overview.json()
+    assert body['summary']['source_count'] == 1
+    assert body['summary']['metric_count'] >= 5
+    assert len(body['lineage']) > 20
+    assert client.get('/api/data-platform/workspaces').status_code == 200
+    assert client.get('/api/data-platform/sources').status_code == 200
+    assert client.get('/api/data-platform/quality-rules').status_code == 200
+    assert client.get('/api/data-platform/metrics').status_code == 200
+    synced = client.post('/api/data-platform/sources/ds_commerce/sync')
+    assert synced.status_code == 200
+    assert synced.json()['row_count'] > 0
+
+
+def test_evaluation_platform_registry_endpoints(monkeypatch, tmp_path):
+    monkeypatch.setenv('ATLAS_EVALUATION_DB_PATH', str(tmp_path / 'evaluation_tasks.db'))
+    datasets = client.get('/api/evaluation/datasets')
+    assert datasets.status_code == 200
+    assert any(item['id'] == 'dataset_v3_100' for item in datasets.json()['datasets'])
+    created = client.post(
+        '/api/evaluation/datasets',
+        json={'name': 'API 小集', 'version': 'v1', 'case_ids': ['sales-east']},
+    )
+    assert created.status_code == 201
+    dataset = created.json()
+    assert dataset['case_count'] == 1
+    experiment = client.post(
+        '/api/evaluation/experiments',
+        json={'name': 'API 实验', 'dataset_id': dataset['id'], 'hypothesis': '验证接口闭环'},
+    )
+    assert experiment.status_code == 201
+    assert experiment.json()['dataset_id'] == dataset['id']
+    assert client.get('/api/evaluation/experiments').status_code == 200
+    assert client.get('/api/evaluation/feedback').status_code == 200
