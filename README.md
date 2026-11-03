@@ -182,6 +182,13 @@ flowchart TD
 
 评测中台（2026-11-02）：任务队列、数据集版本、模型实验、bad case 回流和双运行差异。
 
+## 评测集与 holdout
+
+- `strict-model-v3-100`：100 条开发/回归集，用于持续修复模型、Prompt、业务口径和重试逻辑。
+- `strict-model-v3-holdout-30`：30 条独立留出集，不参与调参；覆盖 4 类意图、7 种指标、组合筛选、日趋势和 2 条连续追问。
+- 两套都走严格模型路径，禁止规则 SQL 和确定性摘要补位；分数必须分开报告。
+- 回归集回答有没有变坏，holdout 回答是否只适配了已知题目；当前 holdout 仍属于固定电商业务域，不代表开放域泛化。
+
 ## Harness 运行边界
 
 查询工作流由 LangGraph 编排，但安全与预算不依赖 LangGraph。`app/nl2sql/harness.py` 负责生成 `RunContext` 和执行 SQL 策略：
@@ -270,7 +277,7 @@ python -m app.evaluation.run
 node --check app/static/app.js
 ```
 
-`pytest` 固定关闭在线模型和 BGE 下载，使用真实本地数据与受控模型响应验证 API、SQL 门禁、自愈边界、会话、数据中台和评测任务。当前报告为 **97 passed**；CI 在 Python 3.12 上运行测试，并在 `LLM_ENABLED=false` 下执行模型评测冒烟检查，不产生在线模型成绩。真实 `strict-model-v3-100` 结果需要模型密钥和在线 API，是带日期的能力快照，不作为每次 CI 的确定性分数。
+`pytest` 固定关闭在线模型和 BGE 下载，使用真实本地数据与受控模型响应验证 API、SQL 门禁、自愈边界、会话、数据中台和评测任务。当前报告为 **115 passed**；CI 在 Python 3.12 上运行测试，并在 `LLM_ENABLED=false` 下执行模型评测冒烟检查，不产生在线模型成绩。真实 `strict-model-v3-100` 结果需要模型密钥和在线 API，是带日期的能力快照，不作为每次 CI 的确定性分数。
 
 ## 快速启动
 

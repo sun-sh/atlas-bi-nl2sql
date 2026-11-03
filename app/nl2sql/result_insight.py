@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+from app.nl2sql.harness import is_cancelled
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.models import QueryPlan
 
@@ -339,6 +340,8 @@ def stream_result_narrative(
     question: str,
     plan: QueryPlan,
     digest: dict[str, Any],
+    *,
+    trace_id: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     started = time.perf_counter()
     fallback = rule_narrative(digest)
@@ -393,6 +396,9 @@ def stream_result_narrative(
                 }
             response = client.chat.completions.create(**request)
             for chunk in response:
+                if is_cancelled(trace_id):
+                    yield {"type": "cancelled"}
+                    return
                 if not getattr(chunk, "choices", None):
                     continue
                 choice = chunk.choices[0]

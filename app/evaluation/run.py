@@ -7,7 +7,8 @@ import sys
 import time
 from pathlib import Path
 
-from app.nl2sql.evaluation import CASES, run_evaluation
+from app.nl2sql.evaluation import CASES, DATASET_RANGE, SUITE_VERSION, run_evaluation
+from app.nl2sql.holdout import HOLDOUT_CASES, HOLDOUT_DATASET_RANGE, HOLDOUT_SUITE_VERSION
 from app.nl2sql.model_config import get_model_config
 from app.nl2sql.seed import generate_database
 from app.nl2sql.settings import get_settings
@@ -19,6 +20,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-hit-rate", type=float, help="Fail with exit code 2 below this percentage")
     parser.add_argument("--workers", type=int, choices=(1, 2, 3), default=1,
                         help="Isolated model workers; default 1")
+    parser.add_argument("--suite", choices=("regression", "holdout"), default="regression",
+                        help="Evaluation suite: regression (100) or holdout (30)")
     args = parser.parse_args(argv)
     if args.min_hit_rate is not None and not 0 <= args.min_hit_rate <= 100:
         parser.error("--min-hit-rate must be between 0 and 100")
@@ -50,14 +53,22 @@ def main(argv: list[str] | None = None) -> int:
     for path in sorted(source_root.rglob("*.py")):
         source_hash.update(path.relative_to(source_root).as_posix().encode())
         source_hash.update(path.read_bytes())
-    report = run_evaluation(on_case=progress, workers=args.workers)
+    is_holdout = args.suite == "holdout"
+    selected_cases = HOLDOUT_CASES if is_holdout else CASES
+    report = run_evaluation(
+        cases=tuple(selected_cases),
+        on_case=progress,
+        workers=args.workers,
+        suite_version=HOLDOUT_SUITE_VERSION if is_holdout else SUITE_VERSION,
+        dataset_range=HOLDOUT_DATASET_RANGE if is_holdout else DATASET_RANGE,
+    )
     report["runtime"] = {"workers": args.workers, "wall_elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
                          "source_sha256": source_hash.hexdigest()}
-    report["evaluation_contract"] = "strict-v3-single-channel-scalar-v1"
-    manifest = json.dumps(CASES, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    report["evaluation_contract"] = "strict-v3-result-equivalence-v1"
+    manifest = json.dumps(selected_cases, sort_keys=True, ensure_ascii=False).encode("utf-8")
     report["case_manifest_sha256"] = hashlib.sha256(manifest).hexdigest()
     if args.min_hit_rate is not None:
-        passed = bool(report["available"] and report["total"] == len(CASES) and report["hit_rate"] >= args.min_hit_rate)
+        passed = bool(report["available"] and report["total"] == len(selected_cases) and report["hit_rate"] >= args.min_hit_rate)
         report["quality_gate"] = {"min_hit_rate": args.min_hit_rate, "passed": passed}
     text = redacted(report)
     if args.output:

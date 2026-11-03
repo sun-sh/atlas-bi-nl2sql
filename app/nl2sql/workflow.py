@@ -331,12 +331,14 @@ def query_stream_events(
         trace_id=trace_id,
     )
     state: GraphState = {}
-    for mode, chunk in _GRAPH.stream(
-            initial,
-            stream_mode=["custom", "updates"],
-        ):
+    try:
+        for mode, chunk in _GRAPH.stream(
+                initial,
+                stream_mode=["custom", "updates"],
+            ):
             if is_cancelled(initial["trace_id"]):
-                raise QueryCancelled("查询已取消")
+                yield {"type": "cancelled", "trace_id": initial["trace_id"]}
+                return
             if mode == "custom":
                 if isinstance(chunk, dict) and chunk.get("stage"):
                     yield {
@@ -349,6 +351,9 @@ def query_stream_events(
                 for values in chunk.values():
                     if isinstance(values, dict):
                         state.update(values)
+    except QueryCancelled:
+        yield {"type": "cancelled", "trace_id": initial["trace_id"]}
+        return
     yield {"type": "result", "result": state["final"]}
 
 

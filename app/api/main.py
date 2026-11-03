@@ -334,6 +334,9 @@ def _stream_turn(question: str, session_id: str | None, context: dict, trace_id:
         if trace_id and is_cancelled(trace_id):
             yield _sse("cancelled", {"message": "查询已取消", "trace_id": trace_id})
             return
+        if event.get("type") == "cancelled":
+            yield _sse("cancelled", {"message": "查询已取消", "trace_id": trace_id})
+            return
         if event.get("type") == "stage":
             yield _sse(
                 "status",
@@ -347,7 +350,13 @@ def _stream_turn(question: str, session_id: str | None, context: dict, trace_id:
     digest = digest_from_result(result)
     narrative = None
     sent_thinking = False
-    for event in stream_result_narrative(question, result.plan, digest):
+    for event in stream_result_narrative(question, result.plan, digest, trace_id=trace_id):
+        if trace_id and is_cancelled(trace_id):
+            yield _sse("cancelled", {"message": "查询已取消", "trace_id": trace_id})
+            return
+        if event.get("type") == "cancelled":
+            yield _sse("cancelled", {"message": "查询已取消", "trace_id": trace_id})
+            return
         if event.get("type") == "delta":
             narrative = None
             yield _sse("delta", {"delta": event.get("delta", "")})

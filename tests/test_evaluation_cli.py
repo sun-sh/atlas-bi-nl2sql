@@ -25,6 +25,32 @@ def test_quality_gate_rejects_low_score_and_unavailable_model(monkeypatch, tmp_p
     assert len(report["case_manifest_sha256"]) == 64
 
 
+def test_holdout_suite_runs_the_30_case_set(monkeypatch, tmp_path):
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="x", base_url="https://example.com"))
+    captured = {}
+    def fake_eval(**kwargs):
+        captured["count"] = len(kwargs["cases"])
+        captured["suite_version"] = kwargs["suite_version"]
+        captured["dataset_range"] = kwargs["dataset_range"]
+        return {
+            "available": True,
+            "total": captured["count"],
+            "hit_rate": 100.0,
+            "passed": captured["count"],
+            "suite_version": kwargs["suite_version"],
+            "cases": [],
+        }
+    monkeypatch.setattr(run, "run_evaluation", fake_eval)
+    output = tmp_path / "holdout.json"
+    assert run.main(["--suite", "holdout", "--output", str(output)]) == 0
+    assert captured["count"] == 30
+    assert captured["suite_version"] == "strict-model-v3-holdout-30"
+    assert captured["dataset_range"] == "2025-10-01 至 2026-02-28"
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["total"] == 30
+    assert report["suite_version"] == "strict-model-v3-holdout-30"
+
+
 def test_invalid_worker_count_is_rejected():
     from app.nl2sql.evaluation import run_evaluation
     with pytest.raises(ValueError):

@@ -259,10 +259,13 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
 
 def _seed_datasets(conn: sqlite3.Connection) -> None:
     from app.nl2sql.evaluation import CASES
+    from app.nl2sql.holdout import HOLDOUT_CASES
     ids = [c['id'] for c in CASES]
+    holdout_ids = [c['id'] for c in HOLDOUT_CASES]
     payload = {
         'dataset_v3_100': ('strict-model-v3-100', 'published', ids, 'Strict model full regression set'),
         'dataset_v3_initial': ('strict-model-v3-100', 'archived', ids, 'Original 100-case diagnostic run'),
+        'dataset_v3_holdout_30': ('strict-model-v3-holdout-30', 'holdout', holdout_ids, 'Independent 30-case holdout set'),
     }
     for dataset_id, (name, status, case_ids, description) in payload.items():
         checksum = __import__('hashlib').sha256(__import__('json').dumps(case_ids, sort_keys=True).encode()).hexdigest()
@@ -283,7 +286,8 @@ def list_datasets() -> list[dict[str, Any]]:
 def create_dataset(*, name: str, version: str, case_ids: list[str], description: str = '') -> dict[str, Any]:
     init_task_store()
     from app.nl2sql.evaluation import CASES
-    known = {c['id'] for c in CASES}
+    from app.nl2sql.holdout import HOLDOUT_CASES
+    known = {c['id'] for c in (*CASES, *HOLDOUT_CASES)}
     invalid = sorted(set(case_ids)-known)
     if invalid:
         raise ValueError('未知评测用例：' + ', '.join(invalid[:5]))
@@ -584,6 +588,7 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
     import hashlib
     import time
     from app.nl2sql.evaluation import CASES
+    from app.nl2sql.holdout import HOLDOUT_CASES
 
     task_id = task["id"]
     with _connect() as conn:
@@ -598,7 +603,8 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
             )
         return get_evaluation_task(task_id) or task
     selected_ids = set(json.loads(dataset_row["case_ids_json"]))
-    selected_cases = tuple(case for case in CASES if case["id"] in selected_ids)
+    all_cases = (*CASES, *HOLDOUT_CASES)
+    selected_cases = tuple(case for case in all_cases if case["id"] in selected_ids)
     started = time.perf_counter()
     with _connect() as conn:
         conn.execute(
@@ -613,6 +619,7 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
                 workers=int(task["workers"]),
                 cases=selected_cases,
                 cancel_check=lambda: _task_cancelled(task_id),
+                suite_version=dataset_row["name"],
             )
         source_root = ROOT / "app"
         source_hash = hashlib.sha256()
@@ -625,7 +632,7 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
             "wall_elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
             "source_sha256": source_hash.hexdigest(),
         }
-        report["evaluation_contract"] = "strict-v3-single-channel-scalar-v1"
+        report["evaluation_contract"] = "strict-v3-result-equivalence-v1"
         report["case_manifest_sha256"] = hashlib.sha256(manifest).hexdigest()
         report = _redact_report(report, config)
         summary = _summary_from_report(report)

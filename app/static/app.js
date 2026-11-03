@@ -949,7 +949,7 @@ function platformTab(name) {
 }
 
 function statusBadge(status) {
-  const map = { ready: ['已就绪', ''], registered: ['待同步', 'warn'], error: ['异常', 'fail'], running: ['运行中', 'pending'], queued: ['排队中', 'pending'], completed: ['已完成', ''], failed: ['失败', 'fail'], cancelled: ['已取消', 'cancel'] };
+  const map = { ready: ['已就绪', ''], holdout: ['留出集', 'warn'], registered: ['待同步', 'warn'], error: ['异常', 'fail'], running: ['运行中', 'pending'], queued: ['排队中', 'pending'], completed: ['已完成', ''], failed: ['失败', 'fail'], cancelled: ['已取消', 'cancel'] };
   const [label, cls] = map[status] || [status || '未知', ''];
   return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
 }
@@ -1317,7 +1317,7 @@ function renderEvaluationPlatform(data) {
   const experiments = state.experiments || [];
   const feedback = state.feedback || [];
   $('#dataset-count').textContent = `${datasets.length} 个版本`;
-  $('#dataset-table').innerHTML = datasets.length ? `<table class="eval-table"><thead><tr><th>数据集</th><th>版本</th><th>用例数</th><th>状态</th></tr></thead><tbody>${datasets.map((item) => `<tr><td>${escapeHtml(item.name)}<div class="muted">${escapeHtml(item.description || '')}</div></td><td><code>${escapeHtml(item.version)}</code></td><td>${item.case_count}</td><td>${statusBadge(item.status === 'published' ? 'ready' : 'cancelled')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无数据集版本。</p>';
+  $('#dataset-table').innerHTML = datasets.length ? `<table class="eval-table"><thead><tr><th>数据集</th><th>版本</th><th>用例数</th><th>状态</th></tr></thead><tbody>${datasets.map((item) => `<tr><td>${escapeHtml(item.name)}<div class="muted">${escapeHtml(item.description || '')}</div></td><td><code>${escapeHtml(item.version)}</code></td><td>${item.case_count}</td><td>${statusBadge(item.status === 'published' ? 'ready' : item.status === 'holdout' ? 'holdout' : 'cancelled')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无数据集版本。</p>';
   $('#experiment-dataset').innerHTML = datasets.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(item.version)}</option>`).join('');
   $('#experiment-count').textContent = `${experiments.length} 个实验`;
   $('#experiment-list').innerHTML = experiments.length ? experiments.map((exp) => `<div class="experiment-card"><strong>${escapeHtml(exp.name)}</strong><p>${escapeHtml(exp.hypothesis || '暂无实验假设')}</p><small>${escapeHtml(exp.dataset_id)} · ${escapeHtml(formatEvaluatedAt(exp.created_at))}</small><div class="experiment-runs">${(exp.tasks || []).map((task) => `<span>${escapeHtml(task.model_name || '待运行')} · ${task.hit_rate}%</span>`).join('') || '<span>尚未关联评测任务</span>'}</div></div>`).join('') : '<p class="muted">暂无实验记录。</p>';

@@ -152,9 +152,12 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
         metrics.append("客单价")
     if "销量" in q or "件数" in q:
         metrics.append("销量")
-    if not metrics and is_follow_up:
-        previous_metrics = list(context.get("metrics") or [])
-        if previous_metrics:
+    previous_metrics = list(context.get("metrics") or [])
+    if is_follow_up:
+        previous_intent = str(context.get("intent") or "")
+        if not detected_intent and previous_intent in {"refund_analysis", "marketing_efficiency", "category_analysis"}:
+            intent = previous_intent
+        if not metrics and previous_metrics:
             metrics = previous_metrics
             inherited.append("指标：" + " / ".join(map(str, previous_metrics)))
     if not metrics:

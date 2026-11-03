@@ -485,7 +485,7 @@ def _diagnostics(cases: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 
-def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
+def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any]:
     started = time.perf_counter()
     error = ""
     results = []
@@ -494,7 +494,8 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
     executed = False
     model_used = False
     hit = False
-    setup = next((item for item in CASES if item["id"] == case["setup"]), None)
+    selected_cases = cases or CASES
+    setup = next((item for item in selected_cases if item["id"] == case["setup"]), None)
     try:
         context = None
         for step in ([setup, case] if setup else [case]):
@@ -548,12 +549,20 @@ def _evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _evaluate_with_config(case, config):
+def _evaluate_with_config(case, config, cases=None):
     with model_config_snapshot(config):
-        return _evaluate_case(case)
+        return _evaluate_case(case, cases)
 
 
-def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, workers: int = 1, cases: tuple[dict[str, Any], ...] | None = None, cancel_check: Callable[[], bool] | None = None) -> dict[str, Any]:
+def run_evaluation(
+    on_case: Callable[[dict[str, Any]], None] | None = None,
+    *,
+    workers: int = 1,
+    cases: tuple[dict[str, Any], ...] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    suite_version: str = SUITE_VERSION,
+    dataset_range: str = DATASET_RANGE,
+) -> dict[str, Any]:
     """Run every golden case through the strict model path.
 
     The evaluation never invokes the runtime rule fallback. If the model does
@@ -574,11 +583,11 @@ def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, w
     if not model["active"]:
         total = len(selected_cases)
         report = {
-            "suite_version": SUITE_VERSION,
+            "suite_version": suite_version,
             "mode": MODEL_MODE,
             "model": model,
             "available": False,
-            "dataset_range": DATASET_RANGE,
+            "dataset_range": dataset_range,
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
             "total": total,
             "passed": 0,
@@ -614,14 +623,14 @@ def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, w
         for case in selected_cases:
             if cancel_check and cancel_check():
                 raise RuntimeError("evaluation cancelled")
-            item = _evaluate_with_config(case, config)
+            item = _evaluate_with_config(case, config, selected_cases)
             results_by_case.append(item)
             if on_case:
                 on_case(item)
     else:
         ordered = [None] * len(selected_cases)
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_evaluate_with_config, case, config): index for index, case in enumerate(selected_cases)}
+            futures = {pool.submit(_evaluate_with_config, case, config, selected_cases): index for index, case in enumerate(selected_cases)}
             for future in as_completed(futures):
                 if cancel_check and cancel_check():
                     pool.shutdown(wait=False, cancel_futures=True)
@@ -639,11 +648,11 @@ def run_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None, *, w
     model_count = sum(1 for case in results_by_case if case["model_used"])
     return {
         **_diagnostics(results_by_case),
-        "suite_version": SUITE_VERSION,
+        "suite_version": suite_version,
         "mode": MODEL_MODE,
         "model": model,
         "available": True,
-        "dataset_range": DATASET_RANGE,
+        "dataset_range": dataset_range,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "total": total,
         "passed": hit_count,

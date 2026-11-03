@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from app.nl2sql.harness import register_cancel
+
 from app.nl2sql.planner import make_plan
 from app.nl2sql.result_insight import build_result_digest, stream_result_narrative
 from tests.test_api import client
@@ -124,3 +126,60 @@ def test_stream_narrative_uses_model_delta_when_available(monkeypatch):
     final = next(event['narrative'] for event in events if event['type'] == 'done')
     assert final.mode == 'model'
     assert final.model == 'fake-model'
+
+
+def test_stream_cancel_during_sql_execution_returns_cancelled_event(monkeypatch, tmp_path):
+    import app.api.main as api_main
+
+    monkeypatch.setenv('ATLAS_SESSION_DB_PATH', str(tmp_path / 'sessions.db'))
+
+    def cancelled_events(*args, **kwargs):
+        yield {'type': 'cancelled', 'trace_id': kwargs['trace_id']}
+
+    monkeypatch.setattr(api_main, 'query_stream_events', cancelled_events)
+    created = client.post('/api/sessions', json={}).json()
+    events = _query_stream(client, '上个月各渠道ROI', created['id'])
+    assert events[-1][0] == 'cancelled'
+    assert events[-1][1]['trace_id'] == events[0][1]['trace_id']
+
+
+def test_stream_cancel_during_model_narrative_returns_cancelled_event(monkeypatch, tmp_path):
+    import app.api.main as api_main
+    from app.nl2sql.models import QueryResult
+    from app.nl2sql.planner import make_plan
+
+    monkeypatch.setenv('ATLAS_SESSION_DB_PATH', str(tmp_path / 'sessions.db'))
+    plan = make_plan('各渠道销售额', [])
+
+    def one_result(*args, **kwargs):
+        result = QueryResult(
+            question='各渠道销售额', sql='SELECT 1 AS 销售额', rows=[{'渠道': 'App', '销售额': 100}],
+            columns=['渠道', '销售额'], chart_type='bar', answer='', plan=plan, retrieval=[],
+            attempts=[{'status': 'success'}], elapsed_ms=1, mode='llm', trace_id='trace-narrative',
+        )
+        yield {'type': 'result', 'result': result}
+
+    def cancelled_narrative(*args, **kwargs):
+        assert kwargs['trace_id']
+        yield {'type': 'cancelled'}
+
+    monkeypatch.setattr(api_main, 'query_stream_events', one_result)
+    monkeypatch.setattr(api_main, 'stream_result_narrative', cancelled_narrative)
+    created = client.post('/api/sessions', json={}).json()
+    events = _query_stream(client, '各渠道销售额', created['id'])
+    assert events[-1][0] == 'cancelled'
+    assert events[-1][1]['trace_id'] == events[0][1]['trace_id']
+
+
+
+def test_query_stream_events_converts_execution_cancel_to_event(monkeypatch):
+    from app.nl2sql.sql_engine import QueryCancelled
+    from app.nl2sql.workflow import query_stream_events
+
+    monkeypatch.setattr('app.nl2sql.workflow.is_cancelled', lambda trace_id: True)
+    monkeypatch.setattr('app.nl2sql.workflow.build_graph', lambda: type('Graph', (), {
+        'stream': lambda self, *args, **kwargs: iter([('updates', {'execute': {'attempts': []}})]),
+    })())
+    monkeypatch.setattr('app.nl2sql.workflow._GRAPH', None)
+    events = list(query_stream_events('上个月各渠道ROI', trace_id='cancel-workflow'))
+    assert events == [{'type': 'cancelled', 'trace_id': 'cancel-workflow'}]

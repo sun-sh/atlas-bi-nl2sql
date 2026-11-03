@@ -50,3 +50,13 @@ def test_item_category_filter_does_not_filter_primary_order_category():
     assert "oi.category = '食品饮料'" in plan.filters
     assert "o.category = '食品饮料'" not in plan.filters
     assert plan.context["category_filter"] == "oi.category = '食品饮料'"
+
+
+
+def test_marketing_followup_inherits_intent_and_roi_metric():
+    setup = make_plan("本月各渠道ROI：已支付销售额除以投放花费，两表各自按渠道汇总后计算，按ROI降序", [])
+    context = {**setup.as_dict(), **setup.context, "question": "本月各渠道ROI：已支付销售额除以投放花费，两表各自按渠道汇总后计算，按ROI降序"}
+    followup = make_plan("那上个月呢？", [], context)
+    assert followup.intent == "marketing_efficiency"
+    assert followup.metrics == ["ROI"]
+    assert any("o.order_date BETWEEN '2026-01-01' AND '2026-01-31'" in item for item in followup.filters)
