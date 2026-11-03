@@ -66,6 +66,7 @@ from app.nl2sql.result_insight import (
 )
 from app.nl2sql.seed import generate_database
 from app.nl2sql.session_store import append_turn, create_session, delete_session, get_session, list_sessions
+from app.nl2sql.harness import is_cancelled, register_cancel, release_cancel, request_cancel
 from app.nl2sql.settings import get_settings
 from app.nl2sql.workflow import get_retriever, query_stream_events, run_query
 
@@ -81,6 +82,7 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 class QueryRequest(BaseModel):
     question: str = Field(min_length=2, max_length=300)
     session_id: str | None = Field(default=None, max_length=64)
+    request_id: str | None = Field(default=None, max_length=64)
 
 
 class SessionCreateRequest(BaseModel):
@@ -318,18 +320,24 @@ def _stream_stage(node: str, state: dict) -> dict:
     return payload
 
 
-def _stream_turn(question: str, session_id: str | None, context: dict) -> Iterator[str]:
-    yield _sse("start", {"session_id": session_id, "message": "正在分析问题"})
+def _stream_turn(question: str, session_id: str | None, context: dict, trace_id: str) -> Iterator[str]:
+    yield _sse("start", {"session_id": session_id, "trace_id": trace_id, "message": "正在分析问题"})
     result = None
-    for event in query_stream_events(
+    events = query_stream_events(
         question,
         context=context,
         narrate=False,
-    ):
+        trace_id=trace_id,
+    )
+    for event in events:
+        state_data = event.get("state") or {}
+        if trace_id and is_cancelled(trace_id):
+            yield _sse("cancelled", {"message": "查询已取消", "trace_id": trace_id})
+            return
         if event.get("type") == "stage":
             yield _sse(
                 "status",
-                _stream_stage(event["node"], event.get("state") or {}),
+                _stream_stage(event["node"], state_data),
             )
         elif event.get("type") == "result":
             result = event["result"]
@@ -373,6 +381,12 @@ def _stream_turn(question: str, session_id: str | None, context: dict) -> Iterat
     )
 
 
+@app.post("/api/query/cancel/{trace_id}")
+def cancel_query(trace_id: str) -> dict:
+    accepted = request_cancel(trace_id)
+    return {"cancelled": accepted, "trace_id": trace_id}
+
+
 @app.post("/api/query/stream")
 def query_stream(payload: QueryRequest) -> StreamingResponse:
     try:
@@ -381,11 +395,21 @@ def query_stream(payload: QueryRequest) -> StreamingResponse:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"查询失败：{exc}") from exc
+    trace_id = payload.request_id or __import__("uuid").uuid4().hex[:12]
+    register_cancel(trace_id)
+
+    def stream():
+        try:
+            yield from _stream_turn(question, session_id, context, trace_id)
+        finally:
+            release_cancel(trace_id)
+
     return StreamingResponse(
-        _stream_turn(question, session_id, context),
+        stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
 
 
 @app.get("/api/data-assets")

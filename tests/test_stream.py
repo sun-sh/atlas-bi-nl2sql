@@ -40,6 +40,8 @@ def test_query_stream_returns_result_digest_and_done(monkeypatch, tmp_path):
     events = _query_stream(client, '上个月各渠道ROI', created['id'])
     names = [name for name, _ in events]
     assert names[0] == 'start'
+    start = events[0][1]
+    assert start['trace_id']
     assert names.count('status') >= 5
     assert names.index('status') < names.index('result')
     assert names.index('result') < names.index('delta')
@@ -69,6 +71,12 @@ def test_query_stream_returns_result_digest_and_done(monkeypatch, tmp_path):
     done = events[-1][1]
     assert done['session']['turn_count'] == 1
     assert done['session']['turns'][0]['answer'] == narrative['text']
+
+
+def test_cancel_endpoint_returns_false_for_unknown_trace():
+    response = client.post("/api/query/cancel/unknown-trace")
+    assert response.status_code == 200
+    assert response.json()["cancelled"] is False
 
 
 def test_stream_narrative_uses_model_delta_when_available(monkeypatch):

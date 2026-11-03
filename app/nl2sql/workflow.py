@@ -8,7 +8,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
 from app.nl2sql import generator
-from app.nl2sql.harness import create_run_context
+from app.nl2sql.harness import create_run_context, is_cancelled
 from app.nl2sql.model_config import get_model_config
 from app.nl2sql.generator import generate_llm_repair_sql, generate_llm_sql, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
@@ -22,7 +22,7 @@ from app.nl2sql.result_insight import (
 )
 from app.nl2sql.retrieval import HybridSchemaRetriever
 from app.nl2sql.settings import get_settings
-from app.nl2sql.sql_engine import execute_sql, explain_error, validate_sql
+from app.nl2sql.sql_engine import QueryCancelled, execute_sql, explain_error, validate_sql
 
 
 class GraphState(TypedDict, total=False):
@@ -137,7 +137,7 @@ def execute_node(state: GraphState) -> GraphState:
     warnings = list(state.get("warnings", []))
     try:
         safe_sql = validate_sql(sql)
-        result = execute_sql(safe_sql)
+        result = execute_sql(safe_sql, cancel_trace_id=state.get("trace_id"))
         if result["rows"] and all(
             value is None
             for row in result["rows"]
@@ -154,6 +154,8 @@ def execute_node(state: GraphState) -> GraphState:
             }
         )
         return {"sql": safe_sql, "result": result, "attempts": attempts, "warnings": warnings}
+    except QueryCancelled:
+        raise
     except Exception as exc:
         message = explain_error(exc, sql)
         attempts.append(
@@ -290,8 +292,9 @@ def _initial_state(
     *,
     narrate: bool,
     allow_rule_fallback: bool,
+    trace_id: str | None = None,
 ) -> GraphState:
-    trace_id = uuid.uuid4().hex[:12]
+    trace_id = trace_id or uuid.uuid4().hex[:12]
     return {
         "question": question.strip(),
         "context": context or {},
@@ -314,6 +317,7 @@ def query_stream_events(
     *,
     narrate: bool = False,
     allow_rule_fallback: bool = True,
+    trace_id: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield graph stage updates followed by the finalized QueryResult."""
     global _GRAPH
@@ -324,24 +328,27 @@ def query_stream_events(
         context,
         narrate=narrate,
         allow_rule_fallback=allow_rule_fallback,
+        trace_id=trace_id,
     )
     state: GraphState = {}
     for mode, chunk in _GRAPH.stream(
-        initial,
-        stream_mode=["custom", "updates"],
-    ):
-        if mode == "custom":
-            if isinstance(chunk, dict) and chunk.get("stage"):
-                yield {
-                    "type": "stage",
-                    "node": chunk["stage"],
-                    "state": state,
-                }
-            continue
-        if mode == "updates" and isinstance(chunk, dict):
-            for values in chunk.values():
-                if isinstance(values, dict):
-                    state.update(values)
+            initial,
+            stream_mode=["custom", "updates"],
+        ):
+            if is_cancelled(initial["trace_id"]):
+                raise QueryCancelled("查询已取消")
+            if mode == "custom":
+                if isinstance(chunk, dict) and chunk.get("stage"):
+                    yield {
+                        "type": "stage",
+                        "node": chunk["stage"],
+                        "state": state,
+                    }
+                continue
+            if mode == "updates" and isinstance(chunk, dict):
+                for values in chunk.values():
+                    if isinstance(values, dict):
+                        state.update(values)
     yield {"type": "result", "result": state["final"]}
 
 
@@ -351,6 +358,7 @@ def run_query(
     *,
     narrate: bool = True,
     allow_rule_fallback: bool = True,
+    trace_id: str | None = None,
 ) -> QueryResult:
     global _GRAPH
     if _GRAPH is None:
@@ -360,6 +368,7 @@ def run_query(
         context,
         narrate=narrate,
         allow_rule_fallback=allow_rule_fallback,
+        trace_id=trace_id,
     )
     state = _GRAPH.invoke(initial)
     return state["final"]

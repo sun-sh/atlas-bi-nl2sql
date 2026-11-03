@@ -70,6 +70,23 @@ def test_query_timeout_interrupts_long_query(monkeypatch):
         execute_sql("SELECT COUNT(o1.order_id) AS n FROM orders o1 JOIN orders o2 ON 1=1 JOIN orders o3 ON 1=1")
 
 
+def test_harness_cancel_registry_is_idempotent():
+    from app.nl2sql.harness import (
+        is_cancelled,
+        register_cancel,
+        release_cancel,
+        request_cancel,
+    )
+    trace = "unit-cancel-trace"
+    register_cancel(trace)
+    assert not is_cancelled(trace)
+    assert request_cancel(trace)
+    assert is_cancelled(trace)
+    assert request_cancel(trace)
+    release_cancel(trace)
+    assert not is_cancelled(trace)
+
+
 def test_execute_returns_typed_rows():
     result = execute_sql("SELECT COUNT(*) AS n FROM orders WHERE status = 'paid'")
     assert result["rows"][0]["n"] > 0

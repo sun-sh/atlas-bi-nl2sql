@@ -37,6 +37,12 @@ def test_query_endpoint_returns_trace():
     assert body["run_context"]["max_result_rows"] >= len(body["rows"])
 
 
+def test_query_cancel_endpoint_is_idempotent():
+    response = client.post("/api/query/cancel/not-running")
+    assert response.status_code == 200
+    assert response.json() == {"cancelled": False, "trace_id": "not-running"}
+
+
 def test_invalid_query_is_rejected():
     response = client.post("/api/query", json={"question": "x"})
     assert response.status_code == 422

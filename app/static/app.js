@@ -10,6 +10,8 @@ const state = {
   sessionListRequest: 0,
   sessionOpenRequest: 0,
   activeQueryCard: null,
+  activeTraceId: null,
+  activeAbortController: null,
   threadPinned: true,
   evalTasksData: null,
   evalSelectedTask: null,
@@ -717,14 +719,19 @@ function parseSseFrame(frame) {
 
 async function streamQuery(question, sessionId) {
   const card = state.activeQueryCard;
-  const response = await fetch('/api/query/stream', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
-    body: JSON.stringify({ question, session_id: sessionId }),
-  });
+  const requestId = crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+  state.activeTraceId = requestId;
+    const controller = new AbortController();
+      state.activeAbortController = controller;
+        const response = await fetch('/api/query/stream', {
+            method: 'POST',
+                headers: {
+                      'Content-Type': 'application/json',
+                            Accept: 'text/event-stream',
+                                },
+                                    body: JSON.stringify({ question, session_id: sessionId, request_id: requestId }),
+                                        signal: controller.signal,
+                                          });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.detail || `请求失败 (${response.status})`);
@@ -792,8 +799,10 @@ async function streamQuery(question, sessionId) {
             turnMeta.innerHTML = `<span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span>`;
           }
           card?.classList.remove('is-streaming');
-        } else if (event === 'error') {
-          throw new Error(data.message || '流式查询失败');
+        } else if (event === 'cancelled') {
+          throw new DOMException(data.message || '查询已取消', 'AbortError');
+                  } else if (event === 'error') {
+                            throw new Error(data.message || '流式查询失败');
         }
       }
       index = buffer.indexOf('\n\n');
@@ -808,6 +817,20 @@ async function streamQuery(question, sessionId) {
   return result;
 }
 
+async function cancelActiveQuery() {
+  const traceId = state.activeTraceId;
+  state.activeAbortController?.abort();
+  if (!traceId) return;
+  try {
+    await api(`/api/query/cancel/${encodeURIComponent(traceId)}`, {
+      method: 'POST',
+    });
+  } catch {
+    // Local abort already stopped the browser stream.
+  }
+}
+
+
 async function submitQuery(question) {
   if (!question || question.trim().length < 2) {
     toast('请输入一个完整问题');
@@ -819,8 +842,9 @@ async function submitQuery(question) {
   state.sessionOpenRequest += 1;
   $$('#new-session-btn, #reset-context-btn, .session-item, #refresh-btn').forEach(el => { el.disabled = true; });
   const button = $('#submit-btn');
-  button.disabled = true;
-  button.querySelector('span').textContent = '分析中…';
+  button.disabled = false;
+  button.dataset.mode = 'cancel';
+  button.querySelector('span').textContent = '停止分析';
   const submittedQuestion = question.trim();
   const liveCard = renderPendingTurn(submittedQuestion);
   if (liveCard) liveCard.dataset.question = submittedQuestion;
@@ -853,14 +877,18 @@ async function submitQuery(question) {
     toast(`分析完成 · ${result.elapsed_ms} ms`);
   } catch (error) {
     state.activeQueryCard = null;
-    toast(error.message);
-    renderQueryError(liveCard, error.message);
+    const cancelled = error?.name === 'AbortError';
+    toast(cancelled ? '已停止本次分析' : error.message);
+    renderQueryError(liveCard, cancelled ? '已停止本次分析，可重新提问或继续追问。' : error.message);
     state.threadPinned = true;
     scrollThreadToLatest({ force: true });
   } finally {
     state.sending = false;
+    state.activeAbortController = null;
+    state.activeTraceId = null;
     $$('#new-session-btn, #reset-context-btn, .session-item, #refresh-btn').forEach(el => { el.disabled = false; });
     button.disabled = false;
+    button.dataset.mode = '';
     button.querySelector('span').textContent = '发送问题';
   }
 }
@@ -1534,6 +1562,10 @@ function init() {
   });
   $('#query-form').addEventListener('submit', (event) => {
     event.preventDefault();
+    if (state.sending) {
+      if (event.submitter === $('#submit-btn')) cancelActiveQuery();
+      return;
+    }
     submitQuery($('#question').value);
   });
   $('#question').addEventListener('keydown', (event) => {

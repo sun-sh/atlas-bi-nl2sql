@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Event, RLock
 from typing import Any
 
 
 POLICY_VERSION = "nl2sql-harness-v1"
 MAX_JOINS = 3
 MAX_SUBQUERY_DEPTH = 3
+_CANCEL_EVENTS: dict[str, Event] = {}
+_CANCEL_LOCK = RLock()
 
 
 @dataclass(frozen=True)
@@ -57,3 +60,34 @@ def validate_policy(sql: str, parsed=None) -> None:
             target = item.this if isinstance(item, exp.Alias) else item
             if isinstance(target, exp.Star) or (isinstance(target, exp.Column) and isinstance(target.this, exp.Star)):
                 raise HarnessPolicyError("禁止 SELECT *，请显式列出字段")
+
+
+def register_cancel(trace_id: str) -> Event:
+    event = Event()
+    with _CANCEL_LOCK:
+        _CANCEL_EVENTS[trace_id] = event
+    return event
+
+
+def request_cancel(trace_id: str) -> bool:
+    with _CANCEL_LOCK:
+        event = _CANCEL_EVENTS.get(trace_id)
+    if event is None:
+        return False
+    event.set()
+    return True
+
+
+def is_cancelled(trace_id: str | None = None, event: Event | None = None) -> bool:
+    if event is not None:
+        return event.is_set()
+    if not trace_id:
+        return False
+    with _CANCEL_LOCK:
+        current = _CANCEL_EVENTS.get(trace_id)
+    return bool(current and current.is_set())
+
+
+def release_cancel(trace_id: str) -> None:
+    with _CANCEL_LOCK:
+        _CANCEL_EVENTS.pop(trace_id, None)

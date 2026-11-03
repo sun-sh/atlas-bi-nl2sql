@@ -190,6 +190,7 @@ flowchart TD
 - SQLite 执行受 `QUERY_TIMEOUT_SECONDS`（默认 5 秒）限制，并只读取 `MAX_RESULT_ROWS + 1` 行判断截断，不再先全量读入内存。
 - 每次查询返回 `run_context`，包含 `trace_id`、策略版本、修复预算、结果行数预算和超时配置。
 - 这些约束位于编排层之外，未来替换 LangGraph 也不会绕过 SQL 门禁和资源边界。
+- 查询运行中可点击停止分析：浏览器中止 SSE，同时调用 `POST /api/query/cancel/{trace_id}`，服务端通过 Harness 取消事件中断 SQLite 查询和后续节点。
 
 ## 自愈机制
 

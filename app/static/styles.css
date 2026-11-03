@@ -415,3 +415,6 @@ button:disabled{cursor:wait;opacity:.6}
 .badge.warn{background:#f7efd6;color:#92732b}.badge.cancel{background:#edf0eb;color:#7c857d}
 @media(max-width:1100px){.platform-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:760px){.platform-tabs{width:100%;overflow:auto;flex-wrap:nowrap}.platform-tab{white-space:nowrap;flex:1 0 auto}.platform-grid>.panel{padding:13px}.heading-actions{align-items:stretch}.heading-actions .secondary-btn{flex:1}}
+
+.primary-btn[data-mode="cancel"]{background:#7a2e2e}
+.primary-btn[data-mode="cancel"]:hover{background:#652626}

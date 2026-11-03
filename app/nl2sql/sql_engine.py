@@ -8,7 +8,7 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
-from app.nl2sql.harness import HarnessPolicyError, validate_policy
+from app.nl2sql.harness import HarnessPolicyError, is_cancelled, validate_policy
 from app.nl2sql.schema_catalog import allowed_tables
 from app.nl2sql.settings import get_settings
 
@@ -20,6 +20,10 @@ ALLOWED_OPERATORS = {"=", "!=", "<>", ">", "<", ">=", "<=", "+", "-", "*", "/", 
 
 
 class SQLValidationError(ValueError):
+    pass
+
+
+class QueryCancelled(RuntimeError):
     pass
 
 
@@ -68,7 +72,7 @@ def validate_sql(sql: str) -> str:
     return statement.sql(dialect="sqlite")
 
 
-def execute_sql(sql: str, limit: int | None = None) -> dict[str, Any]:
+def execute_sql(sql: str, limit: int | None = None, cancel_trace_id: str | None = None) -> dict[str, Any]:
     settings = get_settings()
     safe_sql = validate_sql(sql)
     row_limit = limit or settings.max_rows
@@ -78,7 +82,7 @@ def execute_sql(sql: str, limit: int | None = None) -> dict[str, Any]:
     deadline = time.monotonic() + settings.query_timeout_seconds
 
     def progress_handler() -> int:
-        return 1 if time.monotonic() >= deadline else 0
+        return 1 if time.monotonic() >= deadline or is_cancelled(cancel_trace_id) else 0
     conn.set_progress_handler(progress_handler, 1000)
     try:
         cur = conn.execute(safe_sql)
@@ -86,6 +90,8 @@ def execute_sql(sql: str, limit: int | None = None) -> dict[str, Any]:
         rows = cur.fetchmany(row_limit + 1)
     except sqlite3.OperationalError as exc:
         if "interrupted" in str(exc).lower():
+            if is_cancelled(cancel_trace_id):
+                raise QueryCancelled("查询已取消") from exc
             raise TimeoutError(f"查询超过 {settings.query_timeout_seconds:g} 秒执行上限") from exc
         raise
     finally:
