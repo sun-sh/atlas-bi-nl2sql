@@ -63,7 +63,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 最终轮由 3 个隔离进程运行，报告保存 `runtime`、`source_sha256`、`case_manifest_sha256` 和 `evaluation_contract`。完整结果见 [首轮 JSON](evaluations/evaluation-v3-100-initial-2026-10-27.json) 与 [最终轮 JSON](evaluations/evaluation-v3-100-2026-10-27.json)。该成绩是带日期的在线能力快照，不是 CI 固定分数。
 
-2026-11-03 的当前配置实时抽查为 **99/100**：`roi-channels` 首次 SQL 为空，导致该轮生成失败；单独复跑该用例时触发一次模型重试并通过。这个结果说明在线模型存在波动，归档的 100/100 不应被表述为稳定承诺。
+归档的 100/100 只代表 2026-10-27 的模型、网络和数据条件下的一次快照，不应被表述为稳定承诺；用当前配置重新运行时，应以新生成的带日期报告为准，不要把未归档的临时抽查写成正式成绩。
 
 2026-10-27 的旧版 18 条快照为 **5/18 通过、命中率 27.8%、SQL 执行率 55.6%、模型完成率 44.4%、平均每条 15.4 秒**。该结果用于定位 Qwen thinking、空 SQL、SQL 修复、语义口径和解读回退问题，不代表当前 100 条套件成绩；完整报告见 [旧版评测 JSON](evaluations/evaluation-v2-2026-10-27.json)。
 

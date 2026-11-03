@@ -1,4 +1,4 @@
-# Atlas BI · 企业级电商 NL2SQL 数据分析平台
+# Atlas BI｜电商 NL2SQL 智能分析平台
 
 **把自然语言经营问题转化为可执行、可审计、可复现的只读 SQL 查询。**
 
@@ -13,6 +13,8 @@ Atlas BI 面向电商运营、商业分析与数据团队，覆盖订单、商�
 ![Atlas BI 分析会话：用户问题、模型回答和按需展开的数据依据](docs/images/atlas-stream-final.png)
 
 当前工作台界面（截图更新于 2026-10-27）：对话为主，历史会话与分析条件按需打开，SQL 和执行证据收在回答下方。
+
+[快速启动](#快速启动) · [Agent 架构](#agent-编排) · [严格模型评测](#严格模型评测) · [评测报告](docs/evaluations/holdout-2026-11-03.json)
 
 ## 业务定位
 
@@ -152,7 +154,7 @@ flowchart TD
 
 该套件主要是由时间、地区、渠道、品类矩阵展开的**模板化回归集**，用于验证固定业务域内的链路稳定性，不等同于开放域真实问题的泛化评测。
 
-2026-11-03 另做了一次当前配置的实时抽查：100 条中 **99/100 通过**，`roi-channels` 首次 SQL 为空导致该次失败；单独复跑该用例时触发一次模型重试并通过。因此 README 将 **2026-10-27 的 100/100** 标为归档快照，而不是当前稳定承诺。报告：[首轮](docs/evaluations/evaluation-v3-100-initial-2026-10-27.json)、[最终轮](docs/evaluations/evaluation-v3-100-2026-10-27.json)。旧版 18 条与 6 条快照仅保留在 [评测文档](docs/EVALUATION.md) 的历史部分。
+**2026-10-27 的 100/100** 是带日期的归档快照，不是当前稳定承诺；模型服务、网络和配置变化后应重新运行并记录新的在线报告。报告：[首轮](docs/evaluations/evaluation-v3-100-initial-2026-10-27.json)、[最终轮](docs/evaluations/evaluation-v3-100-2026-10-27.json)。旧版 18 条与 6 条快照仅保留在 [评测文档](docs/EVALUATION.md) 的历史部分。
 
 ## 数据中台
 
@@ -216,7 +218,8 @@ flowchart TD
 `POST /api/query/stream` 使用 Server-Sent Events。标准事件顺序为：
 
 ```text
-start  status*  result  [thinking]  (delta* | reset?)  narrative  done
+起点：start → status* → result → [thinking] → (delta* | reset?) → narrative → done
+用户中断：可在 status / result / narrative 阶段返回 cancelled
 ```
 
 - `start`：开始本轮回复。
@@ -226,13 +229,14 @@ start  status*  result  [thinking]  (delta* | reset?)  narrative  done
 - `reset`：流中途失败时，用确定性摘要替换不完整草稿。
 - `narrative`：最终结论文本和 `model` / `digest` 来源。
 - `done`：本轮完成；有 `session_id` 时返回已持久化会话快照。
+- `cancelled`：用户停止分析或请求被中断；浏览器保留已经收到的可信结果，不再等待后续叙述。
 
 ```bash
 curl -N -X POST http://127.0.0.1:8000/api/query/stream \
   -H 'Content-Type: application/json' \
-    -H 'Accept: text/event-stream' \
-      -d '{"question":"上个月各渠道ROI","session_id":null}'
-      ```
+  -H 'Accept: text/event-stream' \
+  -d '{"question":"上个月各渠道ROI","session_id":null}'
+```
 
 浏览器端使用 `fetch` + `ReadableStream` 读取 POST 响应。结果先进入同一条 AI 回复，SQL、明细和证据按需展开；模型文本再以 `delta` 增量追加。用户上翻时暂停自动跟随，可点击回到最新回答。
 
@@ -242,12 +246,15 @@ curl -N -X POST http://127.0.0.1:8000/api/query/stream \
 | --- | --- |
 | `GET /api/health` | 数据库、检索后端、模型状态与修复配置 |
 | `GET /api/overview` | 经营总览指标 |
+| `GET /api/examples` | 获取工作台示例问题 |
 | `POST /api/query` | 同步执行完整 NL2SQL 查询 |
 | `POST /api/query/stream` | SSE 流式查询与结果解读 |
+| `POST /api/query/cancel/{trace_id}` | 请求停止运行中的查询 |
 | `GET/POST /api/sessions` | 列出或创建会话 |
 | `GET/DELETE /api/sessions/{id}` | 恢复或删除会话 |
 | `GET /api/data-assets` | 固定业务域的数据资产巡检 |
 | `GET /api/data-platform` | 数据中台概览、质量、血缘和审计 |
+| `GET/POST /api/data-platform/workspaces` | 工作区列表与创建 |
 | `GET/POST /api/data-platform/sources` | 数据源列表与注册 |
 | `POST /api/data-platform/sources/{id}/sync` | 执行快照 / ingest 同步 |
 | `GET/POST /api/data-platform/metrics` | 指标目录 |
@@ -340,7 +347,7 @@ app/
 data/               # 本地数据库、会话与模型配置（不入库）
 docs/
   images/           # 工作台、数据中台和评测中台截图
-  evaluations/      # 脱敏评测报告，包含首轮与最终结果
+  evaluations/      # 回归快照、旧版排查与 holdout 报告
   EVALUATION.md     # 回归集、严格口径、数据集、实验与任务说明
   *.md              # 架构、运行、评测与体验说明
 tests/              # 自动化测试

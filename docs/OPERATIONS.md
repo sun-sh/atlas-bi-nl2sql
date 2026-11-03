@@ -35,7 +35,7 @@ Session memory is stored in `data/sessions.db` and excluded from Git. It is shor
 
 ## Streaming endpoint
 
-`POST /api/query/stream` uses Server-Sent Events. Clients should handle `result`, `delta`, `reset`, `thinking`, `narrative` and `done`. The `result` event carries trusted rows, SQL, evidence and a deterministic first-screen `answer`; the final model text arrives later. `delta` events append model content, `reset` replaces a partial draft with the deterministic digest, and `narrative` supplies the final text and source mode. When `session_id` is supplied, `done` returns the persisted session snapshot. Disable proxy buffering for this route.
+`POST /api/query/stream` uses Server-Sent Events. Clients should handle `result`, `delta`, `reset`, `thinking`, `narrative`, `done` and `cancelled`. The `result` event carries trusted rows, SQL, evidence and a deterministic first-screen `answer`; the final model text arrives later. `delta` events append model content, `reset` replaces a partial draft with the deterministic digest, and `narrative` supplies the final text and source mode. When `session_id` is supplied, `done` returns the persisted session snapshot. Disable proxy buffering for this route.
 
 For Qwen-family models, both SQL generation/repair and result narration send `chat_template_kwargs.enable_thinking=false`, so output tokens are spent on the answer rather than a hidden reasoning phase. Other OpenAI-compatible providers do not receive this extension.
 
