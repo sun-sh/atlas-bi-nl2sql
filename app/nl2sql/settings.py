@@ -31,6 +31,7 @@ class Settings:
     elasticsearch_url: str | None = os.getenv("ELASTICSEARCH_URL") or None
     max_repair_attempts: int = int(os.getenv("MAX_REPAIR_ATTEMPTS", "2"))
     max_rows: int = int(os.getenv("MAX_RESULT_ROWS", "200"))
+    query_timeout_seconds: float = float(os.getenv("QUERY_TIMEOUT_SECONDS", "5"))
 
 
 @lru_cache(maxsize=1)

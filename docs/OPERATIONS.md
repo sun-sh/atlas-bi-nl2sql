@@ -46,7 +46,9 @@ python -m pytest -q
 python -m app.evaluation.run
 ```
 
-A release candidate should have all tests passing and no unexpected warning regressions. Evaluation uses the configured model in strict mode: record `execution_rate`, `hit_rate` and `model_rate` as observed, and never treat rule fallback as a model pass. Model-dependent scores are a dated snapshot, not a deterministic CI gate.
+A release candidate should have all tests passing and no unexpected warning regressions.
+
+SQL execution is bounded by `QUERY_TIMEOUT_SECONDS` (default 5 seconds) and `MAX_RESULT_ROWS`. The harness also rejects recursive CTEs, CROSS JOIN, more than three JOINs and projection-level `*` in subqueries. Raise these limits only with a matching load test; do not silently widen them for one-off demos. Evaluation uses the configured model in strict mode: record `execution_rate`, `hit_rate` and `model_rate` as observed, and never treat rule fallback as a model pass. Model-dependent scores are a dated snapshot, not a deterministic CI gate.
 
 ## Troubleshooting
 

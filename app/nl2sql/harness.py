@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+POLICY_VERSION = "nl2sql-harness-v1"
+MAX_JOINS = 3
+MAX_SUBQUERY_DEPTH = 3
+
+
+@dataclass(frozen=True)
+class RunContext:
+    trace_id: str
+    deadline_seconds: float
+    max_repair_attempts: int
+    max_result_rows: int
+    policy_version: str = POLICY_VERSION
+    budget: dict[str, int] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "trace_id": self.trace_id,
+            "deadline_seconds": self.deadline_seconds,
+            "max_repair_attempts": self.max_repair_attempts,
+            "max_result_rows": self.max_result_rows,
+            "policy_version": self.policy_version,
+            "budget": dict(self.budget),
+        }
+
+
+class HarnessPolicyError(ValueError):
+    pass
+
+
+def create_run_context(*, trace_id: str, timeout_seconds: float, max_repair_attempts: int, max_result_rows: int) -> RunContext:
+    return RunContext(trace_id=trace_id, deadline_seconds=timeout_seconds, max_repair_attempts=max_repair_attempts, max_result_rows=max_result_rows, budget={"repairs": max_repair_attempts, "result_rows": max_result_rows})
+
+
+def validate_policy(sql: str, parsed=None) -> None:
+    """Reject query shapes that can exhaust the local SQLite worker."""
+    import sqlglot
+    from sqlglot import exp
+    statement = parsed or sqlglot.parse_one(sql, read="sqlite")
+    if any(cte.args.get("recursive") for cte in statement.find_all(exp.With)):
+        raise HarnessPolicyError("递归 CTE 不在当前查询能力范围内")
+    joins = list(statement.find_all(exp.Join))
+    if len(joins) > MAX_JOINS:
+        raise HarnessPolicyError(f"JOIN 数量超过上限 {MAX_JOINS}")
+    if any(str(join.args.get("kind") or "").upper() == "CROSS" for join in joins):
+        raise HarnessPolicyError("禁止 CROSS JOIN，请使用带关联条件的 JOIN")
+    selects = list(statement.find_all(exp.Select))
+    if len(selects) > MAX_SUBQUERY_DEPTH + 1:
+        raise HarnessPolicyError(f"子查询层级超过上限 {MAX_SUBQUERY_DEPTH}")
+    for select in selects:
+        for item in select.expressions:
+            target = item.this if isinstance(item, exp.Alias) else item
+            if isinstance(target, exp.Star) or (isinstance(target, exp.Column) and isinstance(target.this, exp.Star)):
+                raise HarnessPolicyError("禁止 SELECT *，请显式列出字段")

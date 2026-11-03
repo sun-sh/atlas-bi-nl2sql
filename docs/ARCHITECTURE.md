@@ -13,6 +13,8 @@ Session memory is deliberately bounded: SQLite-backed short-term state, at most 
 
 All rule-generated, model-generated and repaired SQL passes through the same validator before execution. Result narration runs only after a trusted SQL result exists: deterministic digest statistics constrain the prompt, and a model or streaming failure falls back to the same deterministic summary. The model may summarize trusted rows, but it never rewrites SQL, rows or evidence.
 
+The SQL harness enforces a bounded policy before execution: one SELECT statement, authorized tables/functions, no projection-level stars (including inside CTEs), no recursive CTEs, no CROSS JOIN, at most three JOINs, and a bounded subquery depth. SQLite execution also has a wall-clock progress-handler timeout and fetches only the rows needed to mark truncation.
+
 On the model path, an empty first SQL response triggers one model retry. Validation or execution failures enter the bounded `repair` node; an all-empty aggregate result is also treated as a failure signal. Narration empty/truncated responses receive one retry at a larger token budget, after which production falls back to the deterministic digest while strict evaluation fails the case.
 
 ## Component diagram
@@ -171,6 +173,10 @@ The LangGraph state carries the question, retrieval question, trace ID, timer, s
 - Qdrant stores vectors in memory by default; a remote endpoint can be supplied.
 - Lexical retrieval uses Elasticsearch BM25 when reachable, otherwise local IDF scoring.
 - Final scoring is `0.56 * semantic + 0.44 * lexical`, with evidence preserved in the response.
+
+## Harness boundary
+
+`app/nl2sql/harness.py` defines the versioned run contract. `RunContext` records the trace ID, query timeout, repair budget, result-row budget and policy version; it is carried through LangGraph state and returned as `run_context`. The SQL policy is separate from LangGraph so the orchestration layer can be replaced without weakening execution guardrails.
 
 ## Failure model
 

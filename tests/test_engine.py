@@ -41,6 +41,35 @@ def test_validator_rejects_unknown_functions():
         validate_sql("SELECT load_extension('x') FROM orders")
 
 
+def test_harness_policy_rejects_recursive_cte_and_cross_join():
+    with pytest.raises(SQLValidationError, match="递归 CTE"):
+        validate_sql("WITH RECURSIVE c AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM c) SELECT n FROM c")
+    with pytest.raises(SQLValidationError, match="CROSS JOIN"):
+        validate_sql("SELECT o.order_id FROM orders o CROSS JOIN orders x")
+
+
+def test_harness_policy_rejects_star_inside_cte_but_allows_count_star():
+    with pytest.raises(SQLValidationError, match=r"SELECT \*"):
+        validate_sql("WITH x AS (SELECT * FROM orders) SELECT order_id FROM x")
+    assert validate_sql("SELECT COUNT(*) AS n FROM orders")
+
+
+def test_harness_policy_rejects_excessive_joins():
+    sql = "SELECT o.order_id FROM orders o JOIN orders a ON a.order_id=o.order_id JOIN orders b ON b.order_id=o.order_id JOIN orders c ON c.order_id=o.order_id JOIN orders d ON d.order_id=o.order_id"
+    with pytest.raises(SQLValidationError, match="JOIN"):
+        validate_sql(sql)
+
+
+def test_query_timeout_interrupts_long_query(monkeypatch):
+    from types import SimpleNamespace
+    from app.nl2sql import sql_engine
+    settings = sql_engine.get_settings()
+    fake = SimpleNamespace(db_path=settings.db_path, max_rows=200, query_timeout_seconds=0.001)
+    monkeypatch.setattr(sql_engine, "get_settings", lambda: fake)
+    with pytest.raises(TimeoutError):
+        execute_sql("SELECT COUNT(o1.order_id) AS n FROM orders o1 JOIN orders o2 ON 1=1 JOIN orders o3 ON 1=1")
+
+
 def test_execute_returns_typed_rows():
     result = execute_sql("SELECT COUNT(*) AS n FROM orders WHERE status = 'paid'")
     assert result["rows"][0]["n"] > 0

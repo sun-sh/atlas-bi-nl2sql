@@ -8,6 +8,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 
 from app.nl2sql import generator
+from app.nl2sql.harness import create_run_context
 from app.nl2sql.model_config import get_model_config
 from app.nl2sql.generator import generate_llm_repair_sql, generate_llm_sql, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
@@ -35,6 +36,7 @@ class GraphState(TypedDict, total=False):
     warnings: list[str]
     started: float
     trace_id: str
+    run_context: dict[str, Any]
     mode: str
     context: dict[str, Any]
     narrate: bool
@@ -256,6 +258,7 @@ def finalize_node(state: GraphState) -> GraphState:
         narrative_model=narrative.model,
         narrative_retries=narrative.retries,
         generation_retries=state.get("generation_retries", 0),
+        run_context=state.get("run_context", {}),
     )
     return {"final": final}
 
@@ -288,11 +291,18 @@ def _initial_state(
     narrate: bool,
     allow_rule_fallback: bool,
 ) -> GraphState:
+    trace_id = uuid.uuid4().hex[:12]
     return {
         "question": question.strip(),
         "context": context or {},
         "started": time.perf_counter(),
-        "trace_id": uuid.uuid4().hex[:12],
+        "trace_id": trace_id,
+        "run_context": create_run_context(
+            trace_id=trace_id,
+            timeout_seconds=get_settings().query_timeout_seconds,
+            max_repair_attempts=get_settings().max_repair_attempts,
+            max_result_rows=get_settings().max_rows,
+        ).as_dict(),
         "narrate": narrate,
         "allow_rule_fallback": allow_rule_fallback,
     }

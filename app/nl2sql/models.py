@@ -103,6 +103,7 @@ class QueryResult:
     narrative_model: str = ""
     generation_retries: int = 0
     narrative_retries: int = 0
+    run_context: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +121,7 @@ class QueryResult:
             "mode": self.mode,
             "warnings": self.warnings,
             "trace_id": self.trace_id,
+            "run_context": self.run_context,
             "narrative": {
                 "mode": self.narrative_mode,
                 "model": self.narrative_model,

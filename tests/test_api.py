@@ -32,6 +32,9 @@ def test_query_endpoint_returns_trace():
     assert body["attempts"][-1]["status"] == "success"
     assert body["rows"][0]["渠道"] == "App"
     assert "m.spend_date" in body["sql"]
+    assert body["run_context"]["policy_version"] == "nl2sql-harness-v1"
+    assert body["run_context"]["trace_id"] == body["trace_id"]
+    assert body["run_context"]["max_result_rows"] >= len(body["rows"])
 
 
 def test_invalid_query_is_rejected():

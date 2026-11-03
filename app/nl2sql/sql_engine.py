@@ -8,6 +8,7 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
+from app.nl2sql.harness import HarnessPolicyError, validate_policy
 from app.nl2sql.schema_catalog import allowed_tables
 from app.nl2sql.settings import get_settings
 
@@ -60,6 +61,10 @@ def validate_sql(sql: str) -> str:
     for col in statement.find_all(exp.Column):
         if col.name.lower() in SENSITIVE_COLUMNS:
             raise SQLValidationError(f"敏感字段不可直接查询：{col.name}")
+    try:
+        validate_policy(text, parsed=statement)
+    except HarnessPolicyError as exc:
+        raise SQLValidationError(str(exc)) from exc
     return statement.sql(dialect="sqlite")
 
 
@@ -70,10 +75,19 @@ def execute_sql(sql: str, limit: int | None = None) -> dict[str, Any]:
     started = time.perf_counter()
     conn = sqlite3.connect(f"file:{settings.db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
+    deadline = time.monotonic() + settings.query_timeout_seconds
+
+    def progress_handler() -> int:
+        return 1 if time.monotonic() >= deadline else 0
+    conn.set_progress_handler(progress_handler, 1000)
     try:
         cur = conn.execute(safe_sql)
-        rows = cur.fetchall()
         columns = [d[0] for d in cur.description or ()]
+        rows = cur.fetchmany(row_limit + 1)
+    except sqlite3.OperationalError as exc:
+        if "interrupted" in str(exc).lower():
+            raise TimeoutError(f"查询超过 {settings.query_timeout_seconds:g} 秒执行上限") from exc
+        raise
     finally:
         conn.close()
     elapsed = (time.perf_counter() - started) * 1000
@@ -82,9 +96,11 @@ def execute_sql(sql: str, limit: int | None = None) -> dict[str, Any]:
         "sql": safe_sql,
         "rows": data,
         "columns": columns,
-        "row_count": len(rows),
+        "row_count": min(len(rows), row_limit),  # bounded count; see truncated
         "truncated": len(rows) > row_limit,
         "elapsed_ms": round(elapsed, 2),
+        "policy_version": "nl2sql-harness-v1",
+        "query_timeout_seconds": settings.query_timeout_seconds,
     }
 
 

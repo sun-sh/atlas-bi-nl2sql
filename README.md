@@ -182,6 +182,15 @@ flowchart TD
 
 评测中台（2026-11-02）：任务队列、数据集版本、模型实验、bad case 回流和双运行差异。
 
+## Harness 运行边界
+
+查询工作流由 LangGraph 编排，但安全与预算不依赖 LangGraph。`app/nl2sql/harness.py` 负责生成 `RunContext` 和执行 SQL 策略：
+
+- 只允许单条 `SELECT`；递归 CTE、`CROSS JOIN`、超过 3 个 JOIN 和投影级 `SELECT *` 直接拒绝，CTE 内的 `*` 同样检查。
+- SQLite 执行受 `QUERY_TIMEOUT_SECONDS`（默认 5 秒）限制，并只读取 `MAX_RESULT_ROWS + 1` 行判断截断，不再先全量读入内存。
+- 每次查询返回 `run_context`，包含 `trace_id`、策略版本、修复预算、结果行数预算和超时配置。
+- 这些约束位于编排层之外，未来替换 LangGraph 也不会绕过 SQL 门禁和资源边界。
+
 ## 自愈机制
 
 模型输出是不可信输入。运行时的自愈不是无限重试，也不是规则替模型过评测：
@@ -303,6 +312,7 @@ Windows 可运行 `run.ps1`，macOS / Linux 可运行 `./run.sh`。
 | `ELASTICSEARCH_URL` | 空 | Elasticsearch；空值使用本地 IDF |
 | `MAX_REPAIR_ATTEMPTS` | `2` | SQL 修复上限 |
 | `MAX_RESULT_ROWS` | `200` | 结果返回上限 |
+| `QUERY_TIMEOUT_SECONDS` | `5` | SQLite 查询执行时间上限 |
 | `ATLAS_SESSION_DB_PATH` | `data/sessions.db` | 短期会话存储路径 |
 | `ATLAS_EVALUATION_DB_PATH` | `data/evaluation_tasks.db` | 评测任务、数据集、实验和反馈存储路径 |
 | `ATLAS_DATA_PLATFORM_DB_PATH` | `data/data_platform.db` | 数据中台控制面元数据与审计存储路径 |
