@@ -241,7 +241,7 @@ def finalize_node(state: GraphState) -> GraphState:
     warnings = list(state.get("warnings", [])) + narrative_warnings(narrative)
     mode = state.get("mode", "rule")
     if mode.startswith("rule"):
-        warnings.append("当前离线模式使用规则 SQL 生成器；配置 LLM_ENABLED=true 可切换为模型生成。")
+        warnings.append("当前离线模式使用规则 SQL 生成器；可在模型配置中启用模型生成。")
     final = QueryResult(
         question=state["question"],
         sql=state.get("sql", ""),

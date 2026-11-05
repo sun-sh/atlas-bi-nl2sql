@@ -10,7 +10,7 @@ Atlas BI 是一个电商经营分析问答项目，业务数据覆盖订单、�
 ![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-1f6feb)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-![Atlas BI 分析会话：用户问题、模型回答和按需展开的数据依据](docs/images/readme/atlas-workspace.png)
+![Atlas BI 分析会话：问题输入、快捷提问和分析条件入口](docs/images/readme/atlas-workspace.png)
 
 工作台把分析结论、SQL、明细和检索依据放在同一条对话里。
 

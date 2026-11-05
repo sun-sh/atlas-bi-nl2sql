@@ -52,7 +52,7 @@ def test_secondary_routes_are_directly_accessible():
     for path in ("/workspace", "/overview", "/evidence", "/data-assets", "/evaluation", "/models"):
         response = client.get(path)
         assert response.status_code == 200
-        assert "Atlas BI" in response.text and "NL2SQL" in response.text
+        assert "Atlas BI" in response.text and "电商经营分析" in response.text
 
 
 def test_evaluation_endpoint_reports_model_only_status():
@@ -89,8 +89,10 @@ def test_evaluation_endpoint_reports_model_only_status():
 
 def test_evaluation_page_explains_strict_model_policy():
     body = client.get('/evaluation').text
-    assert '严格模型链路' in body
-    assert '数据集版本、实验和队列任务' in body
+    assert '严格链路' in body
+    assert '禁止规则与摘要补位' in body
+    assert '数据集版本' in body
+    assert '模型实验' in body
     assert '逐用例结果' in body
     assert 'id="eval-meta"' in body
     assert 'id="eval-count"' in body

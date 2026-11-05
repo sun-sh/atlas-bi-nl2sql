@@ -118,17 +118,10 @@ function renderChannels(rows) {
 async function loadHealth() {
   try {
     const data = await api('/api/health');
-    $('#health-text').textContent = data.database
-      ? '数据服务正常'
-      : '数据库缺失';
-    const r = data.retrieval;
-    const semanticLabel =
-      r.qdrant_enabled || r.semantic_backend !== 'local fallback'
-        ? 'BGE 语义召回'
-        : '语义降级';
-    const lexicalLabel = r.elasticsearch_enabled ? 'ES BM25' : '本地 IDF';
-    $('#retrieval-meta').textContent =
-      `${semanticLabel} + ${lexicalLabel} · 只读 SQL`;
+    $('#health-text').textContent = data.database ? '数据服务正常' : '数据库缺失';
+    $('#retrieval-meta').textContent = data.retrieval.elasticsearch_enabled
+      ? '数据检索正常 · 只读查询'
+      : '本地检索 · 只读查询';
     state.model = data.model;
     renderModelHeading(data.model, data.llm_active);
     renderModelRuntime(data.model, data.llm_active);
@@ -158,6 +151,34 @@ async function loadExamples() {
   );
 }
 
+const SQL_SOURCE_LABELS = {
+  llm: '模型生成',
+  'llm-repair': '模型修复',
+  rule: '规则回退',
+  'rule-repair': '规则修复',
+  'model-failed': '模型未产出',
+  'model-repair-failed': '模型修复失败',
+  unavailable: '未运行',
+  error: '异常',
+};
+
+const ATTEMPT_STATUS_LABELS = {
+  success: '成功',
+  failed: '失败',
+};
+
+function sqlSourceLabel(value) {
+  return SQL_SOURCE_LABELS[value] || '来源未知';
+}
+
+function attemptLine(attempt, framed = false) {
+  const failed = attempt.status === 'failed';
+  const status = ATTEMPT_STATUS_LABELS[attempt.status] || attempt.status || '未知';
+  const prefix = framed ? '<span class="trace-mark ' + (failed ? 'bad' : '') + '">' + (failed ? '!' : '✓') + '</span>' : '';
+  const error = attempt.error ? ' · ' + escapeHtml(attempt.error) : '';
+  return '<div class="trace-item">' + prefix + '<span>第 ' + escapeHtml(attempt.attempt) + ' 次 · ' + escapeHtml(status) + ' · ' + escapeHtml(attempt.elapsed_ms) + ' 毫秒' + error + '</span></div>';
+}
+
 function renderResultBody(
   result,
   cols,
@@ -173,8 +194,8 @@ function renderResultBody(
     <div class="result-answer"><strong>分析结论</strong> <span class="narrative-tag">${result.narrative?.mode === 'model' ? `模型解读 · ${escapeHtml(result.narrative.model || '已完成')}` : '确定性摘要'}</span><div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div></div>
     ${(result.warnings || []).length ? `<div class="result-meta">${result.warnings.map((w) => `<span class="small-pill">${escapeHtml(w)}</span>`).join('')}</div>` : ''}
     <div class="result-meta">
-      <span class="small-pill">${{ llm: '模型生成', 'llm-repair': '模型修复', rule: '规则回退', 'rule-repair': '规则修复', 'model-failed': '模型未产出', 'model-repair-failed': '模型修复失败' }[result.mode] || '来源未知'}</span>
-      <span class="small-pill">${attempts.length} 次执行 · ${escapeHtml(result.elapsed_ms)} ms</span>
+      <span class="small-pill">${sqlSourceLabel(result.mode)}</span>
+      <span class="small-pill">${attempts.length} 次执行 · ${escapeHtml(result.elapsed_ms)} 毫秒</span>
       ${(result.plan?.inherited || []).map((item) => `<span class="small-pill inherited-pill">继承 · ${escapeHtml(item)}</span>`).join('')}
     </div>
     ${numericCol && firstDimension && rows.length > 1 ? `<div class="chart-box"><div class="chart-title">${escapeHtml(numericCol)} · 按 ${escapeHtml(firstDimension)} 展示${rows.length > 8 ? ' · 前 8 项，完整结果见数据依据' : ''}</div><div class="chart-bars">${bars}</div></div>` : ''}
@@ -182,10 +203,10 @@ function renderResultBody(
       <div class="evidence-detail">
         <div class="evidence-detail-head"><span>结果明细</span><span>${rows.length} 行${result.truncated ? ' · 已达到查询行数上限' : ''}</span></div>
         ${table}
-        <div class="evidence-detail-head"><span>生成的只读 SQL</span><span>${escapeHtml(result.sql_mode || result.mode || '')}</span></div>
+        <div class="evidence-detail-head"><span>生成的只读 SQL</span><span>${sqlSourceLabel(result.sql_mode || result.mode)}</span></div>
         <div class="sql-block">${escapeHtml(result.sql)}</div>
-        <div class="evidence-detail-head"><span>执行轨迹与 Schema 召回</span><span>${attempts.length} 次执行</span></div>
-        <div class="trace">${attempts.map((a) => `<div class="trace-item"><span class="trace-mark ${a.status === 'failed' ? 'bad' : ''}">${a.status === 'failed' ? '!' : '✓'}</span><span>第 ${escapeHtml(a.attempt)} 次 · ${escapeHtml(a.status)} · ${escapeHtml(a.elapsed_ms)} ms${a.error ? ' · ' + escapeHtml(a.error) : ''}</span></div>`).join('')}${(result.retrieval || []).map((hit) => `<div class="trace-item"><span class="trace-mark">◎</span><span>召回 ${escapeHtml(hit.label)}（${escapeHtml(hit.table)}）· 融合 ${escapeHtml(hit.score)} · 语义 ${escapeHtml(hit.vector_score)} · 关键词 ${escapeHtml(hit.lexical_score)}</span></div>`).join('')}</div>
+        <div class="evidence-detail-head"><span>执行轨迹与数据表召回</span><span>${attempts.length} 次执行</span></div>
+        <div class="trace">${attempts.map((a) => attemptLine(a, true)).join('')}${(result.retrieval || []).map((hit) => `<div class="trace-item"><span class="trace-mark">◎</span><span>召回 ${escapeHtml(hit.label)}（${escapeHtml(hit.table)}）· 融合 ${escapeHtml(hit.score)} · 语义 ${escapeHtml(hit.vector_score)} · 关键词 ${escapeHtml(hit.lexical_score)}</span></div>`).join('')}</div>
       </div>
     </details>`;
 }
@@ -195,7 +216,7 @@ function renderPendingTurn(question) {
   if (!thread) return null;
   thread.querySelector('.conversation-empty')?.remove();
   const stages = [
-    ['retrieve', '召回 Schema'],
+    ['retrieve', '召回数据表'],
     ['plan', '理解意图'],
     ['generate', '生成 SQL'],
     ['execute', '只读执行'],
@@ -206,12 +227,12 @@ function renderPendingTurn(question) {
     `<article class="turn-card is-streaming" data-live-turn="true">
       <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(question)}</div></div>
       <div class="turn-answer">
-        <div class="turn-label assistant-label">AI</div>
+        <div class="turn-label assistant-label">助手</div>
         <div class="assistant-content">
           <div class="stream-head">
             <span class="stream-pulse"></span>
             <strong class="stream-title">正在分析</strong>
-            <span class="stream-detail">准备检索 Schema</span>
+            <span class="stream-detail">准备检索数据表</span>
           </div>
           <div class="stream-stage-list" aria-live="polite">
             ${stages
@@ -324,8 +345,8 @@ function renderResult(result, options = {}) {
     liveCard.removeAttribute('data-live-turn');
     liveCard.innerHTML = `
       <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(result.question)}</div></div>
-      <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span></div>
-      <div class="turn-answer"><div class="turn-label assistant-label">AI</div><div class="assistant-content">${body}</div></div>`;
+      <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} 毫秒</span></div>
+      <div class="turn-answer"><div class="turn-label assistant-label">助手</div><div class="assistant-content">${body}</div></div>`;
     state.activeQueryCard = null;
   } else {
     thread.insertAdjacentHTML(
@@ -333,8 +354,8 @@ function renderResult(result, options = {}) {
       `
       <article class="turn-card">
         <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(result.question)}</div></div>
-        <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span></div>
-        <div class="turn-answer"><div class="turn-label assistant-label">AI</div><div class="assistant-content">${body}</div></div>
+        <div class="turn-meta"><span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} 毫秒</span></div>
+        <div class="turn-answer"><div class="turn-label assistant-label">助手</div><div class="assistant-content">${body}</div></div>
       </article>`,
     );
   }
@@ -349,19 +370,9 @@ function setTurnNarrative(card, text, trailing = false) {
   }
 }
 
-function setPageHeading(view) {
-  const headings = {
-    workspace: ['ATLAS / ANALYSIS', '今天想分析什么？', '直接问经营问题，回答会留在当前会话里；需要时再查看筛选条件和数据依据。'],
-    overview: ['ATLAS / OVERVIEW', '经营总览', '演示数据覆盖 2025 年 10 月至 2026 年 2 月。需要了解指标变化，可在分析会话中继续提问。'],
-    evidence: ['ATLAS / EVIDENCE', '每条结论，都能回到数据依据', '查看最近一次查询召回的业务表、融合分数、只读 SQL 与执行轨迹。'],
-    'data-assets': ['ATLAS / DATA PLATFORM', '先确认真实可用的数据与口径', '管理数据源、同步、资产目录、字段血缘、质量规则、指标口径、数据服务和审计。'],
-    evaluation: ['ATLAS / EVALUATION PLATFORM', '把模型评测变成可复用的质量服务', '以数据集版本、实验和队列任务组织严格模型评测，支持取消重试、结果对比和 bad case 回流。'],
-    models: ['ATLAS / MODELS', '选择本次分析使用的模型', '连接 OpenAI 兼容接口；保存后，后续查询会自动使用当前生效模型。'],
-  };
-  const [eyebrow, title, subtitle] = headings[view] || headings.workspace;
-  $('#page-eyebrow').textContent = eyebrow;
-  $('#page-title').textContent = title;
-  $('#page-subtitle').textContent = subtitle;
+function setPageHeading() {
+  $('#page-title').textContent = 'Atlas BI';
+  $('#page-subtitle').textContent = '电商经营分析';
 }
 
 function toggleWorkspacePanel(panel) {
@@ -411,15 +422,15 @@ function renderEvidence(result) {
       .map(
         (hit, index) => `
     <article class="panel schema-card">
-      <div class="schema-head"><div><div class="panel-kicker">RECALL #${index + 1}</div><div class="schema-name">${hit.label} · ${hit.table}</div></div><span class="badge">融合 ${hit.score}</span></div>
+      <div class="schema-head"><div><div class="schema-name">${hit.label} · ${hit.table}</div></div><span class="badge">融合 ${hit.score}</span></div>
       <p class="schema-desc">${hit.description}</p>
       <div class="score-grid"><div class="score-box"><div class="score-label">语义分数</div><div class="score-value">${hit.vector_score}</div></div><div class="score-box"><div class="score-label">关键词分数</div><div class="score-value">${hit.lexical_score}</div></div><div class="score-box"><div class="score-label">命中词</div><div class="score-value" style="font-size:12px">${hit.matched_terms.join(' / ') || '—'}</div></div></div>
     </article>`,
       )
       .join('') +
     `
-    <article class="panel schema-card"><div class="panel-kicker">QUERY TRACE</div><div class="schema-name" style="margin-top:7px">执行轨迹与安全门禁</div>
-    <div class="trace" style="margin-top:14px">${(result.attempts || []).map((a) => `<div class="trace-item"><span class="trace-mark ${a.status === 'failed' ? 'bad' : ''}">${a.status === 'failed' ? '!' : '✓'}</span><span>attempt ${a.attempt} · ${a.status} · ${a.elapsed_ms} ms ${a.error ? '· ' + a.error : ''}</span></div>`).join('')}</div>
+    <article class="panel schema-card"><div class="schema-name">执行轨迹与安全门禁</div>
+    <div class="trace" style="margin-top:14px">${(result.attempts || []).map((a) => attemptLine(a, true)).join('')}</div>
     <div class="sql-block" style="margin-top:12px">${escapeHtml(result.sql)}</div></article>`;
 }
 
@@ -527,11 +538,9 @@ function renderEmptyConversation() {
   const thread = $('#conversation-thread');
   if (!thread) return;
   thread.innerHTML = `<div class="conversation-empty">
-          <div class="conversation-empty-mark">AI</div>
-              <h3>直接问一个经营问题</h3>
-                  <p>例如“上个月各渠道 ROI”，再追问“那华东呢”。时间、指标和筛选条件会按会话继承。</p>
-                      <div class="starter-grid" id="example-list">${state.examples.map((q) => `<button class="example-chip" data-question="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}</div>
-                        </div>`;
+          <p class="conversation-empty-lead">直接问一个经营问题，例如“上个月各渠道 ROI”，也可以继续追问“那华东呢”。</p>
+          <div class="starter-grid" id="example-list">${state.examples.map((q) => `<button class="example-chip" data-question="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}</div>
+        </div>`;
   thread.querySelectorAll('.example-chip').forEach((btn) =>
     btn.addEventListener('click', () => {
       $('#question').value = btn.dataset.question || '';
@@ -574,7 +583,7 @@ function renderQueryError(card, message) {
   card.innerHTML = `
     <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(card.dataset.question || '')}</div></div>
     <div class="turn-answer stream-error-answer">
-      <div class="turn-label assistant-label">AI</div>
+      <div class="turn-label assistant-label">助手</div>
       <div class="stream-error"><strong>这次查询没有完成</strong><span>${escapeHtml(message)}</span><button type="button" class="retry-query-btn">重新尝试</button></div>
     </div>`;
   card.querySelector('.retry-query-btn')?.addEventListener('click', () => {
@@ -796,7 +805,7 @@ async function streamQuery(question, sessionId) {
           }
           const turnMeta = card?.querySelector('.turn-meta');
           if (turnMeta && result) {
-            turnMeta.innerHTML = `<span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} ms</span>`;
+            turnMeta.innerHTML = `<span>${escapeHtml(result.plan?.time_range || '')}</span><span>${escapeHtml(result.elapsed_ms)} 毫秒</span>`;
           }
           card?.classList.remove('is-streaming');
         } else if (event === 'cancelled') {
@@ -874,7 +883,7 @@ async function submitQuery(question) {
       }
     }
     if ($('#question').value.trim() === submittedQuestion) $('#question').value = '';
-    toast(`分析完成 · ${result.elapsed_ms} ms`);
+    toast(`分析完成 · ${result.elapsed_ms} 毫秒`);
   } catch (error) {
     state.activeQueryCard = null;
     const cancelled = error?.name === 'AbortError';
@@ -904,7 +913,7 @@ function switchView(view) {
   if (window.location.pathname !== `/${view}`) {
     window.history.pushState({}, '', `/${view}`);
   }
-  setPageHeading(view);
+  setPageHeading();
   $$('.mobile-nav-item').forEach((x) =>
     x.classList.toggle('active', x.dataset.view === view),
   );
@@ -963,17 +972,16 @@ function renderDataPlatform(data) {
     metricCard('字段血缘', `${summary.lineage_edges || 0} 条`, '源系统字段 → 平台资产字段'),
   ].join('');
   $('#source-count').textContent = `${(data.sources || []).length} 个`;
-  $('#source-table').innerHTML = (data.sources || []).map((source) => `<tr><td><strong>${escapeHtml(source.name)}</strong><div class="muted">${escapeHtml(source.kind)} · ${escapeHtml(source.location)}</div></td><td>${statusBadge(source.status)}<div class="muted">${escapeHtml(source.last_sync_at || '尚未同步')}</div></td><td>${fmtNum(source.row_count)} 行</td><td>${source.schedule_minutes ? `${source.schedule_minutes} 分钟` : '手动'}</td><td><button class="secondary-btn compact-btn" data-sync-source="${escapeHtml(source.id)}">同步</button></td></tr>`).join('');
+  $('#source-table').innerHTML = (data.sources || []).map((source) => `<tr><td><strong>${escapeHtml(source.name)}</strong><div class="muted">${source.kind === 'csv' ? 'CSV' : source.kind === 'sqlite' ? 'SQLite' : escapeHtml(source.kind)} · ${escapeHtml(source.location)}</div></td><td>${statusBadge(source.status)}<div class="muted">${escapeHtml(source.last_sync_at || '尚未同步')}</div></td><td>${fmtNum(source.row_count)} 行</td><td>${source.schedule_minutes ? `${source.schedule_minutes} 分钟` : '手动'}</td><td><button class="secondary-btn compact-btn" data-sync-source="${escapeHtml(source.id)}">同步</button></td></tr>`).join('');
   $$('[data-sync-source]').forEach((btn) => btn.addEventListener('click', () => syncPlatformSource(btn.dataset.syncSource)));
-  $('#quality-rule-table').innerHTML = `<table class="eval-table"><thead><tr><th>规则</th><th>类型</th><th>对象</th><th>状态</th></tr></thead><tbody>${(data.rules || []).map((rule) => `<tr><td>${escapeHtml(rule.name)}</td><td><code>${escapeHtml(rule.rule_type)}</code></td><td>${escapeHtml(rule.table_name)}.${escapeHtml(rule.column_name || '')}</td><td>${rule.enabled ? '<span class="badge">启用</span>' : '<span class="badge cancel">停用</span>'}</td></tr>`).join('')}</tbody></table>`;
+  const ruleTypeLabels = { not_null: '非空', unique: '唯一', non_negative: '非负', not_orphan: '外键有效', row_min: '最少行数' };
+  $('#quality-rule-table').innerHTML = `<table class="eval-table"><thead><tr><th>规则</th><th>类型</th><th>对象</th><th>状态</th></tr></thead><tbody>${(data.rules || []).map((rule) => `<tr><td>${escapeHtml(rule.name)}</td><td>${escapeHtml(ruleTypeLabels[rule.rule_type] || rule.rule_type)}</td><td>${escapeHtml(rule.table_name)}.${escapeHtml(rule.column_name || '')}</td><td>${rule.enabled ? '<span class="badge">启用</span>' : '<span class="badge cancel">停用</span>'}</td></tr>`).join('')}</tbody></table>`;
   $('#quality-run-table').innerHTML = (data.quality_runs || []).length ? `<table class="eval-table"><thead><tr><th>时间</th><th>数据源</th><th>结果</th></tr></thead><tbody>${data.quality_runs.map((run) => `<tr><td>${escapeHtml(formatEvaluatedAt(run.started_at))}</td><td>${escapeHtml(run.source_id)}</td><td><span class="badge ${run.failed ? 'fail' : ''}">${run.passed} 通过 / ${run.failed} 失败</span></td></tr>`).join('')}</tbody></table>` : '<p class="muted">尚无巡检记录。</p>';
   $('#metric-count').textContent = `${(data.metrics || []).length} 个`;
   $('#metric-table').innerHTML = `<table class="eval-table"><thead><tr><th>指标</th><th>粒度</th><th>口径</th><th>负责人</th><th>状态</th></tr></thead><tbody>${(data.metrics || []).map((metric) => `<tr><td><strong>${escapeHtml(metric.name)}</strong></td><td>${escapeHtml(metric.grain)}</td><td>${escapeHtml(metric.definition)}</td><td>${escapeHtml(metric.owner || '—')}</td><td>${statusBadge(metric.status === 'published' ? 'ready' : metric.status === 'deprecated' ? 'cancelled' : 'queued')}</td></tr>`).join('')}</tbody></table>`;
   $('#lineage-count').textContent = `${(data.lineage || []).length} 条`;
   $('#lineage-table').innerHTML = (data.lineage || []).length ? `<table class="eval-table"><thead><tr><th>上游字段</th><th></th><th>平台资产字段</th><th>关系</th></tr></thead><tbody>${data.lineage.slice(0, 100).map((edge) => `<tr><td><code>${escapeHtml(edge.upstream_node)}</code></td><td class="muted">→</td><td><code>${escapeHtml(edge.downstream_node)}</code></td><td>${escapeHtml(edge.relation)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">同步数据源后生成字段级血缘。</p>';
-  $('#audit-list').innerHTML = (data.audit || []).map((item) => `<div class="audit-item"><strong>${escapeHtml(item.action)}</strong><small>${escapeHtml(item.actor)} · ${escapeHtml(formatEvaluatedAt(item.created_at))}</small><code>${escapeHtml(item.resource_type)} / ${escapeHtml(item.resource_id)}</code><small>${item.role}</small></div>`).join('');
-  $('#asset-boundary').innerHTML = `<strong>数据中台控制面</strong><span>多源接入、只读数据服务、字段血缘、质量规则、指标目录与操作审计。</span><small>当前工作区：${escapeHtml(data.workspace?.name || '默认')} · 数据服务角色：viewer</small>`;
-}
+  $('#audit-list').innerHTML = (data.audit || []).map((item) => `<div class="audit-item"><strong>${escapeHtml(item.action)}</strong><small>${escapeHtml(item.actor)} · ${escapeHtml(formatEvaluatedAt(item.created_at))}</small><code>${escapeHtml(item.resource_type)} / ${escapeHtml(item.resource_id)}</code><small>${item.role}</small></div>`).join('');}
 
 async function syncPlatformSource(sourceId) {
   try {
@@ -1027,9 +1035,7 @@ function renderDataAssets(data) {
   $('#asset-metric-list').innerHTML = (data.semantic_layer?.metrics || []).map((metric) => `
     <div class="asset-metric"><strong>${escapeHtml(metric.name)}</strong><span>${escapeHtml(metric.grain)}</span><small>${escapeHtml(metric.definition)}</small></div>`).join('');
   $('#asset-relation-count').textContent = `${(data.relations || []).length} 条`;
-  $('#asset-relation-table').innerHTML = `<table class="eval-table"><thead><tr><th>源表</th><th>关系</th><th>目标表</th><th>孤儿记录</th></tr></thead><tbody>${(data.relations || []).map((r) => `<tr><td><code>${escapeHtml(r.source)}.${escapeHtml(r.source_column)}</code></td><td>${escapeHtml(r.description)}</td><td><code>${escapeHtml(r.target)}.${escapeHtml(r.target_column)}</code></td><td><span class="badge ${r.orphan_count ? 'fail' : ''}">${r.orphan_count}</span></td></tr>`).join('')}</tbody></table>`;
-  $('#asset-boundary').innerHTML = `<strong>数据中台控制面</strong><span>数据源注册与快照、资产目录、质量规则、指标目录、字段血缘和审计。</span><small>巡检时间：${escapeHtml(formatEvaluatedAt(data.generated_at))}</small>`;
-}
+  $('#asset-relation-table').innerHTML = `<table class="eval-table"><thead><tr><th>源表</th><th>关系</th><th>目标表</th><th>孤儿记录</th></tr></thead><tbody>${(data.relations || []).map((r) => `<tr><td><code>${escapeHtml(r.source)}.${escapeHtml(r.source_column)}</code></td><td>${escapeHtml(r.description)}</td><td><code>${escapeHtml(r.target)}.${escapeHtml(r.target_column)}</code></td><td><span class="badge ${r.orphan_count ? 'fail' : ''}">${r.orphan_count}</span></td></tr>`).join('')}</tbody></table>`;}
 
 const EVAL_LABELS = {
   sales_overview: '销售总览',
@@ -1047,17 +1053,16 @@ function formatEvaluatedAt(value) {
 }
 
 function evalModeLabel(item) {
-  return (
-    {
-      llm: '模型生成',
-      'llm-repair': '模型修复',
-      'model-failed': '模型未产出',
-      'model-repair-failed': '模型修复失败',
-      unavailable: '未运行',
-      error: '异常',
-    }[item.sql_mode] || item.sql_mode || '未知'
-  );
+  return SQL_SOURCE_LABELS[item.sql_mode] || item.sql_mode || '未知';
 }
+
+const FEEDBACK_CATEGORY_LABELS = {
+  wrong_result: '结果错误',
+  wrong_sql: 'SQL 口径',
+  bad_narrative: '解读问题',
+  retrieval: '召回问题',
+  other: '其他',
+};
 
 const EVAL_STATUS_LABELS = {
   queued: '排队中',
@@ -1132,8 +1137,8 @@ function renderEvaluationTaskSummary(task) {
     const model = report.model || {};
     $('#eval-summary').innerHTML = [
       metricCard('模型通过率', `${task.hit_rate ?? 0}%`, `${task.passed}/${task.total} 条模型结果通过`, true),
-      metricCard('SQL 执行率', `${task.execution_rate ?? 0}%`, '严格模型链路，不使用规则补位'),
-      metricCard('平均响应时间', `${task.avg_elapsed_ms ?? 0} ms`, '含检索、SQL、修复与解读'),
+      metricCard('SQL 执行率', `${task.execution_rate ?? 0}%`, '模型 SQL 实际执行比例'),
+      metricCard('平均响应时间', `${task.avg_elapsed_ms ?? 0} 毫秒`, '检索、SQL、修复与解读'),
       metricCard('覆盖意图', `${report.intents ?? 0} 类`, `${escapeHtml(model.model || task.model_name || '模型')} · ${escapeHtml(report.suite_version || task.suite_version || '')}`),
     ].join('');
   }
@@ -1172,7 +1177,7 @@ async function submitFeedback(event) {
   event.preventDefault();
   try {
     await api('/api/evaluation/feedback', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ task_id: $('#feedback-task').value, case_id: $('#feedback-case').value, category: $('#feedback-category').value, note: $('#feedback-note').value }) });
-    $('#feedback-message').textContent = '已加入 bad case 队列。';
+    $('#feedback-message').textContent = '已加入失败用例队列。';
     await loadEvaluationTasks();
   } catch (error) { $('#feedback-message').textContent = error.message; }
 }
@@ -1192,7 +1197,7 @@ function renderEvaluationReport(task) {
       <td>${escapeHtml(EVAL_LABELS[item.intent] || item.intent)}</td>
       <td>${modelBadge}<div class="muted">${escapeHtml(evalModeLabel(item))}</div></td>
       <td><span class="badge ${item.hit ? '' : 'fail'}">${item.hit ? '通过' : '未通过'}</span></td>
-      <td>${escapeHtml(item.attempts)} 次 / ${escapeHtml(item.elapsed_ms)} ms</td>
+      <td>${escapeHtml(item.attempts)} 次 / ${escapeHtml(item.elapsed_ms)} 毫秒</td>
       <td class="eval-result-cell">${item.error ? `<span class="eval-error">${escapeHtml(item.error)}</span>` : '<span class="eval-pass">模型结果符合验收值</span>'}</td>
     </tr>`;
   }).join('');
@@ -1322,7 +1327,7 @@ function renderEvaluationPlatform(data) {
   $('#experiment-count').textContent = `${experiments.length} 个实验`;
   $('#experiment-list').innerHTML = experiments.length ? experiments.map((exp) => `<div class="experiment-card"><strong>${escapeHtml(exp.name)}</strong><p>${escapeHtml(exp.hypothesis || '暂无实验假设')}</p><small>${escapeHtml(exp.dataset_id)} · ${escapeHtml(formatEvaluatedAt(exp.created_at))}</small><div class="experiment-runs">${(exp.tasks || []).map((task) => `<span>${escapeHtml(task.model_name || '待运行')} · ${task.hit_rate}%</span>`).join('') || '<span>尚未关联评测任务</span>'}</div></div>`).join('') : '<p class="muted">暂无实验记录。</p>';
   $('#feedback-count').textContent = `${feedback.length} 条`;
-  $('#feedback-table').innerHTML = feedback.length ? `<table class="eval-table"><thead><tr><th>用例</th><th>任务</th><th>分类</th><th>状态</th></tr></thead><tbody>${feedback.map((item) => `<tr><td>${escapeHtml(item.case_id)}<div class="muted">${escapeHtml(item.note || '')}</div></td><td><code>${escapeHtml(item.task_id)}</code></td><td>${escapeHtml(item.category)}</td><td>${statusBadge(item.status === 'open' ? 'queued' : 'ready')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无 bad case。</p>';
+  $('#feedback-table').innerHTML = feedback.length ? `<table class="eval-table"><thead><tr><th>用例</th><th>任务</th><th>分类</th><th>状态</th></tr></thead><tbody>${feedback.map((item) => `<tr><td>${escapeHtml(item.case_id)}<div class="muted">${escapeHtml(item.note || '')}</div></td><td><code>${escapeHtml(item.task_id)}</code></td><td>${escapeHtml(FEEDBACK_CATEGORY_LABELS[item.category] || item.category)}</td><td>${statusBadge(item.status === 'open' ? 'queued' : 'ready')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无失败用例。</p>';
   const activeTask = data.active;
   const selected = state.evalSelectedTask;
   const runSelect = $('#eval-dataset');
@@ -1344,7 +1349,7 @@ async function compareEvaluationTasks() {
     if (data.fixed?.length) results.push(`<div class="eval-diff-group fixed"><strong>新增修复 ${data.fixed.length}</strong>${data.fixed.map((item) => `<span>${escapeHtml(item.question)}</span>`).join('')}</div>`);
     if (data.regressed?.length) results.push(`<div class="eval-diff-group regressed"><strong>新增回归 ${data.regressed.length}</strong>${data.regressed.map((item) => `<span>${escapeHtml(item.question)}</span>`).join('')}</div>`);
     if (!results.length) results.push('<p class="muted">两份任务的逐用例通过状态没有变化。</p>');
-    $('#eval-compare-result').innerHTML = `<div class="eval-compare-metrics"><span>通过数 <strong>${data.delta.passed >= 0 ? '+' : ''}${data.delta.passed}</strong></span><span>通过率 <strong>${data.delta.hit_rate >= 0 ? '+' : ''}${data.delta.hit_rate}%</strong></span><span>执行率 <strong>${data.delta.execution_rate >= 0 ? '+' : ''}${data.delta.execution_rate}%</strong></span><span>平均耗时 <strong>${data.delta.avg_elapsed_ms >= 0 ? '+' : ''}${data.delta.avg_elapsed_ms} ms</strong></span></div>${results.join('')}`;
+    $('#eval-compare-result').innerHTML = `<div class="eval-compare-metrics"><span>通过数 <strong>${data.delta.passed >= 0 ? '+' : ''}${data.delta.passed}</strong></span><span>通过率 <strong>${data.delta.hit_rate >= 0 ? '+' : ''}${data.delta.hit_rate}%</strong></span><span>执行率 <strong>${data.delta.execution_rate >= 0 ? '+' : ''}${data.delta.execution_rate}%</strong></span><span>平均耗时 <strong>${data.delta.avg_elapsed_ms >= 0 ? '+' : ''}${data.delta.avg_elapsed_ms} 毫秒</strong></span></div>${results.join('')}`;
   } catch (error) {
     toast(error.message);
   }
@@ -1380,9 +1385,9 @@ function renderModelRuntime(model, active) {
     runtime.innerHTML = [
       ['状态', active ? '模型生成已启用' : '模型未启用'],
       ['模型', model.model || '未选择'],
-      ['服务商', model.provider || '未选择'],
+      ['服务商', { custom: '自定义兼容接口', openai: 'OpenAI', deepseek: 'DeepSeek', qwen: '通义千问', siliconflow: 'SiliconFlow', moonshot: 'Moonshot', disabled: '未配置' }[model.provider] || model.provider || '未选择'],
       ['接口地址', model.base_url || '未配置'],
-      ['API Key', model.api_key_configured ? '已保存（服务端）' : '未配置'],
+      ['访问密钥', model.api_key_configured ? '已保存（服务端）' : '未配置'],
     ]
       .map(
         ([k, v]) => `<div><span>${k}</span><span>${escapeHtml(v)}</span></div>`,
@@ -1411,13 +1416,13 @@ function updateModelKeyState(configured) {
   const note = $('#model-key-note');
   if (input) {
     input.placeholder = configured
-      ? '已保存，不回显；留空保持现有 Key'
+      ? '已保存，不回显；留空保持现有密钥'
       : 'sk-...';
   }
   if (note) {
     note.textContent = configured
-      ? 'API Key 已保存在服务端本地配置文件，浏览器不会回显；留空可继续使用。'
-      : 'API Key 仅保存在服务端，不在浏览器回显；保存后无需重复填写。';
+      ? '访问密钥已保存在服务端本地配置文件，浏览器不会回显；留空可继续使用。'
+      : '访问密钥仅保存在服务端，不在浏览器回显；保存后无需重复填写。';
   }
 }
 

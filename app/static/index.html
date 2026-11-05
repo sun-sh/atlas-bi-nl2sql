@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Atlas BI｜电商 NL2SQL 智能分析平台</title>
+  <title>Atlas BI｜电商经营分析</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
@@ -14,7 +14,7 @@
         <div class="brand-mark">A</div>
         <div>
           <div class="brand-name">Atlas BI</div>
-          <div class="brand-sub">电商 NL2SQL 分析平台</div>
+          <div class="brand-sub">电商经营分析</div>
         </div>
       </div>
       <nav class="nav">
@@ -30,10 +30,6 @@
         <div class="status-row"><span class="status-dot"></span><span id="health-text">正在连接…</span></div>
         <div class="mini-meta" id="retrieval-meta">双路召回 · 只读 SQL</div>
       </div>
-      <div class="sidebar-foot">
-        <div class="foot-title">设计原则</div>
-        <p>可解释检索、只读执行、失败可修复、结果可量化验收。</p>
-      </div>
     </aside>
 
     <main class="main">
@@ -48,9 +44,8 @@
 
       <header class="topbar">
         <div>
-          <div class="eyebrow" id="page-eyebrow">ATLAS / ANALYSIS</div>
-          <h1 id="page-title">今天想分析什么？</h1>
-          <p class="top-subtitle" id="page-subtitle">直接问经营问题，回答会留在当前会话里；需要时再查看筛选条件和数据依据。</p>
+          <h1 id="page-title">Atlas BI</h1>
+          <p class="top-subtitle" id="page-subtitle">电商经营分析</p>
         </div>
         <div class="top-actions">
           <span class="pill" id="model-pill"><span class="status-dot"></span>正在检查模型</span>
@@ -65,7 +60,6 @@
           <aside class="panel session-rail workspace-drawer" id="session-drawer" aria-label="历史会话">
             <div class="session-rail-head">
               <div>
-                <div class="panel-kicker">CONVERSATIONS</div>
                 <h2>历史会话</h2>
               </div>
               <button class="drawer-close" id="session-drawer-close" title="关闭历史会话" aria-label="关闭历史会话">×</button>
@@ -79,7 +73,6 @@
           <section class="panel conversation-panel">
             <div class="conversation-head">
               <div class="conversation-title">
-                <div class="panel-kicker">ANALYSIS THREAD</div>
                 <div class="conversation-title-row">
                   <h2 id="session-title">新的分析会话</h2>
                   <span class="thread-count" id="session-count">0 轮</span>
@@ -97,7 +90,6 @@
             </div>
             <div class="conversation-thread" id="conversation-thread" role="log" aria-label="分析对话" aria-live="off">
               <div class="conversation-empty">
-                <div class="conversation-empty-mark">AI</div>
                 <h3>直接问一个经营问题</h3>
                 <p>例如“上个月各渠道 ROI”，再追问“那华东呢”。时间、指标和筛选条件会按会话继承。</p>
                 <div class="starter-grid" id="example-list"></div>
@@ -108,7 +100,7 @@
             <form id="query-form" class="composer">
               <textarea id="question" aria-label="输入经营问题" rows="2" maxlength="300" placeholder="问销售额、品类、退款率、渠道 ROI，或继续追问…"></textarea>
               <div class="composer-foot">
-                <span class="hint">Enter 发送 · Shift + Enter 换行 · 只读查询</span>
+                <span class="hint">回车发送 · Shift + 回车换行 · 只读查询</span>
                 <button class="primary-btn" id="submit-btn" type="submit"><span>发送问题</span><span class="arrow">↗</span></button>
               </div>
             </form>
@@ -117,7 +109,7 @@
           <aside class="panel context-column workspace-drawer" id="context-drawer" aria-label="当前分析条件">
             <section class="context-card">
               <div class="panel-head compact">
-                <div><div class="panel-kicker">CURRENT CONTEXT</div><h2>当前分析条件</h2></div>
+                <div><h2>当前分析条件</h2></div>
                 <button class="drawer-close" id="context-drawer-close" title="关闭分析条件" aria-label="关闭分析条件">×</button>
               </div>
               <div class="context-list" id="context-list">
@@ -136,13 +128,9 @@
       </section>
 
       <section class="view" id="view-overview">
-        <div class="page-heading overview-heading">
-          <div>
-            <div class="eyebrow">BUSINESS OVERVIEW</div>
-            <h2>经营总览</h2>
-            <p>先看全局指标，再进入分析会话追踪具体问题。</p>
-          </div>
-          <button class="secondary-btn" id="overview-refresh-btn">刷新指标</button>
+        <div class="platform-head">
+          <span class="platform-title">经营指标</span>
+          <button class="text-action" id="overview-refresh-btn">刷新</button>
         </div>
         <div class="metrics-grid" id="metrics-grid">
           <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
@@ -150,83 +138,73 @@
         </div>
         <div class="bottom-grid">
           <section class="panel trend-panel">
-            <div class="panel-head compact"><div><div class="panel-kicker">SIGNAL</div><h2>2026 年 2 月销售趋势</h2></div><span class="muted">已支付订单实付 · 未扣减退款</span></div>
+            <div class="panel-head compact"><div><h2>2026 年 2 月销售趋势</h2></div><span class="muted">已支付订单实付 · 未扣减退款</span></div>
             <div id="trend-chart" class="trend-chart"></div>
           </section>
           <section class="panel channel-panel">
-            <div class="panel-head compact"><div><div class="panel-kicker">MIX</div><h2>渠道销售结构</h2></div><span class="muted">按订单实付</span></div>
+            <div class="panel-head compact"><div><h2>渠道销售结构</h2></div><span class="muted">按订单实付</span></div>
             <div id="channel-list" class="channel-list"></div>
           </section>
         </div>
       </section>
       <section class="view" id="view-evidence">
-        <div class="page-heading">
-          <div class="eyebrow">EXPLAINABILITY</div><h2>每一次生成，都应该能被追问</h2>
-          <p>这里展示最近一次查询的 Schema 召回、候选分数、SQL 校验与执行轨迹。</p>
-        </div>
         <div id="evidence-content" class="evidence-content"><div class="panel empty-small">先运行一条查询，再回到这里查看证据链。</div></div>
       </section>
 
       <section class="view" id="view-data-assets">
-        <div class="page-heading asset-heading">
-          <div>
-            <div class="eyebrow">DATA PLATFORM</div>
-            <h2>数据中台控制面</h2>
-            <p>统一管理数据源、同步状态、资产目录、字段血缘、质量规则、指标口径、受控数据服务和审计记录。默认工作区已接入电商业务库。</p>
-          </div>
-          <div class="heading-actions">
-            <button class="secondary-btn" id="scheduler-run-btn">执行到期同步</button>
-            <button class="secondary-btn" id="assets-refresh-btn">刷新控制面</button>
-          </div>
-        </div>
         <div class="metrics-grid asset-summary" id="asset-summary">
           <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
           <div class="metric-card skeleton"></div><div class="metric-card skeleton"></div>
         </div>
-        <div class="platform-tabs" id="data-platform-tabs">
-          <button class="platform-tab active" data-platform-tab="catalog">资产目录</button>
-          <button class="platform-tab" data-platform-tab="sources">数据源</button>
-          <button class="platform-tab" data-platform-tab="quality">质量治理</button>
-          <button class="platform-tab" data-platform-tab="metrics">指标服务</button>
-          <button class="platform-tab" data-platform-tab="lineage">血缘与审计</button>
+        <div class="platform-toolbar">
+          <div class="platform-tabs" id="data-platform-tabs">
+            <button class="platform-tab active" data-platform-tab="catalog">资产目录</button>
+            <button class="platform-tab" data-platform-tab="sources">数据源</button>
+            <button class="platform-tab" data-platform-tab="quality">质量治理</button>
+            <button class="platform-tab" data-platform-tab="metrics">指标服务</button>
+            <button class="platform-tab" data-platform-tab="lineage">血缘与审计</button>
+          </div>
+          <div class="heading-actions">
+            <button class="text-action" id="scheduler-run-btn">执行到期同步</button>
+            <button class="text-action" id="assets-refresh-btn">刷新</button>
+          </div>
         </div>
 
         <section class="platform-panel active" id="platform-panel-catalog">
           <div class="asset-layout">
             <section class="panel asset-tables">
-              <div class="panel-head compact"><div><div class="panel-kicker">ASSET CATALOG</div><h2>业务表与字段</h2></div><span class="badge" id="asset-table-count">等待加载</span></div>
+              <div class="panel-head compact"><div><h2>业务表与字段</h2></div><span class="badge" id="asset-table-count">等待加载</span></div>
               <div id="asset-table-list" class="asset-table-list"><p class="muted">正在读取资产目录…</p></div>
             </section>
             <div class="asset-side">
               <section class="panel asset-quality">
-                <div class="panel-head compact"><div><div class="panel-kicker">LATEST QUALITY</div><h2>最近一次巡检</h2></div><span class="badge" id="asset-quality-status">等待巡检</span></div>
+                <div class="panel-head compact"><div><h2>最近一次巡检</h2></div><span class="badge" id="asset-quality-status">等待巡检</span></div>
                 <div id="asset-quality-list" class="asset-check-list"></div>
               </section>
               <section class="panel asset-metrics">
-                <div class="panel-kicker">SEMANTIC LAYER</div><h2>指标口径</h2>
+                <h2>指标口径</h2>
                 <div id="asset-metric-list" class="asset-metric-list"></div>
               </section>
             </div>
           </div>
           <section class="panel asset-relations">
-            <div class="panel-head compact"><div><div class="panel-kicker">RELATIONSHIPS</div><h2>表关系与孤儿记录检查</h2></div><span class="badge" id="asset-relation-count">—</span></div>
+            <div class="panel-head compact"><div><h2>表关系与孤儿记录检查</h2></div><span class="badge" id="asset-relation-count">—</span></div>
             <div class="table-wrap" id="asset-relation-table"></div>
           </section>
-          <div class="asset-boundary" id="asset-boundary"></div>
         </section>
 
         <section class="platform-panel" id="platform-panel-sources">
           <div class="platform-grid">
             <section class="panel">
-              <div class="panel-head compact"><div><div class="panel-kicker">CONNECTORS</div><h2>数据源与同步</h2></div><span class="badge" id="source-count">—</span></div>
+              <div class="panel-head compact"><div><h2>数据源与同步</h2></div><span class="badge" id="source-count">—</span></div>
               <div class="table-wrap" id="source-table"></div>
             </section>
             <section class="panel">
-              <div class="panel-kicker">REGISTER SOURCE</div><h2>接入新的 SQLite / CSV</h2>
+              <h2>接入数据源</h2>
               <form class="model-form compact-form" id="source-form">
-                <label>名称<input id="source-name" required placeholder="例如：区域销售 CSV"></label>
+                <label>数据源名称<input id="source-name" required placeholder="例如：区域销售 CSV"></label>
                 <label>类型<select id="source-kind"><option value="csv">CSV</option><option value="sqlite">SQLite</option></select></label>
-                <label>路径<input id="source-location" required placeholder="data/imports/sales.csv"></label>
+                <label>文件路径<input id="source-location" required placeholder="data/imports/sales.csv"></label>
                 <label>同步周期（分钟）<input id="source-schedule" type="number" min="0" max="10080" value="0"></label>
                 <label>敏感级别<select id="source-sensitivity"><option value="internal">内部</option><option value="confidential">机密</option></select></label>
                 <button class="primary-btn" type="submit">注册数据源</button>
@@ -239,19 +217,19 @@
         <section class="platform-panel" id="platform-panel-quality">
           <div class="platform-grid">
             <section class="panel">
-              <div class="panel-head compact"><div><div class="panel-kicker">QUALITY RULES</div><h2>规则与巡检记录</h2></div><button class="secondary-btn compact-btn" id="quality-run-btn">运行巡检</button></div>
+              <div class="panel-head compact"><div><h2>规则与巡检记录</h2></div><button class="secondary-btn compact-btn" id="quality-run-btn">运行巡检</button></div>
               <div class="table-wrap" id="quality-rule-table"></div>
-              <div class="platform-subhead">最近运行</div>
+              <h3>最近巡检</h3>
               <div class="table-wrap" id="quality-run-table"></div>
             </section>
             <section class="panel">
-              <div class="panel-kicker">NEW RULE</div><h2>新增质量规则</h2>
+              <h2>新增质量规则</h2>
               <form class="model-form compact-form" id="quality-rule-form">
                 <label>名称<input id="rule-name" required placeholder="例如：客户编号非空"></label>
-                <label>类型<select id="rule-type"><option value="not_null">not_null</option><option value="unique">unique</option><option value="non_negative">non_negative</option><option value="not_orphan">not_orphan</option><option value="row_min">row_min</option></select></label>
+                <label>类型<select id="rule-type"><option value="not_null">非空</option><option value="unique">唯一</option><option value="non_negative">非负</option><option value="not_orphan">外键有效</option><option value="row_min">最少行数</option></select></label>
                 <label>表名<input id="rule-table" required placeholder="orders"></label>
                 <label>字段<input id="rule-column" placeholder="order_id"></label>
-                <label>外键目标 / 阈值<input id="rule-expression" placeholder="orders.order_id 或 1"></label>
+                <label>关联目标或阈值<input id="rule-expression" placeholder="orders.order_id 或 1"></label>
                 <button class="primary-btn" type="submit">保存规则</button>
               </form>
               <div id="rule-message" class="model-message">规则在只读连接上执行，结果写入巡检记录。</div>
@@ -262,11 +240,11 @@
         <section class="platform-panel" id="platform-panel-metrics">
           <div class="platform-grid">
             <section class="panel">
-              <div class="panel-head compact"><div><div class="panel-kicker">METRIC CATALOG</div><h2>统一指标定义</h2></div><span class="badge" id="metric-count">—</span></div>
+              <div class="panel-head compact"><div><h2>统一指标定义</h2></div><span class="badge" id="metric-count">—</span></div>
               <div class="table-wrap" id="metric-table"></div>
             </section>
             <section class="panel">
-              <div class="panel-kicker">PUBLISH METRIC</div><h2>登记指标口径</h2>
+              <h2>登记指标口径</h2>
               <form class="model-form compact-form" id="metric-form">
                 <label>指标名称<input id="metric-name" required placeholder="例如：毛利额"></label>
                 <label>统计粒度<input id="metric-grain" placeholder="订单 / 渠道 / 品类"></label>
@@ -281,37 +259,33 @@
 
         <section class="platform-panel" id="platform-panel-lineage">
           <section class="panel">
-            <div class="panel-head compact"><div><div class="panel-kicker">COLUMN LINEAGE</div><h2>字段血缘</h2></div><span class="badge" id="lineage-count">—</span></div>
+            <div class="panel-head compact"><div><h2>字段血缘</h2></div><span class="badge" id="lineage-count">—</span></div>
             <div class="table-wrap" id="lineage-table"></div>
           </section>
           <section class="panel audit-panel">
-            <div class="panel-head compact"><div><div class="panel-kicker">AUDIT TRAIL</div><h2>操作审计</h2></div><span class="badge">最近 20 条</span></div>
+            <div class="panel-head compact"><div><h2>操作审计</h2></div><span class="badge">最近 20 条</span></div>
             <div id="audit-list" class="audit-list"></div>
           </section>
         </section>
       </section>
 
       <section class="view" id="view-models">
-        <div class="page-heading">
-          <div class="eyebrow">MODEL GATEWAY</div><h2>连接你的大模型</h2>
-          <p>支持 OpenAI 兼容接口。填写 Base URL 和 API Key 后可在线拉取模型列表、测试连接并切换 SQL 生成模式。</p>
-        </div>
         <div class="model-layout">
           <section class="panel model-card">
-            <div class="panel-head compact"><div><div class="panel-kicker">01 / PROVIDER</div><h2>模型服务</h2></div><span id="model-status" class="badge">未配置</span></div>
+            <div class="panel-head compact"><div><h2>连接配置</h2></div><span id="model-status" class="badge">未配置</span></div>
             <form id="model-form" class="model-form">
-              <label>服务商<select id="model-provider">
-                <option value="custom">自定义 / OpenAI 兼容</option>
+              <label>模型服务商<select id="model-provider">
+                <option value="custom">兼容接口</option>
                 <option value="openai">OpenAI</option>
                 <option value="deepseek">DeepSeek</option>
                 <option value="qwen">通义千问</option>
                 <option value="siliconflow">SiliconFlow</option>
                 <option value="moonshot">Moonshot</option>
               </select></label>
-              <label>Base URL<input id="model-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="url"></label>
-              <label>API Key<input id="model-api-key" type="password" placeholder="sk-..." autocomplete="new-password"><small id="model-key-note">API Key 仅保存在服务端，不在浏览器回显；留空会继续使用已保存的 Key。</small></label>
-              <label>模型<input id="model-name" type="text" list="model-options" placeholder="例如 gpt-4.1-mini" autocomplete="off"><datalist id="model-options"></datalist><small>可直接填写模型 ID，或先拉取模型列表再选择。</small></label>
-              <label class="switch-row"><input id="model-enabled" type="checkbox"> 启用大模型生成与 SQL 自修复</label>
+              <label>服务地址<input id="model-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="url"></label>
+              <label>API 密钥<input id="model-api-key" type="password" placeholder="sk-..." autocomplete="new-password"><small id="model-key-note">访问密钥仅保存在服务端，不在浏览器回显；留空会继续使用已保存的密钥。</small></label>
+              <label>模型<input id="model-name" type="text" list="model-options" placeholder="例如 gpt-4.1-mini" autocomplete="off"><datalist id="model-options"></datalist><small>可直接填写模型标识。</small></label>
+              <label class="switch-row"><input id="model-enabled" type="checkbox"> 启用模型生成与失败自修复</label>
               <div class="form-actions">
                 <button type="button" class="secondary-btn" id="model-fetch-btn">获取模型</button>
                 <button type="button" class="secondary-btn" id="model-test-btn">测试连接</button>
@@ -321,33 +295,27 @@
             <div id="model-message" class="model-message">填写接口信息后先获取模型，再保存启用。</div>
           </section>
           <section class="panel model-card">
-            <div class="panel-kicker">02 / RUNTIME</div><h2>当前运行链路</h2>
+            <h2>运行状态</h2>
             <div id="model-runtime" class="model-runtime"></div>
-            <div class="model-note"><strong>查询链路</strong><span>问题 → Schema 召回 → 模型生成 SQL → AST 安全门禁 → 只读执行 → 失败反馈修复</span></div>
-            <div class="model-note"><strong>兼容范围</strong><span>支持提供 /v1/models 与 /v1/chat/completions 的 OpenAI 兼容服务。不同服务商的代理地址需包含对应 API 前缀。</span></div>
+
           </section>
         </div>
       </section>
 
       <section class="view" id="view-evaluation">
-        <div class="page-heading eval-heading">
-          <div>
-            <div class="eyebrow">EVALUATION PLATFORM</div>
-            <h2>评测中台控制面</h2>
-            <p>以数据集版本、实验和队列任务组织模型评测；保留严格模型链路、进度、历史、取消重试和 bad case 回流。</p>
-          </div>
-          <button class="secondary-btn" id="run-eval-btn">提交评测任务</button>
-        </div>
         <div class="eval-meta" id="eval-meta">
           <span>执行方式 <strong>任务队列 · 单执行槽</strong></span>
           <span>严格链路 <strong>禁止规则与摘要补位</strong></span>
           <span>状态 <strong>正在读取控制面</strong></span>
         </div>
-        <div class="platform-tabs" id="eval-platform-tabs">
-          <button class="platform-tab active" data-eval-tab="runs">任务队列</button>
-          <button class="platform-tab" data-eval-tab="datasets">数据集版本</button>
-          <button class="platform-tab" data-eval-tab="experiments">模型实验</button>
-          <button class="platform-tab" data-eval-tab="feedback">Bad Case</button>
+        <div class="platform-toolbar">
+          <div class="platform-tabs" id="eval-platform-tabs">
+            <button class="platform-tab active" data-eval-tab="runs">任务队列</button>
+            <button class="platform-tab" data-eval-tab="datasets">数据集版本</button>
+            <button class="platform-tab" data-eval-tab="experiments">模型实验</button>
+            <button class="platform-tab" data-eval-tab="feedback">失败用例</button>
+          </div>
+          <button class="primary-btn compact-btn" id="run-eval-btn">提交评测任务</button>
         </div>
 
         <section class="platform-panel active" id="eval-panel-runs">
@@ -356,11 +324,11 @@
           </div>
           <div class="eval-task-layout">
             <section class="panel eval-history-panel">
-              <div class="panel-head compact"><div><div class="panel-kicker">TASK QUEUE</div><h2>评测任务</h2></div><span class="badge" id="eval-history-count">等待加载</span></div>
+              <div class="panel-head compact"><div><h2>评测任务</h2></div><span class="badge" id="eval-history-count">等待加载</span></div>
               <div class="eval-task-list" id="eval-task-list"><p class="muted">正在读取任务队列…</p></div>
             </section>
             <section class="panel eval-compare-panel">
-              <div class="panel-head compact"><div><div class="panel-kicker">RUN DIFF</div><h2>结果对比</h2></div><button class="secondary-btn compact-btn" id="compare-eval-btn" type="button">对比两次任务</button></div>
+              <div class="panel-head compact"><div><h2>结果对比</h2></div><button class="secondary-btn compact-btn" id="compare-eval-btn" type="button">对比两次任务</button></div>
               <div class="eval-compare-form">
                 <label>基线<select id="eval-baseline"></select></label>
                 <label>候选<select id="eval-candidate"></select></label>
@@ -372,7 +340,7 @@
             <div class="panel evaluation-empty">提交任务后会进入队列。单执行槽保证模型调用和额度消耗可控；任务完成后可查看逐用例结果。</div>
           </div>
           <section class="panel eval-results">
-            <div class="panel-head compact"><div><div class="panel-kicker">SELECTED RUN</div><h2>逐用例结果</h2></div><span class="badge" id="eval-count">等待加载</span></div>
+            <div class="panel-head compact"><div><h2>逐用例结果</h2></div><span class="badge" id="eval-count">等待加载</span></div>
             <div class="table-wrap" id="eval-table"><p class="muted">选择一份评测任务后查看。</p></div>
           </section>
         </section>
@@ -380,15 +348,15 @@
         <section class="platform-panel" id="eval-panel-datasets">
           <div class="platform-grid">
             <section class="panel">
-              <div class="panel-head compact"><div><div class="panel-kicker">DATASET REGISTRY</div><h2>数据集与版本</h2></div><span class="badge" id="dataset-count">—</span></div>
+              <div class="panel-head compact"><div><h2>数据集与版本</h2></div><span class="badge" id="dataset-count">—</span></div>
               <div class="table-wrap" id="dataset-table"></div>
             </section>
             <section class="panel">
-              <div class="panel-kicker">CREATE VERSION</div><h2>从用例 ID 创建版本</h2>
+              <h2>从用例 ID 创建版本</h2>
               <form class="model-form compact-form" id="dataset-form">
                 <label>数据集名称<input id="dataset-name" required placeholder="例如：ROI 专项集"></label>
                 <label>版本<input id="dataset-version" required value="v1"></label>
-                <label>用例 ID（逗号或换行分隔）<textarea id="dataset-cases" required placeholder="roi-channels, roi-douyin"></textarea></label>
+                <label>用例编号（逗号或换行分隔）<textarea id="dataset-cases" required placeholder="roi-channels, roi-douyin"></textarea></label>
                 <label>说明<input id="dataset-description" placeholder="说明这个版本的验证目标"></label>
                 <button class="primary-btn" type="submit">发布数据集版本</button>
               </form>
@@ -400,11 +368,11 @@
         <section class="platform-panel" id="eval-panel-experiments">
           <div class="platform-grid">
             <section class="panel">
-              <div class="panel-head compact"><div><div class="panel-kicker">EXPERIMENTS</div><h2>模型实验记录</h2></div><span class="badge" id="experiment-count">—</span></div>
+              <div class="panel-head compact"><div><h2>模型实验记录</h2></div><span class="badge" id="experiment-count">—</span></div>
               <div id="experiment-list" class="experiment-list"></div>
             </section>
             <section class="panel">
-              <div class="panel-kicker">NEW EXPERIMENT</div><h2>登记实验假设</h2>
+              <h2>登记实验假设</h2>
               <form class="model-form compact-form" id="experiment-form">
                 <label>实验名称<input id="experiment-name" required placeholder="例如：DeepSeek 自愈对比"></label>
                 <label>数据集<select id="experiment-dataset"></select></label>
@@ -419,14 +387,14 @@
         <section class="platform-panel" id="eval-panel-feedback">
           <div class="platform-grid">
             <section class="panel">
-              <div class="panel-head compact"><div><div class="panel-kicker">BAD CASE QUEUE</div><h2>失败回流</h2></div><span class="badge" id="feedback-count">—</span></div>
+              <div class="panel-head compact"><div><h2>失败回流</h2></div><span class="badge" id="feedback-count">—</span></div>
               <div class="table-wrap" id="feedback-table"></div>
             </section>
             <section class="panel">
-              <div class="panel-kicker">TRIAGE</div><h2>登记 bad case</h2>
+              <h2>登记失败用例</h2>
               <form class="model-form compact-form" id="feedback-form">
-                <label>评测任务 ID<input id="feedback-task" required placeholder="ev_..."></label>
-                <label>用例 ID<input id="feedback-case" required placeholder="matrix-roi-last30-app"></label>
+                <label>评测任务编号<input id="feedback-task" required placeholder="ev_..."></label>
+                <label>用例编号<input id="feedback-case" required placeholder="matrix-roi-last30-app"></label>
                 <label>分类<select id="feedback-category"><option value="wrong_result">结果错误</option><option value="wrong_sql">SQL 口径</option><option value="bad_narrative">解读问题</option><option value="retrieval">召回问题</option><option value="other">其他</option></select></label>
                 <label>说明<textarea id="feedback-note" placeholder="记录失败现象和复核建议"></textarea></label>
                 <button class="primary-btn" type="submit">加入回流队列</button>

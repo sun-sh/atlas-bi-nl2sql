@@ -289,7 +289,7 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 
 
 STREAM_STAGE_LABELS = {
-    "retrieve": "正在召回相关 Schema",
+    "retrieve": "正在查找相关数据表",
     "plan": "正在解析分析意图",
     "generate": "正在生成 SQL",
     "execute": "正在执行只读查询",
