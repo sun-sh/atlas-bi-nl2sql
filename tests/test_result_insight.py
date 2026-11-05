@@ -97,3 +97,74 @@ def test_english_refund_rate_column_maps_to_chinese_metric():
     assert digest["metrics"][0]["sum"] is None
     assert digest["ranking_comparable"] is False
     assert not any("占比" in fact for fact in digest["facts"])
+
+
+def _grounded_digest():
+    plan = QueryPlan(
+        intent="sales_overview",
+        tables=["orders"],
+        metrics=["销售额"],
+    )
+    return build_result_digest(
+        "各渠道销售额",
+        plan,
+        [{"渠道": "App", "销售额": 120.0}, {"渠道": "Web", "销售额": 80.0}],
+        ["渠道", "销售额"],
+        2,
+        False,
+    )
+
+
+def test_narrative_accepts_only_digest_numbers_and_correct_top_channel():
+    from app.nl2sql.result_insight import validate_narrative
+
+    digest = _grounded_digest()
+    good = validate_narrative(
+        "结论：App 渠道销售额最高。\n关键发现：- App 为 120；Web 为 80。",
+        digest,
+    )
+    assert good["passed"] is True
+    assert good["errors"] == []
+
+
+def test_narrative_rejects_unfounded_number():
+    from app.nl2sql.result_insight import validate_narrative
+
+    check = validate_narrative("结论：App 销售额为 999。", _grounded_digest())
+    assert check["passed"] is False
+    assert any("摘要外数值" in error for error in check["errors"])
+
+
+def test_narrative_rejects_wrong_top_channel_and_trend_direction():
+    from app.nl2sql.result_insight import validate_narrative
+
+    plan = QueryPlan(intent="sales_overview", tables=["orders"], metrics=["销售额"])
+    digest = build_result_digest(
+        "按日看本月销售额趋势",
+        plan,
+        [
+            {"日期": "2026-02-01", "销售额": 100.0},
+            {"日期": "2026-02-02", "销售额": 80.0},
+        ],
+        ["日期", "销售额"],
+        2,
+        False,
+    )
+    digest["ranking"] = [
+        {"label": "2026-02-01", "value": "100", "share_pct": 55.56},
+        {"label": "2026-02-02", "value": "80", "share_pct": 44.44},
+    ]
+    check = validate_narrative(
+        "结论：2026-02-02 最高，销售额下降 20%。",
+        digest,
+    )
+    assert check["passed"] is False
+    assert any("非榜首" in error for error in check["errors"])
+
+    digest["trend"] = {**digest["trend"], "change_pct": 20.0}
+    check = validate_narrative(
+        "结论：2026-02-01 最高，销售额下降 20%。",
+        digest,
+    )
+    assert check["passed"] is False
+    assert any("趋势方向" in error for error in check["errors"])

@@ -11,7 +11,9 @@ Atlas BI has three runnable control planes plus bounded quality guardrails:
 
 Session memory is deliberately bounded: SQLite-backed short-term state, at most 20 turns per session, expiring after 7 days. It stores structured query context, not a cross-session user profile.
 
-All rule-generated, model-generated and repaired SQL passes through the same validator before execution. Result narration runs only after a trusted SQL result exists: deterministic digest statistics constrain the prompt, and a model or streaming failure falls back to the same deterministic summary. The model may summarize trusted rows, but it never rewrites SQL, rows or evidence.
+All rule-generated, model-generated and repaired SQL passes through the same validator before execution. Result narration runs only after a trusted SQL result exists: deterministic digest statistics constrain the prompt, the final text is validated against digest values, ranking and trend direction, and a validation, model or streaming failure falls back to the same deterministic summary. The model may summarize trusted rows, but it never rewrites SQL, rows or evidence.
+
+Before retrieval, a deterministic intent guard decides whether a request is answerable, needs clarification, or must be refused. Write requests, sensitive fields, out-of-domain requests and ambiguous business questions never reach SQL generation. Follow-ups remain answerable when the previous turn already established a metric.
 
 The SQL harness enforces a bounded policy before execution: one SELECT statement, authorized tables/functions, no projection-level stars (including inside CTEs), no recursive CTEs, no CROSS JOIN, at most three JOINs, and a bounded subquery depth. SQLite execution also has a wall-clock progress-handler timeout and fetches only the rows needed to mark truncation.
 

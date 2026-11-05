@@ -73,6 +73,12 @@ SQL execution is bounded by `QUERY_TIMEOUT_SECONDS` (default 5 seconds) and `MAX
 
 The project-level data platform keeps metadata, snapshots, quality runs and audit records in `data/data_platform.db`; generated platform warehouse data defaults to `data/platform_warehouse.db`. Override these with `ATLAS_DATA_PLATFORM_DB_PATH` and `ATLAS_PLATFORM_WAREHOUSE_DB_PATH`. Source registration accepts project-accessible SQLite and CSV paths, with `snapshot` or `ingest` synchronisation modes. The scheduler endpoint is an explicit due-sync entry point, not a resident cluster scheduler.
 
+## Scope guard and narrative validation
+
+`python -m app.evaluation.run --suite scope --min-hit-rate 100` runs the deterministic refusal/clarification suite without a model. Its cases must produce no SQL and no rows when the request is ambiguous, destructive, sensitive or outside the supported commerce domain.
+
+The result narrative is checked against the deterministic digest before it is returned. A model answer that cites an unknown number, calls a non-leading row the top result, or states the opposite trend is replaced by the deterministic summary. The response exposes `outcome` and `narrative_validation` for inspection. These checks reduce confident-wrong answers; they do not certify every business explanation.
+
 ## Evaluation-platform storage
 
 Evaluation datasets, experiments, feedback and queue tasks live in `data/evaluation_tasks.db`; override with `ATLAS_EVALUATION_DB_PATH`. The queue enforces one running evaluation at a time. A task may run 1-3 isolated model processes. Execution is triggered by FastAPI `BackgroundTasks` for the submitted task or by the explicit `POST /api/evaluation/queue/claim` worker path; there is no Celery-style resident distributed worker. Queued rows survive a process restart but must be claimed again before they resume.

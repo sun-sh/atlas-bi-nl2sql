@@ -223,3 +223,13 @@ def test_failure_diagnostics_count_setup_and_narrative_separately():
     assert report["failures"] == {"setup": 1, "narrative": 1}
     assert report["self_healing"] == {"attempted_cases": 1, "passed_cases": 1}
     assert next(item for item in report["by_intent"] if item["intent"] == "sales_overview")["hit_rate"] == 50
+
+
+def test_scope_guard_suite_passes():
+    from app.nl2sql.evaluation import run_scope_evaluation
+
+    report = run_scope_evaluation()
+    assert report["suite_version"] == "scope-guard-v1"
+    assert report["total"] >= 7
+    assert report["passed"] == report["total"]
+    assert all(case["sql"] == "" and case["rows"] == 0 for case in report["cases"])

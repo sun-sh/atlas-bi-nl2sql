@@ -158,6 +158,8 @@ const SQL_SOURCE_LABELS = {
   'rule-repair': '规则修复',
   'model-failed': '模型未产出',
   'model-repair-failed': '模型修复失败',
+  clarification: '需要补充条件',
+  unsupported: '不在可回答范围',
   unavailable: '未运行',
   error: '异常',
 };
@@ -191,7 +193,7 @@ function renderResultBody(
   table,
 ) {
   return `
-    <div class="result-answer"><strong>分析结论</strong> <span class="narrative-tag">${result.narrative?.mode === 'model' ? `模型解读 · ${escapeHtml(result.narrative.model || '已完成')}` : '确定性摘要'}</span><div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div></div>
+    <div class="result-answer${result.outcome && result.outcome !== 'answered' ? ' result-guard' : ''}"><strong>${result.outcome === 'clarification' ? '需要补充信息' : result.outcome === 'unsupported' ? '暂不能回答' : '分析结论'}</strong> <span class="narrative-tag">${result.outcome && result.outcome !== 'answered' ? '范围检查' : result.narrative?.mode === 'model' ? `模型解读 · ${escapeHtml(result.narrative.model || '已完成')}` : '确定性摘要'}</span><div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div></div>
     ${(result.warnings || []).length ? `<div class="result-meta">${result.warnings.map((w) => `<span class="small-pill">${escapeHtml(w)}</span>`).join('')}</div>` : ''}
     <div class="result-meta">
       <span class="small-pill">${sqlSourceLabel(result.mode)}</span>
@@ -278,8 +280,49 @@ function updateStreamStage(card, data = {}) {
   scrollThreadToLatest();
 }
 
+function renderGuardResult(result, options = {}) {
+  const isClarification = result.outcome === 'clarification';
+  const title = isClarification ? '需要补充信息' : '暂不能回答';
+  const kind = isClarification ? 'clarification' : 'unsupported';
+  const body = `
+    <div class="result-answer result-guard ${kind}">
+      <strong>${title}</strong>
+      <div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div>
+    </div>
+    <div class="result-meta">
+      <span class="small-pill">${isClarification ? '范围检查 · 需要补充条件' : '范围检查 · 只读请求'}</span>
+      <span class="small-pill">${escapeHtml(result.elapsed_ms)} 毫秒</span>
+    </div>`;
+  const thread = $('#conversation-thread');
+  if (!thread) return;
+  if (thread.querySelector('.conversation-empty')) thread.innerHTML = '';
+  const liveCard =
+    options.card ||
+    (!options.append && state.activeQueryCard && state.activeQueryCard.isConnected
+      ? state.activeQueryCard
+      : null);
+  const markup = `
+      <div class="turn-question"><span class="turn-label">你</span><div>${escapeHtml(result.question)}</div></div>
+      <div class="turn-meta"><span>未执行 SQL</span><span>${escapeHtml(result.elapsed_ms)} 毫秒</span></div>
+      <div class="turn-answer"><div class="turn-label assistant-label">助手</div><div class="assistant-content">${body}</div></div>`;
+  if (liveCard) {
+    liveCard.classList.remove('is-streaming');
+    liveCard.removeAttribute('data-live-turn');
+    liveCard.innerHTML = markup;
+    state.activeQueryCard = null;
+  } else {
+    thread.insertAdjacentHTML('beforeend', `<article class="turn-card">${markup}</article>`);
+  }
+  state.lastResult = result;
+  renderEvidence(result);
+}
+
 function renderResult(result, options = {}) {
   state.lastResult = result;
+  if (result.outcome && result.outcome !== 'answered') {
+    renderGuardResult(result, options);
+    return;
+  }
   const cols = result.columns || [];
   const rows = result.rows || [];
   const firstDimension = cols.find(c => rows.some(r => typeof r[c] !== 'number' && r[c] != null));
@@ -402,9 +445,11 @@ function setNarrativeTag(card, narrative) {
   const tag = card?.querySelector('.narrative-tag');
   if (!tag) return;
   const model = narrative?.mode === 'model';
-  tag.textContent = model
-    ? `模型解读 · ${narrative.model || '流式'}`
-    : '确定性摘要';
+  tag.textContent = narrative?.mode === 'guard'
+    ? '范围检查'
+    : model
+      ? `模型解读 · ${narrative.model || '流式'}`
+      : '确定性摘要';
   tag.classList.toggle('model', model);
 }
 
@@ -770,6 +815,10 @@ async function streamQuery(question, sessionId) {
           result.session_id = data.session_id;
           renderResult(result, { card });
           narrative = '';
+          if (result.outcome && result.outcome !== 'answered') {
+            card?.classList.remove('is-streaming');
+            continue;
+          }
           setTurnNarrative(card, '', true);
           const tag = card?.querySelector('.narrative-tag');
           if (tag) tag.textContent = '正在组织分析结论…';

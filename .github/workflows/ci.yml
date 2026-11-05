@@ -32,3 +32,5 @@ jobs:
         run: python -m pytest -q
       - name: Run model evaluation smoke check
         run: python -m app.evaluation.run
+      - name: Run scope guard evaluation
+        run: python -m app.evaluation.run --suite scope --min-hit-rate 100

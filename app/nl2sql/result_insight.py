@@ -10,6 +10,116 @@ from app.nl2sql.harness import is_cancelled
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.models import QueryPlan
 
+_NUMBER_RE = re.compile(r"(?<![A-Za-z_])[-+]?\d+(?:,\d{3})*(?:\.\d+)?")
+_TREND_TERMS = {
+    "上升": "rising",
+    "增长": "rising",
+    "提高": "rising",
+    "增加": "rising",
+    "下降": "falling",
+    "减少": "falling",
+    "降低": "falling",
+}
+
+
+def _number(value: Any) -> float | None:
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _digest_numbers(digest: dict[str, Any]) -> set[float]:
+    values: set[float] = set()
+
+    def add(value: Any) -> None:
+        number = _number(value)
+        if number is not None:
+            values.add(round(number, 4))
+
+    add(digest.get("row_count"))
+    for metric in digest.get("metrics") or []:
+        for key in ("sum", "avg", "min", "max"):
+            add(metric.get(key))
+    for row in digest.get("sample_rows") or []:
+        for value in row.values():
+            add(value)
+    for item in digest.get("ranking") or []:
+        add(item.get("value"))
+        add(item.get("share_pct"))
+    trend = digest.get("trend") or {}
+    add(trend.get("start_raw"))
+    add(trend.get("end_raw"))
+    add(trend.get("change_pct"))
+    return values
+
+
+def validate_narrative(
+    text: str,
+    digest: dict[str, Any],
+    *,
+    mode: str = "model",
+) -> dict[str, Any]:
+    """Check narrative numbers and ranking/trend claims against the digest."""
+    answer = str(text or "").strip()
+    numeric_text = re.sub(r"\d{4}-\d{2}-\d{2}", " ", answer)
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not answer:
+        errors.append("解读为空")
+
+    allowed = _digest_numbers(digest)
+    if mode == "model":
+        for match in _NUMBER_RE.findall(numeric_text):
+            value = _number(match)
+            if value is None:
+                continue
+            if value not in allowed and abs(value) > 1:
+                change = abs(float((digest.get("trend") or {}).get("change_pct") or 0))
+                signed_trend = (
+                    change > 1
+                    and abs(abs(value) - change) < 0.011
+                    and any(term in answer for term in ("下降", "上升", "增长", "减少"))
+                )
+                if not signed_trend:
+                    errors.append(f"解读出现摘要外数值：{match}")
+
+        ranking = list(digest.get("ranking") or [])
+        dimension = str(digest.get("dimension") or "")
+        if ranking and dimension:
+            top = ranking[0]
+            top_label = str(top.get("label") or "")
+            others = [str(item.get("label") or "") for item in ranking[1:] if item.get("label")]
+            top_pattern = re.compile(
+                r"(?:最高|第一|榜首|领先).{0,20}" + re.escape(top_label)
+                + "|" + re.escape(top_label) + ".{0,20}(?:最高|第一|榜首|领先)"
+            )
+            if top_label and top_pattern.search(answer) is None:
+                warnings.append(f"未明确复述 {dimension} 榜首 {top_label}")
+            for label in others:
+                pattern = re.compile(
+                    r"(?:最高|第一|榜首|领先).{0,20}" + re.escape(label)
+                    + "|" + re.escape(label) + ".{0,20}(?:最高|第一|榜首|领先)"
+                )
+                if pattern.search(answer):
+                    errors.append(f"把非榜首 {label} 描述为最高")
+
+        change = (digest.get("trend") or {}).get("change_pct")
+        if change is not None:
+            expected = "rising" if float(change) >= 0 else "falling"
+            found = {
+                direction for term, direction in _TREND_TERMS.items() if term in answer
+            }
+            if found and expected not in found:
+                errors.append("趋势方向与查询摘要不一致")
+
+    return {
+        "passed": not errors,
+        "errors": list(dict.fromkeys(errors)),
+        "warnings": list(dict.fromkeys(warnings)),
+        "contract": "deterministic-digest-grounding-v1",
+    }
+
 
 @dataclass(frozen=True)
 class NarrativeResult:
@@ -419,14 +529,18 @@ def stream_result_narrative(
 
         text = re.sub(r"```(?:text)?", "", "".join(parts)).replace("```", "").strip()
         if not error and text:
-            yield {
-                "type": "done",
-                "narrative": NarrativeResult(
-                    text=text, mode="model", model=config.model, retries=retries,
-                    elapsed_ms=(time.perf_counter() - started) * 1000,
-                ),
-            }
-            return
+            check = validate_narrative(text, digest, mode="model")
+            if not check["passed"]:
+                error = "解读事实一致性校验失败：" + "；".join(check["errors"])
+            else:
+                yield {
+                    "type": "done",
+                    "narrative": NarrativeResult(
+                        text=text, mode="model", model=config.model, retries=retries,
+                        elapsed_ms=(time.perf_counter() - started) * 1000,
+                    ),
+                }
+                return
         error = error or "模型返回空内容"
 
     if emitted:

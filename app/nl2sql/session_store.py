@@ -148,10 +148,16 @@ def get_session(session_id: str) -> dict[str, Any] | None:
             }
         )
     latest_plan = {}
-    if payload_turns:
-        latest_result = payload_turns[-1].get("result") or {}
+    answerable_turns = [
+        turn
+        for turn in payload_turns
+        if (turn.get("result") or {}).get("outcome", "answered") == "answered"
+    ]
+    if answerable_turns:
+        latest_answerable = answerable_turns[-1]
+        latest_result = latest_answerable.get("result") or {}
         latest_plan = dict(latest_result.get("plan") or {})
-        latest_plan["previous_question"] = payload_turns[-1]["question"]
+        latest_plan["previous_question"] = latest_answerable["question"]
         latest_plan.update(dict(latest_plan.get("context") or {}))
     return {
         **dict(session),
@@ -177,7 +183,7 @@ def append_turn(session_id: str, question: str, result: QueryResult) -> dict[str
             "UPDATE sessions SET updated_at = ?, expires_at = ? WHERE id = ?",
             (_iso(now), _iso(now + timedelta(days=SESSION_TTL_DAYS)), session_id),
         )
-        if session["title"] == DEFAULT_TITLE:
+        if session["title"] == DEFAULT_TITLE and result.outcome == "answered":
             conn.execute(
                 "UPDATE sessions SET title = ? WHERE id = ?",
                 (_derive_title(question), session_id),

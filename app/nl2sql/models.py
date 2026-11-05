@@ -67,6 +67,9 @@ class QueryPlan:
     inherited: list[str] = field(default_factory=list)
     source_question: str = ""
     context: dict[str, Any] = field(default_factory=dict)
+    outcome: str = "answered"
+    reason_code: str = ""
+    decision: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -81,7 +84,13 @@ class QueryPlan:
             "inherited": self.inherited,
             "source_question": self.source_question,
             "context": self.context,
+            "outcome": self.outcome,
+            "reason_code": self.reason_code,
+            "decision": self.decision,
         }
+
+
+
 
 
 @dataclass
@@ -104,6 +113,8 @@ class QueryResult:
     generation_retries: int = 0
     narrative_retries: int = 0
     run_context: dict[str, Any] = field(default_factory=dict)
+    outcome: str = "answered"
+    narrative_validation: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +133,8 @@ class QueryResult:
             "warnings": self.warnings,
             "trace_id": self.trace_id,
             "run_context": self.run_context,
+            "outcome": self.outcome,
+            "narrative_validation": self.narrative_validation,
             "narrative": {
                 "mode": self.narrative_mode,
                 "model": self.narrative_model,

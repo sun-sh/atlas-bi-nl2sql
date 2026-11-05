@@ -292,3 +292,85 @@ def test_evaluation_platform_registry_endpoints(monkeypatch, tmp_path):
     assert experiment.json()['dataset_id'] == dataset['id']
     assert client.get('/api/evaluation/experiments').status_code == 200
     assert client.get('/api/evaluation/feedback').status_code == 200
+
+def test_ambiguous_and_write_questions_stop_before_sql():
+    ambiguous = client.post("/api/query", json={"question": "最近生意怎么样？"}).json()
+    assert ambiguous["outcome"] == "clarification"
+    assert ambiguous["mode"] == "clarification"
+    assert ambiguous["plan"]["reason_code"] == "missing_metric"
+    assert ambiguous["sql"] == ""
+    assert ambiguous["rows"] == []
+
+    write = client.post("/api/query", json={"question": "帮我把订单表删掉"}).json()
+    assert write["outcome"] == "unsupported"
+    assert write["mode"] == "unsupported"
+    assert write["plan"]["reason_code"] == "write_request"
+    assert write["sql"] == ""
+    assert write["rows"] == []
+
+
+def test_follow_up_can_use_previous_metric_context():
+    created = client.post("/api/sessions", json={}).json()
+    first = client.post(
+        "/api/query",
+        json={"question": "上个月华东地区销售额是多少？", "session_id": created["id"]},
+    ).json()
+    assert first["outcome"] == "answered"
+    follow_up = client.post(
+        "/api/query",
+        json={"question": "那华南呢？", "session_id": created["id"]},
+    ).json()
+    assert follow_up["outcome"] == "answered"
+    assert follow_up["rows"]
+
+
+def test_stream_clarification_does_not_call_model(monkeypatch, tmp_path):
+    import app.api.main as api_main
+    from tests.test_stream import parse_sse
+
+    monkeypatch.setenv("ATLAS_SESSION_DB_PATH", str(tmp_path / "sessions.db"))
+    called = {"narrative": False}
+
+    def forbidden_narrative(*args, **kwargs):
+        called["narrative"] = True
+        yield {"type": "done"}
+
+    monkeypatch.setattr(api_main, "stream_result_narrative", forbidden_narrative)
+    created = client.post("/api/sessions", json={}).json()
+    with client.stream(
+        "POST",
+        "/api/query/stream",
+        json={"question": "用户满意度怎么样？", "session_id": created["id"]},
+        headers={"Accept": "text/event-stream"},
+    ) as response:
+        events = parse_sse("".join(response.iter_text()))
+    names = [name for name, _ in events]
+    assert names[-1] == "done"
+    assert "delta" not in names
+    assert called["narrative"] is False
+    result = next(data for name, data in events if name == "result")["result"]
+    assert result["outcome"] == "unsupported"
+    assert result["sql"] == ""
+    assert result["rows"] == []
+def test_clarification_does_not_replace_followup_context():
+    created = client.post("/api/sessions", json={}).json()
+    first = client.post(
+        "/api/query",
+        json={"question": "上个月华东地区销售额是多少？", "session_id": created["id"]},
+    ).json()
+    assert first["outcome"] == "answered"
+    ambiguous = client.post(
+        "/api/query",
+        json={"question": "用户满意度怎么样？", "session_id": created["id"]},
+    ).json()
+    assert ambiguous["outcome"] == "unsupported"
+    session = client.get(f"/api/sessions/{created['id']}").json()
+    assert session["turn_count"] == 2
+    assert session["turns"][-1]["result"]["outcome"] == "unsupported"
+    follow_up = client.post(
+        "/api/query",
+        json={"question": "那华南呢？", "session_id": created["id"]},
+    ).json()
+    assert follow_up["outcome"] == "answered"
+    assert "o.region = '华南'" in follow_up["sql"]
+    assert "2026-01-01" in follow_up["sql"]

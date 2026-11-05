@@ -59,10 +59,13 @@ from app.nl2sql.model_config import (
     test_model_chat,
 )
 from app.nl2sql.result_insight import (
+    NarrativeResult,
     digest_from_result,
     narrative_warnings,
     narrate_result,
+    rule_narrative,
     stream_result_narrative,
+    validate_narrative,
 )
 from app.nl2sql.seed import generate_database
 from app.nl2sql.session_store import append_turn, create_session, delete_session, get_session, list_sessions
@@ -306,6 +309,8 @@ def _stream_stage(node: str, state: dict) -> dict:
     if node == "plan" and state.get("plan") is not None:
         plan = state["plan"]
         payload["time_range"] = plan.time_range
+        payload["outcome"] = plan.outcome
+        payload["reason_code"] = plan.reason_code
     if node in {"retrieve", "plan"} and state.get("hits"):
         payload["schema_count"] = len(state["hits"])
     if node in {"generate", "repair"} and state.get("mode"):
@@ -347,6 +352,27 @@ def _stream_turn(question: str, session_id: str | None, context: dict, trace_id:
     if result is None:
         raise RuntimeError("查询工作流未返回结果")
     yield _sse("result", {"result": result.as_dict(), "session_id": session_id})
+    if result.outcome != "answered":
+        narrative = {
+            "text": result.answer,
+            "mode": "guard",
+            "model": "",
+            "retries": 0,
+            "fallback_reason": "",
+            "elapsed_ms": 0,
+        }
+        yield _sse("narrative", narrative)
+        updated = _persist_turn(session_id, question, result)
+        yield _sse(
+            "done",
+            {
+                "session_id": session_id,
+                "session": updated,
+                "elapsed_ms": round(result.elapsed_ms, 1),
+                "trace_id": result.trace_id,
+            },
+        )
+        return
     digest = digest_from_result(result)
     narrative = None
     sent_thinking = False
@@ -370,6 +396,18 @@ def _stream_turn(question: str, session_id: str | None, context: dict, trace_id:
             narrative = event["narrative"]
     if narrative is None:
         narrative = narrate_result(question, result.plan, digest)
+    check = validate_narrative(narrative.text, digest, mode=narrative.mode)
+    if narrative.mode == "model" and not check["passed"]:
+        narrative = NarrativeResult(
+            text=rule_narrative(digest),
+            mode="digest",
+            fallback_reason="解读事实校验未通过：" + "；".join(check["errors"]),
+            retries=narrative.retries,
+            elapsed_ms=narrative.elapsed_ms,
+        )
+        check = validate_narrative(narrative.text, digest, mode="digest")
+        check["fallback_from"] = "model"
+    result.narrative_validation = check
     if narrative.mode == "model":
         result.answer = narrative.text
         result.narrative_mode = narrative.mode

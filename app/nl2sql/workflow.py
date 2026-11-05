@@ -9,6 +9,7 @@ from langgraph.graph import END, StateGraph
 
 from app.nl2sql import generator
 from app.nl2sql.harness import create_run_context, is_cancelled
+from app.nl2sql.intent_guard import OUTCOME_ANSWERED, OUTCOME_CLARIFICATION, OUTCOME_UNSUPPORTED, assess_question
 from app.nl2sql.model_config import get_model_config
 from app.nl2sql.generator import generate_llm_repair_sql, generate_llm_sql, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
@@ -19,6 +20,7 @@ from app.nl2sql.result_insight import (
     narrative_warnings,
     narrate_result,
     rule_narrative,
+    validate_narrative,
 )
 from app.nl2sql.retrieval import HybridSchemaRetriever
 from app.nl2sql.settings import get_settings
@@ -43,6 +45,7 @@ class GraphState(TypedDict, total=False):
     allow_rule_fallback: bool
     narrative: NarrativeResult
     generation_retries: int
+    decision: dict[str, Any]
     final: QueryResult
 
 
@@ -90,12 +93,24 @@ def retrieve_node(state: GraphState) -> GraphState:
 
 
 def plan_node(state: GraphState) -> GraphState:
+    decision = assess_question(state["question"], state.get("context"))
+    if not decision.answerable:
+        plan = make_plan(state["question"], state.get("hits", []), state.get("context"))
+        plan.outcome = decision.outcome
+        plan.reason_code = decision.reason_code
+        plan.decision = decision.as_dict()
+        return {"plan": plan, "decision": decision.as_dict()}
     _emit_stage("plan")
     plan = make_plan(state["question"], state["hits"], state.get("context"))
-    return {"plan": plan}
+    plan.outcome = decision.outcome
+    plan.reason_code = decision.reason_code
+    plan.decision = decision.as_dict()
+    return {"plan": plan, "decision": decision.as_dict()}
 
 
 def generate_node(state: GraphState) -> GraphState:
+    if state.get("decision", {}).get("outcome") not in (None, OUTCOME_ANSWERED):
+        return {"sql": "", "mode": "unsupported", "warnings": [], "generation_retries": 0}
     _emit_stage("generate")
     plan = state["plan"]
     sql = generate_llm_sql(state["question"], plan, state["hits"])
@@ -130,6 +145,8 @@ def generate_node(state: GraphState) -> GraphState:
 
 
 def execute_node(state: GraphState) -> GraphState:
+    if state.get("decision", {}).get("outcome") not in (None, OUTCOME_ANSWERED):
+        return {"attempts": [], "warnings": []}
     _emit_stage("execute")
     started = time.perf_counter()
     sql = state["sql"]
@@ -209,6 +226,8 @@ def repair_node(state: GraphState) -> GraphState:
 
 
 def should_repair(state: GraphState) -> str:
+    if state.get("decision", {}).get("outcome") not in (None, OUTCOME_ANSWERED):
+        return "finalize"
     if state.get("mode") in {"model-failed", "model-repair-failed"}:
         return "finalize"
     result = state.get("result")
@@ -222,8 +241,35 @@ def should_repair(state: GraphState) -> str:
 
 def finalize_node(state: GraphState) -> GraphState:
     _emit_stage("finalize")
-    result = state.get("result") or {"rows": [], "columns": [], "row_count": 0, "truncated": False, "elapsed_ms": 0}
     plan = state["plan"]
+    decision = state.get("decision") or {}
+    if decision.get("outcome") not in (None, OUTCOME_ANSWERED):
+        answer = str(decision.get("message") or "当前问题不在可回答范围内。")
+        suggestions = list(decision.get("suggestions") or [])
+        if suggestions:
+            answer += "\n建议：\n" + "\n".join(f"- {item}" for item in suggestions)
+        final = QueryResult(
+            question=state["question"],
+            sql="",
+            rows=[],
+            columns=[],
+            chart_type="table",
+            answer=answer,
+            plan=plan,
+            retrieval=state.get("hits", []),
+            attempts=[],
+            elapsed_ms=(time.perf_counter() - state["started"]) * 1000,
+            mode=("clarification" if decision.get("outcome") == OUTCOME_CLARIFICATION else "unsupported"),
+            narrative_model="",
+            warnings=[],
+            trace_id=state["trace_id"],
+            narrative_mode="guard",
+            run_context=state.get("run_context", {}),
+            outcome=str(decision.get("outcome") or "unsupported"),
+            narrative_validation={"passed": True, "errors": [], "warnings": [], "contract": "intent-guard-v1"},
+        )
+        return {"final": final}
+    result = state.get("result") or {"rows": [], "columns": [], "row_count": 0, "truncated": False, "elapsed_ms": 0}
     rows = result.get("rows", [])
     columns = result.get("columns", [])
     digest = build_result_digest(
@@ -238,6 +284,17 @@ def finalize_node(state: GraphState) -> GraphState:
         narrative = narrate_result(state["question"], plan, digest)
     else:
         narrative = NarrativeResult(text=rule_narrative(digest), mode="digest")
+    narrative_check = validate_narrative(narrative.text, digest, mode=narrative.mode)
+    if narrative.mode == "model" and not narrative_check["passed"]:
+        narrative = NarrativeResult(
+            text=rule_narrative(digest),
+            mode="digest",
+            fallback_reason="解读事实校验未通过：" + "；".join(narrative_check["errors"]),
+            retries=narrative.retries,
+            elapsed_ms=narrative.elapsed_ms,
+        )
+        narrative_check = validate_narrative(narrative.text, digest, mode="digest")
+        narrative_check["fallback_from"] = "model"
     warnings = list(state.get("warnings", [])) + narrative_warnings(narrative)
     mode = state.get("mode", "rule")
     if mode.startswith("rule"):
@@ -261,6 +318,8 @@ def finalize_node(state: GraphState) -> GraphState:
         narrative_retries=narrative.retries,
         generation_retries=state.get("generation_retries", 0),
         run_context=state.get("run_context", {}),
+        outcome=OUTCOME_ANSWERED,
+        narrative_validation=narrative_check,
     )
     return {"final": final}
 

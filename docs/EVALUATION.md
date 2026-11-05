@@ -16,13 +16,34 @@ python -m app.evaluation.run --suite regression --min-hit-rate 90
 python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/evaluations/holdout-latest.json
 ```
 
-两套题使用相同的严格模型路径、独立基准 SQL 和禁止规则回退约束，但不能把 holdout 的分数与回归集分数混在一起报告。
+两套题使用相同的严格模型路径、独立基准 SQL 和禁止规则回退约束，但不能把 holdout 的分数与回归集分数混在一起报告。另有不调用模型的 `scope` 套件，用于验证系统是否会正确澄清或拒答。
 
 2026-11-03 按上述命令用 `deepseek/deepseek-v4.1-flash` 完成了一轮 30 条在线 holdout 盲测：**28/30 通过、命中率 93.3%、SQL 执行率 93.3%**。4 条触发自愈，2 条成功；两条失败均为重试用完仍超时，严格评测未用规则 SQL 或确定性摘要补位。分意图看，销售 17/17、品类 3/3、退款 5/6、ROI 3/4。该结果只代表这次固定数据集、模型和网络条件下的快照，不是开放域准确率，也不与 100 条回归集的 100/100 混报。报告见 [holdout JSON](evaluations/holdout-2026-11-03.json)。
 
 `strict-model-v3-100` 包含 **100 条严格模型回归用例**，覆盖固定种子的电商数据（2025-10-01 至 2026-02-28）。用例由时间窗口、地区、渠道、品类、销售额、商品销量、退款率、退款原因、退款金额、ROI、日趋势、组合筛选组成，并保留 11 条两轮连续追问链。完整执行最多处理 **111 个查询轮次**；每个轮次可能包含 SQL 生成、有限修复和结果解读请求。
 
 矩阵使用四个时间窗口：上个月（2026-01）、本月（2026-02）、近 30 天（2026-01-30 至 2026-02-28）、近 90 天（2025-12-01 至 2026-02-28）。地区覆盖华东、华南、华北、西南；渠道覆盖 App、MiniProgram、小程序、Web、Douyin、抖音；品类覆盖运动鞋服、食品饮料、数码家电、美妆个护。100 条用例的 ID、问题和独立基准 SQL 由 `app/nl2sql/evaluation.py` 生成，测试会验证 ID 唯一、基准可执行且结果非空。
+
+## 范围判定与拒答
+
+在召回和 SQL 生成之前，系统先判断请求是否属于当前只读电商分析范围。判定结果记录在 `outcome` 和 `plan.reason_code`：
+
+- `clarification`：问题缺少明确指标或范围，或要求因果结论但只能先做数据拆解。
+- `unsupported`：写操作、敏感字段、明显域外请求，或当前数据集没有对应业务域。
+- `answered`：进入正常的 Schema 召回、SQL 生成和执行链路。
+
+`scope-guard-v1` 包含 7 条用例：模糊经营问题、用户满意度、删除订单、修改退款金额、销售额下降原因、导出手机号、写 Python 代码。模糊和因果问题应澄清，写操作、敏感字段和域外问题应拒绝；所有用例都必须满足 `sql == ""` 且 `rows == []`。2026-11-05 的离线运行结果为 **7/7 通过**，报告见 [范围评测 JSON](evaluations/scope-guard-2026-11-05.json)。该套件是确定性规则回归，不是模型开放域理解评测。
+
+## 解读事实校验
+
+严格评测除了核对 SQL 结果，还会独立检查模型解读是否符合确定性摘要：
+
+- 解读中的数值必须能对应摘要中的指标、样本行、排名或趋势值；日期格式不会被当成数值。
+- 若存在排名，非榜首不能被描述为“最高 / 第一 / 榜首 / 领先”。
+- 若存在趋势，出现的趋势方向不能与摘要的 `change_pct` 相反。
+- 校验不通过时，生产链路替换为确定性摘要并记录 `narrative_validation`；严格评测直接判失败。
+
+这套检查能拦截数字幻觉和明显的排名、方向错误，但不能替代人工判断复杂的业务因果和语义表达。它是事实一致性下限，不是“解读完全正确”的证明。
 
 ## 严格链路与自愈
 
@@ -45,6 +66,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 - 题目要求的降序或日期升序。
 - 中文和英文业务列别名，以及常见渠道别名。
 - 可构建非空 grounded digest，且模型确实完成非空结果解读。
+- 模型解读通过 `deterministic-digest-grounding-v1` 数值、排名和趋势方向校验。
 
 业务口径明确为：销售额和客单价只统计 `status='paid'`；订单主表品类销售额不能替代商品行品类销量；退款率为退款申请单数除以全部订单数；ROI 为已支付销售额除以投放花费，两张表先分别聚合再计算。
 
@@ -104,6 +126,7 @@ API 返回 `suite_version`、模型名、评测时间、汇总指标和逐用例
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m app.evaluation.run
+python -m app.evaluation.run --suite scope --min-hit-rate 100
 python -m pytest -q
 node --check app/static/app.js
 ```
