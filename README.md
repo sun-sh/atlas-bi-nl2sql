@@ -10,7 +10,7 @@ Atlas BI 是一个电商经营分析问答项目，业务数据覆盖订单、�
 ![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-1f6feb)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-![Atlas BI 分析会话：用户问题、模型回答和按需展开的数据依据](docs/images/atlas-stream-final.png)
+![Atlas BI 分析会话：用户问题、模型回答和按需展开的数据依据](docs/images/readme/atlas-workspace.png)
 
 工作台把分析结论、SQL、明细和检索依据放在同一条对话里。
 
@@ -135,7 +135,7 @@ flowchart TD
 | `POST /api/model/models` | 拉取可用模型 |
 | `POST /api/model/test` | 验证端点、密钥与模型 |
 
-![模型配置](docs/images/atlas-model-config.png)
+![模型配置](docs/images/readme/atlas-model-settings.png)
 
 ## 模型评测
 
@@ -167,7 +167,7 @@ flowchart TD
 
 默认单工作区、本地管理员；目前没有 SSO、多租户隔离和集群调度。
 
-![数据中台：数据源、资产目录、质量规则、指标、血缘和审计](docs/images/atlas-data-platform.png)
+![数据中台：数据源、资产目录、质量规则、指标、血缘和审计](docs/images/readme/atlas-data-platform.png)
 
 ## 评测中台
 
@@ -178,7 +178,7 @@ flowchart TD
 - 可以看到运行进度，支持取消、重试、脱敏报告、逐用例结果和两次运行对比。
 - 提交后由 FastAPI `BackgroundTasks` 执行，也可以手动领取排队任务。当前没有常驻分布式后台进程；服务重启后排队记录还在，但要重新领取任务才会继续跑。
 
-![评测中台：任务队列、数据集版本、实验和失败用例回流](docs/images/atlas-evaluation-platform.png)
+![评测中台：任务队列、数据集版本、实验和失败用例回流](docs/images/readme/atlas-evaluation.png)
 
 ## 查询与修复
 
