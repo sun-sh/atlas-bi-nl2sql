@@ -81,7 +81,7 @@ def generate_rule_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> 
             + " GROUP BY o.category ORDER BY 退款率 DESC"
         )
     if plan.intent == "category_analysis":
-        if "销量" in q or "件数" in q:
+        if "销量" in q or "件数" in q or "卖得最多" in q or "卖得多" in q:
             return (
                 "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 "
                 "FROM order_items oi JOIN orders o ON o.order_id = oi.order_id "
@@ -101,7 +101,7 @@ def generate_rule_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> 
             "COUNT(*) AS 订单数 FROM orders o " + paid_where
             + " GROUP BY o.order_date ORDER BY o.order_date"
         )
-    if "客单价" in q:
+    if "客单价" in q or "每单平均" in q or "平均花" in q:
         return (
             "SELECT o.channel AS 渠道, COUNT(*) AS 订单数, ROUND(SUM(o.paid_amount), 2) AS 销售额, "
             "ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders o " + paid_where

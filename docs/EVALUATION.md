@@ -28,11 +28,35 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 在召回和 SQL 生成之前，系统先判断请求是否属于当前只读电商分析范围。判定结果记录在 `outcome` 和 `plan.reason_code`：
 
-- `clarification`：问题缺少明确指标或范围，或要求因果结论但只能先做数据拆解。
+- `clarification`：问题缺少明确指标或范围，混合了当前无法可靠计算的指标，或要求因果结论但只能先做数据拆解。
 - `unsupported`：写操作、敏感字段、明显域外请求，或当前数据集没有对应业务域。
 - `answered`：进入正常的 Schema 召回、SQL 生成和执行链路。
 
+澄清和拒答在规划阶段直接终止，返回空意图、空指标、空 SQL 和空行集；系统不会为了填满计划而默认成“销售额”。因此评测可以区分“正确澄清”和“静默改成另一个问题”。
+
 `scope-guard-v1` 包含 7 条用例：模糊经营问题、用户满意度、删除订单、修改退款金额、销售额下降原因、导出手机号、写 Python 代码。模糊和因果问题应澄清，写操作、敏感字段和域外问题应拒绝；所有用例都必须满足 `sql == ""` 且 `rows == []`。2026-11-05 的离线运行结果为 **7/7 通过**，报告见 [范围评测 JSON](evaluations/scope-guard-2026-11-05.json)。该套件是确定性规则回归，不是模型开放域理解评测。
+
+## 自然语言、检索与 HTTP 压测
+
+除了严格模型评测，项目保留三类可离线重复运行的证据：
+
+### 自然语言变体与真实执行
+
+`natural-language-holdout-v1` 有 15 条独立问法，其中 8 条应回答、7 条应澄清。每个可回答用例同时检查范围判定、意图、指标、预期的 Schema 表和真实执行结果；澄清用例必须没有 SQL、没有数据行，且不保留默认指标。只有这五项都通过，才记为端到端通过。当前为 **15/15**，但它是确定性规则链路加固定 SQLite 的真实执行验证，不是在线模型准确率，也不能替代开放域语义 SQL 测试。报告见 [自然语言评测 JSON](evaluations/natural-language-holdout-2026-11-06.json)。
+
+### 检索消融
+
+`retrieval-ablation-v1` 在 12 条人工标注表级问法上比较 `lexical_only`、`semantic_only` 和线上默认的 `hybrid_0.56_0.44`。指标包括：
+
+- **Top-1 accuracy**：返回的第一张表属于期望表集合的比例。
+- **MRR**：期望表首次出现位置倒数的均值。
+- **Full recall@4**：全部期望表都出现在前四位的比例。
+
+2026-11-06 使用真实 BGE 语义检索和本地 IDF 词法检索运行：默认混合方案 **Top-1 91.7%、MRR 0.9583、完整表召回@4 100%**。纯词法方案的完整召回也达到 100%，说明只有五张表的标注集区分度有限，不能据此宣称混合检索在所有场景全面领先。CI 只对默认融合方案设置确定性的表召回底线。报告见 [检索消融 JSON](evaluations/retrieval-ablation-2026-11-06.json)。
+
+### HTTP 冒烟压测
+
+`python -m app.evaluation.loadtest` 对真实运行中的 FastAPI 服务发送有并发上限的查询请求。2026-11-06 的本机结果为 20 个请求、并发 4、20/20 成功，P50 55.7 ms、P95 158.6 ms、约 15.56 req/s。该轮关闭在线模型、使用规则 SQL 和固定种子 SQLite，只覆盖 HTTP 接入与只读查询，不代表模型调用延迟、连接池饱和、多实例调度或生产容量。报告见 [HTTP 压测 JSON](evaluations/http-loadtest-2026-11-06.json)。
 
 ## 解读事实校验
 
@@ -125,9 +149,11 @@ API 返回 `suite_version`、模型名、评测时间、汇总指标和逐用例
 
 ```bash
 python -m pip install -r requirements-dev.txt
+python -m pytest -q
 python -m app.evaluation.run
 python -m app.evaluation.run --suite scope --min-hit-rate 100
-python -m pytest -q
+python -m app.evaluation.run --suite retrieval --min-hit-rate 100
+python -m app.evaluation.run --suite natural --min-hit-rate 100
 node --check app/static/app.js
 ```
 

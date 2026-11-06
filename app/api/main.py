@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -13,7 +14,10 @@ from app.nl2sql.data_assets import data_assets_overview
 from app.nl2sql.data_platform import (
     DEFAULT_WORKSPACE,
     DataPlatformError,
+    DataSourceNotFound,
     PermissionDenied,
+    activate_query_source,
+    active_query_database,
     create_metric,
     create_quality_rule,
     create_workspace,
@@ -67,6 +71,7 @@ from app.nl2sql.result_insight import (
     stream_result_narrative,
     validate_narrative,
 )
+from app.nl2sql.runtime_metrics import observe, snapshot as metrics_snapshot
 from app.nl2sql.seed import generate_database
 from app.nl2sql.session_store import append_turn, create_session, delete_session, get_session, list_sessions
 from app.nl2sql.harness import is_cancelled, register_cancel, release_cancel, request_cancel
@@ -79,6 +84,16 @@ STATIC = ROOT / "app" / "static"
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name, version="1.3.0")
+
+
+def _require_admin_token(x_admin_token: str | None = Header(default=None)) -> None:
+    """Optional operator gate; local default remains open for development."""
+    expected = get_settings().admin_api_token
+    if not expected:
+        return
+    if x_admin_token != expected:
+        raise HTTPException(status_code=401, detail="需要有效的管理令牌")
+
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
@@ -176,7 +191,7 @@ EXAMPLES = [
 ]
 
 
-def _prepare_query(payload: QueryRequest) -> tuple[str, str | None, dict]:
+def _prepare_query(payload: QueryRequest) -> tuple[str, str | None, dict, str]:
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=422, detail="问题不能为空")
@@ -184,14 +199,18 @@ def _prepare_query(payload: QueryRequest) -> tuple[str, str | None, dict]:
     session = get_session(session_id) if session_id else None
     if session_id and session is None:
         raise HTTPException(status_code=404, detail="会话不存在或已过期，请新建会话")
-    if not settings.db_path.exists():
-        generate_database(settings.db_path)
+    query_db = active_query_database(settings.workspace_id)
+    if not query_db["path"].exists():
+        if query_db["fallback"]:
+            generate_database(settings.db_path)
+        else:
+            raise HTTPException(status_code=503, detail="当前分析数据源文件不存在，请重新同步或切换数据源")
     context: dict = {}
     if session and session.get("turns"):
         latest_turn = session["turns"][-1]
         context = dict(session.get("context") or {})
         context.update({"question": latest_turn.get("question", "")})
-    return question, session_id, context
+    return question, session_id, context, str(query_db["path"])
 
 
 def _persist_turn(session_id: str | None, question: str, result) -> dict | None:
@@ -218,9 +237,17 @@ def index() -> FileResponse:
 def health() -> dict:
     retriever = get_retriever()
     model = get_model_config()
+    query_db = active_query_database(settings.workspace_id)
     return {
         "status": "ok",
-        "database": settings.db_path.exists(),
+        "database": query_db["path"].exists(),
+        "query_database": {
+            "workspace_id": query_db["workspace_id"],
+            "source_id": query_db["source_id"],
+            "database": query_db["database"],
+            "read_only": query_db["read_only"],
+            "fallback": query_db["fallback"],
+        },
         "retrieval": retriever.describe(),
         "llm_enabled": model.enabled,
         "llm_active": model.enabled and model.active,
@@ -230,11 +257,20 @@ def health() -> dict:
     }
 
 
+@app.get("/api/metrics")
+def runtime_metrics() -> dict:
+    return metrics_snapshot()
+
+
 @app.get("/api/overview")
 def overview() -> dict:
-    if not settings.db_path.exists():
-        generate_database(settings.db_path)
-    return overview_metrics()
+    query_db = active_query_database(settings.workspace_id)
+    if not query_db["path"].exists():
+        if query_db["fallback"]:
+            generate_database(settings.db_path)
+        else:
+            raise HTTPException(status_code=503, detail="当前分析数据源文件不存在，请重新同步或切换数据源")
+    return overview_metrics(query_db["path"])
 
 
 @app.get("/api/examples")
@@ -269,9 +305,11 @@ def remove_session(session_id: str) -> dict:
 
 @app.post("/api/query")
 def query(payload: QueryRequest) -> dict:
+    started = time.perf_counter()
+    error = False
     try:
-        question, session_id, context = _prepare_query(payload)
-        result = run_query(question, context=context)
+        question, session_id, context, db_path = _prepare_query(payload)
+        result = run_query(question, context=context, db_path=db_path)
         payload_result = result.as_dict()
         payload_result["session_id"] = session_id
         updated = _persist_turn(session_id, question, result)
@@ -279,9 +317,13 @@ def query(payload: QueryRequest) -> dict:
             payload_result["session"] = updated
         return payload_result
     except HTTPException:
+        error = True
         raise
     except Exception as exc:
+        error = True
         raise HTTPException(status_code=500, detail=f"查询失败：{exc}") from exc
+    finally:
+        observe("query", (time.perf_counter() - started) * 1000, error=error)
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -325,7 +367,13 @@ def _stream_stage(node: str, state: dict) -> dict:
     return payload
 
 
-def _stream_turn(question: str, session_id: str | None, context: dict, trace_id: str) -> Iterator[str]:
+def _stream_turn(
+    question: str,
+    session_id: str | None,
+    context: dict,
+    trace_id: str,
+    db_path: str,
+) -> Iterator[str]:
     yield _sse("start", {"session_id": session_id, "trace_id": trace_id, "message": "正在分析问题"})
     result = None
     events = query_stream_events(
@@ -333,6 +381,7 @@ def _stream_turn(question: str, session_id: str | None, context: dict, trace_id:
         context=context,
         narrate=False,
         trace_id=trace_id,
+        db_path=db_path,
     )
     for event in events:
         state_data = event.get("state") or {}
@@ -436,20 +485,29 @@ def cancel_query(trace_id: str) -> dict:
 
 @app.post("/api/query/stream")
 def query_stream(payload: QueryRequest) -> StreamingResponse:
+    started = time.perf_counter()
+    error = False
     try:
-        question, session_id, context = _prepare_query(payload)
+        question, session_id, context, db_path = _prepare_query(payload)
     except HTTPException:
+        error = True
         raise
     except Exception as exc:
+        error = True
         raise HTTPException(status_code=500, detail=f"查询失败：{exc}") from exc
     trace_id = payload.request_id or __import__("uuid").uuid4().hex[:12]
     register_cancel(trace_id)
 
     def stream():
+        nonlocal error
         try:
-            yield from _stream_turn(question, session_id, context, trace_id)
+            yield from _stream_turn(question, session_id, context, trace_id, db_path)
+        except Exception:
+            error = True
+            raise
         finally:
             release_cancel(trace_id)
+            observe("query_stream", (time.perf_counter() - started) * 1000, error=error)
 
     return StreamingResponse(
         stream(),
@@ -478,7 +536,7 @@ def data_platform_workspaces() -> dict:
 
 
 @app.post("/api/data-platform/workspaces", status_code=201)
-def create_data_workspace(payload: dict) -> dict:
+def create_data_workspace(payload: dict, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return create_workspace(name=str(payload.get("name", "")), description=str(payload.get("description", "")))
     except PermissionDenied as exc:
@@ -493,7 +551,7 @@ def data_platform_sources(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
 
 
 @app.post("/api/data-platform/sources", status_code=201)
-def register_platform_source(payload: SourceCreateRequest) -> dict:
+def register_platform_source(payload: SourceCreateRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return register_data_source(**payload.model_dump())
     except PermissionDenied as exc:
@@ -503,7 +561,7 @@ def register_platform_source(payload: SourceCreateRequest) -> dict:
 
 
 @app.post("/api/data-platform/sources/{source_id}/sync")
-def sync_platform_source(source_id: str) -> dict:
+def sync_platform_source(source_id: str, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return sync_data_source(source_id)
     except PermissionDenied as exc:
@@ -518,7 +576,7 @@ def data_platform_metrics(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
 
 
 @app.post("/api/data-platform/metrics", status_code=201)
-def add_data_platform_metric(payload: MetricCreateRequest) -> dict:
+def add_data_platform_metric(payload: MetricCreateRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return create_metric(**payload.model_dump())
     except PermissionDenied as exc:
@@ -533,7 +591,7 @@ def data_platform_quality_rules(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
 
 
 @app.post("/api/data-platform/quality-rules", status_code=201)
-def add_data_platform_quality_rule(payload: QualityRuleCreateRequest) -> dict:
+def add_data_platform_quality_rule(payload: QualityRuleCreateRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return create_quality_rule(**payload.model_dump())
     except PermissionDenied as exc:
@@ -543,9 +601,21 @@ def add_data_platform_quality_rule(payload: QualityRuleCreateRequest) -> dict:
 
 
 @app.post("/api/data-platform/sources/{source_id}/quality")
-def run_platform_quality(source_id: str, workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+def run_platform_quality(source_id: str, workspace_id: str = DEFAULT_WORKSPACE, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return run_quality(workspace_id, source_id)
+    except PermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except DataPlatformError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/data-platform/sources/{source_id}/activate")
+def activate_data_source(source_id: str, _: None = Depends(_require_admin_token)) -> dict:
+    try:
+        return activate_query_source(source_id)
+    except DataSourceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except DataPlatformError as exc:
@@ -563,7 +633,7 @@ def query_data_service(source_id: str, table: str, limit: int = 100, workspace_i
 
 
 @app.post("/api/data-platform/scheduler/run")
-def run_data_scheduler() -> dict:
+def run_data_scheduler(_: None = Depends(_require_admin_token)) -> dict:
     try:
         return dispatch_due_syncs()
     except PermissionDenied as exc:
@@ -576,7 +646,7 @@ def evaluation_datasets() -> dict:
 
 
 @app.post("/api/evaluation/datasets", status_code=201)
-def create_evaluation_dataset(payload: DatasetCreateRequest) -> dict:
+def create_evaluation_dataset(payload: DatasetCreateRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return create_dataset(**payload.model_dump())
     except ValueError as exc:
@@ -589,7 +659,7 @@ def evaluation_experiments() -> dict:
 
 
 @app.post("/api/evaluation/experiments", status_code=201)
-def create_evaluation_experiment(payload: ExperimentCreateRequest) -> dict:
+def create_evaluation_experiment(payload: ExperimentCreateRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return create_experiment(**payload.model_dump())
     except DatasetNotFound as exc:
@@ -604,7 +674,7 @@ def evaluation_feedback(status: str | None = None) -> dict:
 
 
 @app.post("/api/evaluation/feedback", status_code=201)
-def create_evaluation_feedback(payload: FeedbackCreateRequest) -> dict:
+def create_evaluation_feedback(payload: FeedbackCreateRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return add_feedback(**payload.model_dump())
     except ValueError as exc:
@@ -612,7 +682,7 @@ def create_evaluation_feedback(payload: FeedbackCreateRequest) -> dict:
 
 
 @app.post("/api/evaluation/tasks/{task_id}/cancel")
-def cancel_evaluation(task_id: str) -> dict:
+def cancel_evaluation(task_id: str, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return cancel_evaluation_task(task_id)
     except ValueError as exc:
@@ -622,7 +692,7 @@ def cancel_evaluation(task_id: str) -> dict:
 
 
 @app.post("/api/evaluation/tasks/{task_id}/retry", status_code=202)
-def retry_evaluation(task_id: str, background_tasks: BackgroundTasks) -> dict:
+def retry_evaluation(task_id: str, background_tasks: BackgroundTasks, _: None = Depends(_require_admin_token)) -> dict:
     try:
         task = retry_evaluation_task(task_id)
     except ValueError as exc:
@@ -634,13 +704,13 @@ def retry_evaluation(task_id: str, background_tasks: BackgroundTasks) -> dict:
 
 
 @app.post("/api/evaluation/queue/claim")
-def claim_evaluation_queue() -> dict:
+def claim_evaluation_queue(_: None = Depends(_require_admin_token)) -> dict:
     task = claim_next_evaluation_task()
     return {"task": task, "claimed": bool(task)}
 
 
 @app.get("/api/evaluation")
-def evaluation() -> dict:
+def evaluation(_: None = Depends(_require_admin_token)) -> dict:
     """Compatibility endpoint: synchronously run one strict evaluation."""
     from app.nl2sql.evaluation import run_evaluation
 
@@ -655,7 +725,7 @@ def evaluation_tasks(limit: int = 20) -> dict:
 
 
 @app.post("/api/evaluation/tasks", status_code=202)
-def start_evaluation_task(payload: EvaluationTaskCreateRequest, background_tasks: BackgroundTasks) -> dict:
+def start_evaluation_task(payload: EvaluationTaskCreateRequest, background_tasks: BackgroundTasks, _: None = Depends(_require_admin_token)) -> dict:
     try:
         task = create_evaluation_task(
             label=payload.label,
@@ -699,7 +769,7 @@ def model_config() -> dict:
 
 
 @app.put("/api/model/config")
-def update_model_config(payload: ModelSettingsRequest) -> dict:
+def update_model_config(payload: ModelSettingsRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         saved = save_model_config(**payload.model_dump())
         return saved.public()
@@ -708,7 +778,7 @@ def update_model_config(payload: ModelSettingsRequest) -> dict:
 
 
 @app.post("/api/model/models")
-def list_models(payload: ModelProbeRequest) -> dict:
+def list_models(payload: ModelProbeRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         config = candidate_config(**payload.model_dump())
         return {"models": available_models(config)}
@@ -717,7 +787,7 @@ def list_models(payload: ModelProbeRequest) -> dict:
 
 
 @app.post("/api/model/test")
-def test_model(payload: ModelProbeRequest) -> dict:
+def test_model(payload: ModelProbeRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         config = candidate_config(**payload.model_dump())
         reply = test_model_chat(config)

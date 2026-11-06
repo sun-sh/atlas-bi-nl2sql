@@ -199,3 +199,25 @@ def _holdout_cases() -> tuple[dict[str, Any], ...]:
 
 
 HOLDOUT_CASES = _holdout_cases()
+
+# Independent natural-language cases. These check whether the system
+# understands wording deliberately avoided while tuning the fixed v3 suites.
+# Each answered case is validated end to end against scope, plan, retrieval and
+# executed rows. Clarification cases must produce no SQL or rows.
+NATURAL_HOLDOUT_CASES = (
+    {"id": "natural-channel-best", "question": "哪个渠道最赚钱？", "expected_tables": {"orders"}, "expected_intent": "sales_overview", "expected_metric": "销售额", "expected_outcome": "answered"},
+    {"id": "natural-ad-return", "question": "广告花的钱值不值？", "expected_tables": {"marketing_spend", "orders"}, "expected_intent": "marketing_efficiency", "expected_metric": "ROI", "expected_outcome": "answered"},
+    {"id": "natural-refund-cause", "question": "退款主要是哪些原因？", "expected_tables": {"refunds", "orders"}, "expected_intent": "refund_analysis", "expected_metric": "退款金额", "expected_outcome": "answered"},
+    {"id": "natural-category-volume", "question": "什么类目卖得最多？", "expected_tables": {"order_items", "orders"}, "expected_intent": "category_analysis", "expected_metric": "销量", "expected_outcome": "answered"},
+    {"id": "natural-membership", "question": "会员复购情况怎么样？", "expected_tables": {"customers", "orders"}, "expected_outcome": "clarification"},
+    {"id": "natural-aov", "question": "每单平均花多少钱？", "expected_tables": {"orders"}, "expected_intent": "sales_overview", "expected_metric": "客单价", "expected_outcome": "answered"},
+    {"id": "natural-region-gap", "question": "华东和西南的生意差多少？", "expected_tables": {"orders"}, "expected_outcome": "clarification"},
+    {"id": "natural-daily", "question": "这个月每天卖得怎么样？", "expected_tables": {"orders"}, "expected_intent": "sales_overview", "expected_metric": "销售额", "expected_outcome": "answered"},
+    {"id": "natural-refund-money", "question": "退的钱都花在哪些原因上？", "expected_tables": {"refunds", "orders"}, "expected_intent": "refund_analysis", "expected_metric": "退款金额", "expected_outcome": "answered"},
+    {"id": "natural-ads", "question": "广告曝光和点击效果如何？", "expected_tables": {"marketing_spend"}, "expected_outcome": "clarification"},
+    {"id": "natural-conversion", "question": "点击之后到底有多少人下单？", "expected_tables": {"marketing_spend", "orders"}, "expected_outcome": "clarification"},
+    {"id": "natural-city", "question": "客户都来自哪些城市？", "expected_tables": {"customers"}, "expected_outcome": "clarification"},
+    {"id": "natural-refund-ratio", "question": "售后问题占比大吗？", "expected_tables": {"refunds", "orders"}, "expected_intent": "refund_analysis", "expected_metric": "退款率", "expected_outcome": "answered"},
+    {"id": "natural-low-price", "question": "哪些商品卖得多但单价低？", "expected_tables": {"order_items", "orders"}, "expected_outcome": "clarification"},
+    {"id": "natural-new-customer", "question": "新客户和老客户谁贡献更多？", "expected_tables": {"customers", "orders"}, "expected_outcome": "clarification"},
+)

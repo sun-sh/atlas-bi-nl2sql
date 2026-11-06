@@ -413,3 +413,5 @@ button:disabled{cursor:wait;opacity:.6}
 
 .primary-btn[data-mode="cancel"]{background:#7a2e2e}
 .primary-btn[data-mode="cancel"]:hover{background:#652626}
+
+.admin-token-row{display:grid;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}.admin-token-row label{display:grid;gap:5px;color:var(--muted);font-size:var(--fs-meta)}.admin-token-row input{border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:#fff}.admin-token-row button{justify-self:start}

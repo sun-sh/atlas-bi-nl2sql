@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.nl2sql.data_assets import TABLE_PROFILES
+from app.nl2sql.schema_catalog import SCHEMA
 from app.nl2sql.settings import get_settings
 
 
@@ -125,6 +126,7 @@ def init_data_platform() -> None:
                 row_count INTEGER NOT NULL DEFAULT 0,
                 checksum TEXT NOT NULL DEFAULT '',
                 error TEXT NOT NULL DEFAULT '',
+                active_for_query INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(workspace_id) REFERENCES platform_workspaces(id) ON DELETE CASCADE
@@ -203,6 +205,11 @@ def init_data_platform() -> None:
             CREATE INDEX IF NOT EXISTS idx_quality_source ON quality_runs(source_id, started_at DESC);
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(data_sources)").fetchall()}
+        if "active_for_query" not in columns:
+            conn.execute(
+                "ALTER TABLE data_sources ADD COLUMN active_for_query INTEGER NOT NULL DEFAULT 0"
+            )
         now = _iso()
         conn.execute(
             "INSERT OR IGNORE INTO platform_workspaces(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -217,8 +224,8 @@ def _seed_default_sources(conn: sqlite3.Connection) -> None:
     now = _iso()
     warehouse = get_settings().db_path
     conn.execute(
-        "INSERT INTO data_sources(id, workspace_id, name, kind, location, sync_mode, sensitivity, schedule_minutes, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ("ds_commerce", DEFAULT_WORKSPACE, "电商业务库", "sqlite", str(warehouse), "snapshot", "internal", 60, "registered", now, now),
+        "INSERT INTO data_sources(id, workspace_id, name, kind, location, sync_mode, sensitivity, schedule_minutes, status, active_for_query, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("ds_commerce", DEFAULT_WORKSPACE, "电商业务库", "sqlite", str(warehouse), "snapshot", "internal", 60, "registered", 1, now, now),
     )
     metric_rows = (
         ("销售额", "订单", "SUM(orders.paid_amount)，仅统计 paid 订单", "数据团队", "published"),
@@ -302,6 +309,98 @@ def create_workspace(*, name: str, description: str = "", actor: str = "local", 
     return next(item for item in list_workspaces() if item["id"] == workspace_id)
 
 
+QUERY_SCHEMA_CONTRACT = "commerce-demo-v1"
+QUERY_REQUIRED_SCHEMA = {
+    table.name: tuple(column.name for column in table.columns) for table in SCHEMA
+}
+QUERY_INCOMPATIBLE_MESSAGE = "当前数据源缺少 NL2SQL 所需业务表，仅可用于数据服务/治理。"
+
+
+def query_schema_compatibility(path: str | Path) -> dict[str, Any]:
+    """Check the fixed semantic-layer contract used by retrieval and SQL planning."""
+    target = Path(path)
+    report: dict[str, Any] = {
+        "compatible": False,
+        "contract": QUERY_SCHEMA_CONTRACT,
+        "required_tables": list(QUERY_REQUIRED_SCHEMA),
+        "missing_tables": [],
+        "missing_columns": {},
+        "columns_checked": sum(len(columns) for columns in QUERY_REQUIRED_SCHEMA.values()),
+    }
+    if not target.exists():
+        report["missing_tables"] = list(QUERY_REQUIRED_SCHEMA)
+        report["error"] = "分析数据库文件不存在"
+        return report
+    try:
+        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+        try:
+            existing_tables = {
+                str(row[0]).lower(): str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                )
+            }
+            for table, required_columns in QUERY_REQUIRED_SCHEMA.items():
+                physical_table = existing_tables.get(table.lower())
+                if physical_table is None:
+                    report["missing_tables"].append(table)
+                    continue
+                existing_columns = {
+                    str(row[1]).lower()
+                    for row in conn.execute(
+                        f"PRAGMA table_info({_quote(physical_table)})"
+                    ).fetchall()
+                }
+                missing = [
+                    column for column in required_columns
+                    if column.lower() not in existing_columns
+                ]
+                if missing:
+                    report["missing_columns"][table] = missing
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        report["error"] = f"分析数据库无法读取：{exc}"
+        return report
+
+    report["compatible"] = not report["missing_tables"] and not report["missing_columns"]
+    return report
+
+
+def _compatibility_error(report: dict[str, Any]) -> str:
+    details = []
+    if report.get("missing_tables"):
+        details.append("缺少表：" + "、".join(report["missing_tables"]))
+    if report.get("missing_columns"):
+        columns = "；".join(
+            f"{table}({', '.join(columns)})"
+            for table, columns in report["missing_columns"].items()
+        )
+        details.append("缺少字段：" + columns)
+    if report.get("error"):
+        details.append(str(report["error"]))
+    suffix = "；" + "；".join(details) if details else ""
+    return QUERY_INCOMPATIBLE_MESSAGE + suffix
+
+
+def _query_compatibility_for_source(source: dict[str, Any]) -> dict[str, Any]:
+    if source["kind"] == "csv":
+        report = query_schema_compatibility(_warehouse_path())
+        report.update({
+            "compatible": False,
+            "error": "CSV 单表入库默认仅用于数据服务/治理，不能启用为 NL2SQL 分析库",
+        })
+        return report
+    try:
+        return query_schema_compatibility(_resolve_external_path(source["location"]))
+    except DataPlatformError as exc:
+        report = query_schema_compatibility(Path(source["location"]))
+        report["compatible"] = False
+        report["error"] = str(exc)
+        return report
+
+
 def _source_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -318,6 +417,7 @@ def _source_row(row: sqlite3.Row) -> dict[str, Any]:
         "row_count": row["row_count"],
         "checksum": row["checksum"],
         "error": row["error"],
+        "active_for_query": bool(row["active_for_query"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -364,7 +464,11 @@ def list_data_sources(workspace_id: str = DEFAULT_WORKSPACE) -> list[dict[str, A
     ensure_data_platform()
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM data_sources WHERE workspace_id = ? ORDER BY created_at", (workspace_id,)).fetchall()
-    return [_source_row(row) for row in rows]
+    sources = [_source_row(row) for row in rows]
+    for source in sources:
+        if source["status"] == "ready":
+            source["query_compatibility"] = _query_compatibility_for_source(source)
+    return sources
 
 
 def _resolve_external_path(location: str) -> Path:
@@ -474,6 +578,89 @@ def _sync_source(source_id: str, actor: str = "local", role: str = "admin") -> d
 def sync_data_source(source_id: str, *, actor: str = "local", role: str = "admin") -> dict[str, Any]:
     ensure_data_platform()
     return _sync_source(source_id, actor=actor, role=role)
+
+
+
+def activate_query_source(
+    source_id: str,
+    *,
+    actor: str = "local",
+    role: str = "admin",
+) -> dict[str, Any]:
+    """Select one synced source as the default read-only NL2SQL database."""
+    ensure_data_platform()
+    _require_role(role, "admin")
+    source = get_data_source(source_id)
+    if source["status"] != "ready":
+        raise DataPlatformError("数据源尚未成功同步，不能启用为分析数据源")
+    if source["kind"] == "csv":
+        raise DataPlatformError(
+            "CSV 数据源默认仅用于数据服务/治理，不能启用为 NL2SQL 分析库；"
+            "请接入包含固定五表契约的 SQLite 数据源。"
+        )
+    path = _resolve_external_path(source["location"])
+    compatibility = query_schema_compatibility(path)
+    if not compatibility["compatible"]:
+        raise DataPlatformError(_compatibility_error(compatibility))
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE data_sources SET active_for_query=0, updated_at=? WHERE workspace_id=?",
+            (_iso(), source["workspace_id"]),
+        )
+        conn.execute(
+            "UPDATE data_sources SET active_for_query=1, updated_at=? WHERE id=?",
+            (_iso(), source_id),
+        )
+    audit(
+        source["workspace_id"],
+        actor,
+        role,
+        "source.activate",
+        "data_source",
+        source_id,
+        {"database": path.name},
+    )
+    return {
+        "source": get_data_source(source_id),
+        "database": path.name,
+        "read_only": True,
+        "compatibility": compatibility,
+    }
+
+
+def active_query_database(workspace_id: str = DEFAULT_WORKSPACE) -> dict[str, Any]:
+    """Resolve the active query database, falling back to the demo warehouse."""
+    ensure_data_platform()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM data_sources WHERE workspace_id=? AND active_for_query=1 "
+            "AND status='ready' ORDER BY updated_at DESC LIMIT 1",
+            (workspace_id,),
+        ).fetchone()
+    if row is None:
+        path = get_settings().db_path
+        return {
+            "source_id": None,
+            "workspace_id": workspace_id,
+            "database": path.name,
+            "path": path,
+            "read_only": True,
+            "fallback": True,
+        }
+    source = _source_row(row)
+    path = (
+        _warehouse_path()
+        if source["kind"] == "csv"
+        else _resolve_external_path(source["location"])
+    )
+    return {
+        "source_id": source["id"],
+        "workspace_id": source["workspace_id"],
+        "database": path.name,
+        "path": path,
+        "read_only": True,
+        "fallback": False,
+    }
 
 
 def list_lineage(workspace_id: str = DEFAULT_WORKSPACE) -> list[dict[str, Any]]:
@@ -607,6 +794,9 @@ def platform_overview(workspace_id: str = DEFAULT_WORKSPACE) -> dict[str, Any]:
         "workspace": {"id": workspace_id, "name": next((w["name"] for w in list_workspaces() if w["id"] == workspace_id), workspace_id)},
         "summary": {
             "source_count": len(sources), "ready_sources": sum(s["status"] == "ready" for s in sources),
+            "query_ready_sources": sum(
+                bool(s.get("query_compatibility", {}).get("compatible")) for s in sources
+            ),
             "rule_count": len(rules), "metric_count": len(metrics), "published_metrics": sum(m["status"] == "published" for m in metrics),
             "lineage_edges": len(lineage),
             "last_quality": runs[0] if runs else None,
@@ -618,7 +808,12 @@ def platform_overview(workspace_id: str = DEFAULT_WORKSPACE) -> dict[str, Any]:
         "lineage": lineage,
         "schedules": [dict(row) for row in schedules],
         "audit": [_audit_row(row) for row in audit_rows],
-        "controls": {"default_role": "admin", "roles": list(ROLE_LEVEL), "data_service": "read-only"},
+        "controls": {
+            "default_role": "admin",
+            "roles": list(ROLE_LEVEL),
+            "data_service": "read-only",
+            "query_database": active_query_database(workspace_id)["database"],
+        },
     }
 
 

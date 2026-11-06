@@ -24,9 +24,10 @@ Atlas BI 是一个电商经营分析问答项目，业务数据覆盖订单、�
 | 分析什么 | 销售额、品类、退款率、ROI、客单价、趋势和渠道结构 |
 | 一次查询会经过 | 可答性判定 → 双路 Schema 召回 → 意图规划 → 模型生成 SQL → AST 门禁 → 只读执行 → 有限修复 → 解读事实校验 |
 | 怎么用 | Web 工作台、FastAPI 查询接口、只读数据服务、OpenAPI 和 OpenAI 兼容模型接口 |
-| 数据侧 | SQLite/CSV 接入、快照、资产目录、质量规则、指标口径、字段血缘和审计 |
-| 评测侧 | SQL 结果等价验收、解读事实校验、不可答问题范围评测、数据集版本、实验、队列、取消重试和失败回流 |
+| 数据侧 | SQLite/CSV 接入、快照、资产目录、质量规则、指标口径、字段血缘和审计；兼容 SQLite 可切换为当前分析库 |
+| 评测侧 | SQL 结果等价验收、解读事实校验、范围/自然语言/检索消融、数据集版本、实验、队列、取消重试和失败回流 |
 | 会话 | 最多 20 轮、7 天过期；新问题里的条件优先，缺失的条件按需继承 |
+| 运行观测 | `/api/metrics` 进程内延迟摘要、可选 `X-Admin-Token` 运营门禁、本地 HTTP 压测脚本 |
 
 ## 系统架构
 
@@ -117,11 +118,12 @@ flowchart TD
 
 | 模块 | 实现 |
 | --- | --- |
-| 可答性判定 | 模糊问题先要求补充指标；因果问题只提供可查询的拆解方向；写操作、敏感字段和域外请求在生成 SQL 前拒绝 |
+| 可答性判定 | 模糊问题先要求补充指标；因果问题只提供可查询的拆解方向；写操作、敏感字段和域外请求在生成 SQL 前拒绝；澄清和拒答不生成伪造查询计划 |
 | 解读事实校验 | 数字必须来自确定性摘要；非榜首不能写成最高；趋势方向不能与摘要相反；失败时回退确定性摘要 |
-
-| 模块 | 实现 |
-| --- | --- |
+| 数据源启用 | 同步后的五表兼容 SQLite 可切换为当前分析库；CSV 和结构不兼容来源只进入数据服务/治理，不冒充 NL2SQL 数据源 |
+| 运行观测 | `/api/metrics` 暴露进程内请求数、错误数、P50/P95/Max；带管理令牌的运营接口与本地 HTTP 压测脚本可用于回归 |
+| 检索验证 | 12 条标注集比较纯词法、纯语义和已发布的 0.56/0.44 融合方案，同时报告 Top-1、MRR 和完整表召回 |
+| 语言变体验证 | 15 条独立自然语言问法逐条检查范围、意图、指标、表召回和真实执行行；8 条应回答，7 条应澄清 |
 | Schema 召回 | BGE + Qdrant 语义检索与 Elasticsearch BM25 / 本地 IDF 双路召回，最终得分 `0.56 × semantic + 0.44 × lexical` |
 | SQL 安全 | sqlglot AST、单条 SELECT、表/函数白名单、拒绝 `SELECT *`、敏感字段拦截、只读连接和结果行数限制 |
 | 流式结果 | SSE 先推送查询结果、SQL、检索依据和确定性摘要，再流式生成模型结论；失败时用 `reset` 换成完整摘要 |
@@ -162,6 +164,14 @@ flowchart TD
 两套评测集都限定在固定电商数据和业务口径内，不代表开放域泛化。
 
 另有 7 条不调用模型的 `scope-guard-v1` 范围评测，覆盖模糊业务问题、因果问题、写操作、敏感字段和域外请求，当前 **7/7 在生成 SQL 前正确澄清或拒绝**，报告见 [范围评测 JSON](docs/evaluations/scope-guard-2026-11-05.json)。这验证的是“不该答时不要硬答”，不是业务查询准确率。
+
+### 自然语言与检索验证
+
+2026-11-06 的 `natural-language-holdout-v1` 使用 15 条未写进调参集的自然问法，逐条校验实际结果：8 条可回答必须命中预期意图、指标、表和真实数据行，7 条能力不完整或口径不清的问题必须停下并要求澄清。当前 **15/15 全部通过**；这是确定性规则链路加真实 SQLite 执行的证据，不是在线模型准确率。报告见 [自然语言评测 JSON](docs/evaluations/natural-language-holdout-2026-11-06.json)。
+
+同一日期运行的 `retrieval-ablation-v1` 在 12 条标注问法上比较三种方案。已发布的 `0.56/0.44` 混合检索 **Top-1 91.7%、MRR 0.9583、完整表召回@4 100%**；纯词法完整召回也是 100%，说明这个只有 5 张表的小集合并不能证明混合检索全面更优。报告保留每种方案明细，见 [检索消融 JSON](docs/evaluations/retrieval-ablation-2026-11-06.json)。
+
+本地 HTTP 冒烟压测以模型关闭、固定种子 SQLite 和规则 SQL 为前提：20 个请求、并发 4，20/20 成功，P50 55.7 ms、P95 158.6 ms、约 15.56 req/s。它只证明当前机器上 HTTP 与只读 SQL 路径可承受这一小规模请求，不代表 LLM 延迟、集群容量或生产 SLA，见 [HTTP 压测 JSON](docs/evaluations/http-loadtest-2026-11-06.json)。
 
 ## 数据中台
 
@@ -236,7 +246,8 @@ curl -N -X POST http://127.0.0.1:8000/api/query/stream \
 
 | 接口 | 说明 |
 | --- | --- |
-| `GET /api/health` | 数据库、检索后端、模型状态与修复配置 |
+| `GET /api/health` | 当前分析库、检索后端、模型状态与修复配置 |
+| `GET /api/metrics` | 进程内请求数、错误率和 P50/P95/Max 延迟 |
 | `GET /api/overview` | 经营总览指标 |
 | `GET /api/examples` | 获取工作台示例问题 |
 | `POST /api/query` | 同步执行完整 NL2SQL 查询 |
@@ -249,6 +260,7 @@ curl -N -X POST http://127.0.0.1:8000/api/query/stream \
 | `GET/POST /api/data-platform/workspaces` | 工作区列表与创建 |
 | `GET/POST /api/data-platform/sources` | 数据源列表与注册 |
 | `POST /api/data-platform/sources/{id}/sync` | 执行快照或入库同步 |
+| `POST /api/data-platform/sources/{id}/activate` | 将兼容 SQLite 设为当前 NL2SQL 分析库 |
 | `GET/POST /api/data-platform/metrics` | 指标目录 |
 | `GET/POST /api/data-platform/quality-rules` | 质量规则 |
 | `POST /api/data-platform/sources/{id}/quality` | 执行质量巡检 |
@@ -275,10 +287,12 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 python -m app.evaluation.run
 python -m app.evaluation.run --suite scope --min-hit-rate 100
+python -m app.evaluation.run --suite retrieval --min-hit-rate 100
+python -m app.evaluation.run --suite natural --min-hit-rate 100
 node --check app/static/app.js
 ```
 
-`pytest` 会关闭在线模型和 BGE 下载，用本地数据和受控的模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **123 项测试全部通过**。CI 在 Python 3.12、`LLM_ENABLED=false` 下运行测试和评测入口，不产生真实模型分数。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
+`pytest` 会关闭在线模型和 BGE 下载，用本地数据和受控的模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **133 项测试全部通过**。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行测试和确定性质量门禁，不产生在线模型分数；`scope`、`retrieval`、`natural` 三套门禁不依赖模型 Key。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
 
 ## 本地运行
 
@@ -328,6 +342,8 @@ Windows 可以直接运行 `run.ps1`，macOS / Linux 用 `./run.sh`。
 | `ATLAS_PLATFORM_WAREHOUSE_DB_PATH` | `data/platform_warehouse.db` | 数据中台快照/入库的本地仓储路径 |
 | `ATLAS_MODEL_CONFIG_PATH` | `data/model_config.json` | 服务端模型配置；不会返回 API Key |
 | `ATLAS_DISABLE_MODEL` | `0` | 设为 `1` 时强制禁用模型，便于离线验证 |
+| `ATLAS_ADMIN_API_TOKEN` | 空 | 设置后，数据源、指标、评测、模型探测等运营写接口要求 `X-Admin-Token`；SQL 查询路由不受影响 |
+| `ATLAS_WORKSPACE_ID` | `default` | 当前查询链路使用的工作区；启用数据源后从该工作区解析分析库 |
 
 ## 目录结构
 
@@ -350,14 +366,17 @@ tests/              # 自动化测试
 
 - 当前使用固定电商数据和固定业务口径，换成其他业务需要补 Schema、业务规则和评测用例。
 - 可答性判定以规则为主，覆盖常见澄清、写操作、敏感字段和域外请求；它会减少硬答，但不能替代完整的权限系统和人工复核。
-- 数据中台是单工作区、本地管理员，只有函数级角色检查；没有 SSO、多租户隔离和生产数据集群。
+- 数据中台是单工作区、本地管理员，只有函数级角色检查；`X-Admin-Token` 只是可选的共享部署门禁，没有 SSO、多租户隔离、用户级授权和生产数据集群。
+- CSV 单表入库不能切换成 NL2SQL 分析库；只有包含固定五表契约的 SQLite 才能被启用为查询数据源。
+- `/api/metrics` 是单进程内存窗口，进程重启即清零，也不包含网关、数据库连接池或模型供应商侧指标；HTTP 压测关闭模型，不能当作 LLM 容量结论。
 - 评测中台使用 SQLite 队列和单执行槽，没有跨组织标注、分布式后台进程或线上流量评测。
 
 ## 文档
 
-- [架构设计](docs/ARCHITECTURE.md)：组件边界、Agent 状态机、失败处理和扩展点。
-- [运行手册](docs/OPERATIONS.md)：启动、健康检查、模型接入、平台存储与故障定位。
-- [评测说明](docs/EVALUATION.md)：回归集、严格判分、数据集版本、实验、任务队列、失败用例回流和 CI 策略。
+- [架构设计](docs/ARCHITECTURE.md)：组件边界、Agent 状态机、分析库切换、运行指标和失败处理。
+- [运行手册](docs/OPERATIONS.md)：启动、健康检查、管理令牌、分析库启用、压测、平台存储与故障定位。
+- [评测说明](docs/EVALUATION.md)：严格模型评测、自然语言变体、检索消融、HTTP 压测、数据集和任务队列。
+- [面试准备](docs/INTERVIEW.md)：项目讲解顺序、常见追问、已验证能力和事实边界。
 - [安全策略](SECURITY.md)：SQL 门禁、密钥管理与报告流程。
 - [贡献指南](CONTRIBUTING.md)：开发流程、测试要求与提交检查。
 

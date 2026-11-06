@@ -15,6 +15,8 @@ def test_health_and_examples():
     assert body["status"] == "ok"
     assert body["retrieval"]["tables"] == 5
     assert "fusion" in body["retrieval"]
+    assert body["query_database"]["read_only"] is True
+    assert body["query_database"]["database"].endswith(".db")
     assert len(client.get("/api/examples").json()["examples"]) == 6
 
 
@@ -142,6 +144,8 @@ def test_model_config_endpoint_masks_api_key(monkeypatch, tmp_path):
 
 
 def test_model_list_endpoint_does_not_require_saved_config(monkeypatch):
+    import app.api.main as api_main
+
     called = {}
 
     def fake_models(config):
@@ -149,14 +153,20 @@ def test_model_list_endpoint_does_not_require_saved_config(monkeypatch):
         called["api_key"] = config.api_key
         return ["model-a", "model-b"]
 
-    monkeypatch.setattr("app.api.main.available_models", fake_models)
+    monkeypatch.setattr(api_main, "available_models", fake_models)
+    monkeypatch.setattr(api_main, "get_settings", lambda: type(
+        "S", (), {"admin_api_token": "unit-secret"}
+    )())
+    payload = {
+        "provider": "custom",
+        "base_url": "https://example.com/v1",
+        "api_key": "temporary-key",
+    }
+    assert client.post("/api/model/models", json=payload).status_code == 401
     response = client.post(
         "/api/model/models",
-        json={
-            "provider": "custom",
-            "base_url": "https://example.com/v1",
-            "api_key": "temporary-key",
-        },
+        json=payload,
+        headers={"X-Admin-Token": "unit-secret"},
     )
     assert response.status_code == 200
     assert response.json()["models"] == ["model-a", "model-b"]
@@ -298,6 +308,8 @@ def test_ambiguous_and_write_questions_stop_before_sql():
     assert ambiguous["outcome"] == "clarification"
     assert ambiguous["mode"] == "clarification"
     assert ambiguous["plan"]["reason_code"] == "missing_metric"
+    assert ambiguous["plan"]["intent"] == ""
+    assert ambiguous["plan"]["metrics"] == []
     assert ambiguous["sql"] == ""
     assert ambiguous["rows"] == []
 
@@ -305,6 +317,8 @@ def test_ambiguous_and_write_questions_stop_before_sql():
     assert write["outcome"] == "unsupported"
     assert write["mode"] == "unsupported"
     assert write["plan"]["reason_code"] == "write_request"
+    assert write["plan"]["intent"] == ""
+    assert write["plan"]["metrics"] == []
     assert write["sql"] == ""
     assert write["rows"] == []
 
@@ -374,3 +388,88 @@ def test_clarification_does_not_replace_followup_context():
     assert follow_up["outcome"] == "answered"
     assert "o.region = '华南'" in follow_up["sql"]
     assert "2026-01-01" in follow_up["sql"]
+
+
+def test_optional_admin_token_protects_write_routes(monkeypatch):
+    import app.api.main as api_main
+
+    monkeypatch.setattr(api_main, "get_settings", lambda: type(
+        "S", (), {"admin_api_token": "unit-secret"}
+    )())
+    protected = [
+        ("post", "/api/data-platform/metrics", {"workspace_id": "default", "name": "测试指标", "grain": "订单", "definition": "SUM(paid_amount)", "owner": "test"}),
+        ("post", "/api/data-platform/quality-rules", {"name": "测试规则", "rule_type": "row_min", "table_name": "orders", "expression": "1"}),
+        ("post", "/api/evaluation/datasets", {"name": "令牌测试集", "version": "v1", "case_ids": ["sales-east"]}),
+        ("post", "/api/evaluation/experiments", {"name": "令牌实验", "dataset_id": "dataset_v3_100"}),
+        ("post", "/api/evaluation/feedback", {"task_id": "missing", "case_id": "missing", "category": "other"}),
+        ("post", "/api/evaluation/tasks/missing/cancel", None),
+        ("post", "/api/evaluation/tasks/missing/retry", None),
+        ("post", "/api/evaluation/queue/claim", None),
+        ("post", "/api/evaluation/tasks", {"workers": 1}),
+        ("post", "/api/model/models", {"provider": "custom", "base_url": "https://example.com/v1"}),
+        ("put", "/api/model/config", {"enabled": False, "provider": "custom", "base_url": "https://example.com/v1", "model": "test"}),
+        ("get", "/api/evaluation", None),
+    ]
+    for method, url, payload in protected:
+        request = {"json": payload} if payload is not None else {}
+        response = getattr(client, method)(url, **request)
+        assert response.status_code == 401, (url, response.text)
+    assert client.post("/api/data-platform/scheduler/run").status_code == 401
+    authorized = client.post(
+        "/api/data-platform/scheduler/run",
+        headers={"X-Admin-Token": "unit-secret"},
+    )
+    assert authorized.status_code == 200
+
+
+def test_activation_moves_query_to_selected_database(monkeypatch, tmp_path):
+    import app.api.main as api_main
+
+    selected = tmp_path / "selected.db"
+    selected.touch()
+    monkeypatch.setattr(api_main, "active_query_database", lambda workspace_id="default": {
+        "source_id": "test-source",
+        "workspace_id": workspace_id,
+        "database": "selected.db",
+        "path": selected,
+        "read_only": True,
+        "fallback": False,
+    })
+    captured = {}
+
+    def fake_run(question, *, context=None, db_path=None, **kwargs):
+        captured["db_path"] = db_path
+        raise RuntimeError("stop after capture")
+
+    monkeypatch.setattr(api_main, "run_query", fake_run)
+    response = client.post("/api/query", json={"question": "上个月销售额是多少？"})
+    assert response.status_code == 500
+    assert captured["db_path"].endswith("selected.db")
+
+
+def test_runtime_metrics_endpoint_tracks_sync_and_stream_latency(monkeypatch, tmp_path):
+    from tests.test_stream import parse_sse
+
+    monkeypatch.setenv("ATLAS_SESSION_DB_PATH", str(tmp_path / "sessions.db"))
+    response = client.get("/api/query")
+    assert response.status_code == 405
+    client.get("/api/metrics")
+    client.post("/api/query", json={"question": "上个月销售额是多少？"})
+    with client.stream(
+        "POST",
+        "/api/query/stream",
+        json={"question": "上个月销售额是多少？"},
+        headers={"Accept": "text/event-stream"},
+    ) as streamed:
+        assert streamed.status_code == 200
+        assert parse_sse("".join(streamed.iter_text()))[-1][0] == "done"
+    metrics = client.get("/api/metrics").json()
+    assert metrics["sample_limit"] == 1000
+    query_metrics = metrics["routes"].get("query")
+    stream_metrics = metrics["routes"].get("query_stream")
+    assert query_metrics is not None
+    assert query_metrics["count"] >= 1
+    assert stream_metrics is not None
+    assert stream_metrics["count"] >= 1
+    assert stream_metrics["errors"] == 0
+    assert "p95_ms" in query_metrics

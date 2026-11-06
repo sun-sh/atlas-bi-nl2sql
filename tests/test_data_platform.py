@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import sqlite3
 
 import pytest
 
@@ -69,3 +70,74 @@ def test_workspace_role_and_path_boundaries(tmp_path):
     ws = data_platform.create_workspace(name='营销分析', description='区域营销域')
     assert ws['id'].startswith('ws_')
     assert any(item['id'] == ws['id'] for item in data_platform.list_workspaces())
+
+
+def test_csv_source_cannot_be_activated_as_nl2sql_database(tmp_path):
+    data_platform.ensure_data_platform()
+    csv_dir = tmp_path / 'data' / 'imports'
+    csv_dir.mkdir(parents=True)
+    path = csv_dir / 'orders.csv'
+    with path.open('w', encoding='utf-8', newline='') as fh:
+        writer = csv.writer(fh)
+        writer.writerow(['order_id', 'paid_amount'])
+        writer.writerow(['O1', '99.00'])
+    source = data_platform.register_data_source(
+        workspace_id='default',
+        name='订单导出',
+        kind='csv',
+        location='data/imports/orders.csv',
+        sync_mode='ingest',
+    )
+    data_platform.sync_data_source(source['id'])
+
+    with pytest.raises(data_platform.DataPlatformError, match='仅用于数据服务/治理'):
+        data_platform.activate_query_source(source['id'])
+
+    listed = next(item for item in data_platform.list_data_sources() if item['id'] == source['id'])
+    assert listed['query_compatibility']['compatible'] is False
+    assert data_platform.active_query_database()['source_id'] == 'ds_commerce'
+
+
+def test_incompatible_sqlite_source_cannot_be_activated(tmp_path):
+    data_platform.ensure_data_platform()
+    data_dir = tmp_path / 'data' / 'imports'
+    data_dir.mkdir(parents=True)
+    path = data_dir / 'inventory.db'
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute('CREATE TABLE inventory (sku TEXT PRIMARY KEY, stock INTEGER)')
+        conn.execute("INSERT INTO inventory VALUES ('P1', 4)")
+        conn.commit()
+    finally:
+        conn.close()
+    source = data_platform.register_data_source(
+        workspace_id='default',
+        name='库存库',
+        kind='sqlite',
+        location='data/imports/inventory.db',
+    )
+    data_platform.sync_data_source(source['id'])
+
+    listed = next(item for item in data_platform.list_data_sources() if item['id'] == source['id'])
+    assert listed['query_compatibility']['compatible'] is False
+    assert 'orders' in listed['query_compatibility']['missing_tables']
+    with pytest.raises(data_platform.DataPlatformError, match='缺少 NL2SQL 所需业务表'):
+        data_platform.activate_query_source(source['id'])
+    with pytest.raises(data_platform.DataPlatformError, match='缺少表：orders'):
+        data_platform.activate_query_source(source['id'])
+
+
+def test_synced_source_can_become_active_query_database(monkeypatch, tmp_path):
+    from app.nl2sql import data_platform
+
+    monkeypatch.setenv("ATLAS_DATA_PLATFORM_DB_PATH", str(tmp_path / "platform.db"))
+    monkeypatch.setenv("ATLAS_PLATFORM_WAREHOUSE_DB_PATH", str(tmp_path / "warehouse.db"))
+    data_platform.init_data_platform()
+    source = data_platform.get_data_source("ds_commerce")
+    data_platform.sync_data_source(source["id"])
+    activated = data_platform.activate_query_source(source["id"])
+    assert activated["source"]["active_for_query"] is True
+    assert activated["read_only"] is True
+    active = data_platform.active_query_database()
+    assert active["source_id"] == source["id"]
+    assert active["fallback"] is False

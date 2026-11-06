@@ -13,7 +13,7 @@ Session memory is deliberately bounded: SQLite-backed short-term state, at most 
 
 All rule-generated, model-generated and repaired SQL passes through the same validator before execution. Result narration runs only after a trusted SQL result exists: deterministic digest statistics constrain the prompt, the final text is validated against digest values, ranking and trend direction, and a validation, model or streaming failure falls back to the same deterministic summary. The model may summarize trusted rows, but it never rewrites SQL, rows or evidence.
 
-Before retrieval, a deterministic intent guard decides whether a request is answerable, needs clarification, or must be refused. Write requests, sensitive fields, out-of-domain requests and ambiguous business questions never reach SQL generation. Follow-ups remain answerable when the previous turn already established a metric.
+Before retrieval, a deterministic intent guard decides whether a request is answerable, needs clarification, or must be refused. Write requests, sensitive fields, out-of-domain requests and ambiguous business questions never reach SQL generation. A clarification/refusal produces an explicitly empty plan, not a default sales query. Follow-ups remain answerable when the previous turn already established a metric.
 
 The SQL harness enforces a bounded policy before execution: one SELECT statement, authorized tables/functions, no projection-level stars (including inside CTEs), no recursive CTEs, no CROSS JOIN, at most three JOINs, and a bounded subquery depth. SQLite execution also has a wall-clock progress-handler timeout and fetches only the rows needed to mark truncation.
 
@@ -175,6 +175,19 @@ The LangGraph state carries the question, retrieval question, trace ID, timer, s
 - Qdrant stores vectors in memory by default; a remote endpoint can be supplied.
 - Lexical retrieval uses Elasticsearch BM25 when reachable, otherwise local IDF scoring.
 - Final scoring is `0.56 * semantic + 0.44 * lexical`, with evidence preserved in the response.
+- The ablation reports Top-1 accuracy, MRR and full recall@4. On the current five-table labelled set, lexical-only also reaches full recall@4, so the evidence supports a reproducible baseline rather than a claim that fusion dominates every alternative.
+
+## Active query database
+
+The data platform stores source metadata and snapshots separately from the query path. `POST /api/data-platform/sources/{id}/activate` is an operator action: it accepts only a synced SQLite source that implements the fixed five-table schema contract, verifies the live file, and marks one source active per workspace. CSV sources are intentionally limited to governance and the read-only data service because a single imported table cannot satisfy the semantic layer.
+
+`/api/query`, `/api/query/stream` and `/api/overview` resolve the active database at request time and pass its read-only path through the LangGraph state. `/api/health` reports the resolved source ID, database filename and whether it is a fallback. This is a real source switch, not a display-only selector. It does not include a database adapter abstraction for MySQL/Postgres, connection pooling, per-tenant row filters or replicated failover.
+
+## Operational controls and metrics
+
+All operator mutations on data-platform, evaluation and model-probe routes pass through one optional dependency. When `ATLAS_ADMIN_API_TOKEN` is set, callers must send `X-Admin-Token`; when it is empty, the local demo remains open. Query/session routes stay public because they are the end-user path. This is a single shared operator secret, not user authentication or RBAC.
+
+`app/nl2sql/runtime_metrics.py` keeps a bounded in-process sample window (latest 1000 observations per route). `/api/metrics` exposes count, error count, error rate and P50/P95/max for `query` and `query_stream`. These are process-local diagnostics: restarting the process clears them, and a multi-worker deployment needs external aggregation.
 
 ## Harness boundary
 

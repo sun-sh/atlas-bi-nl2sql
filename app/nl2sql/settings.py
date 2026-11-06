@@ -32,6 +32,8 @@ class Settings:
     max_repair_attempts: int = int(os.getenv("MAX_REPAIR_ATTEMPTS", "2"))
     max_rows: int = int(os.getenv("MAX_RESULT_ROWS", "200"))
     query_timeout_seconds: float = float(os.getenv("QUERY_TIMEOUT_SECONDS", "5"))
+    workspace_id: str = os.getenv("ATLAS_WORKSPACE_ID", "default")
+    admin_api_token: str = os.getenv("ATLAS_ADMIN_API_TOKEN", "").strip()
 
 
 @lru_cache(maxsize=1)

@@ -173,7 +173,14 @@ class HybridSchemaRetriever:
         except Exception:
             return [0.0] * len(self.tables)
 
-    def search(self, query: str, limit: int = 4) -> list[SchemaHit]:
+    def search(
+        self,
+        query: str,
+        limit: int = 4,
+        *,
+        semantic_weight: float = 0.56,
+        lexical_weight: float = 0.44,
+    ) -> list[SchemaHit]:
         self._refresh_elastic_scores(query)
         lexical = [self._lexical(query, i) for i in range(len(self.tables))]
         semantic = self._semantic(query)
@@ -189,7 +196,7 @@ class HybridSchemaRetriever:
                 keyword_score = min(1.0, self.elastic_scores.get(table.name, 0.0) / 10.0)
             else:
                 keyword_score = lex_score / lex_max
-            score = 0.56 * sem_score + 0.44 * keyword_score
+            score = semantic_weight * sem_score + lexical_weight * keyword_score
             if table.name == "orders":
                 score += 0.015
             hits.append(
@@ -215,6 +222,7 @@ class HybridSchemaRetriever:
             "elasticsearch_enabled": self.elastic is not None,
             "qdrant_mode": "remote" if self.settings.qdrant_url else "in-memory",
             "fusion": "0.56 semantic + 0.44 lexical",
+            "rerank": "orders +0.015 tie-break",
             "fusion_basis": (
                 "ES BM25 -> min(score/10, 1)"
                 if self.elastic is not None

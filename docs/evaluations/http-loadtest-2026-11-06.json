@@ -1,0 +1,24 @@
+{
+  "suite_version": "http-loadtest-v1",
+  "requests": 20,
+  "concurrency": 4,
+  "success": 20,
+  "failed": 0,
+  "success_rate": 100.0,
+  "wall_seconds": 1.29,
+  "throughput_rps": 15.56,
+  "latency_ms": {
+    "mean": 73.0,
+    "p50": 55.7,
+    "p95": 158.6,
+    "max": 209.0
+  },
+  "errors": [],
+  "environment": {
+    "python": "3.13.15",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "model_enabled": false,
+    "workload": "local deterministic rule SQL over seeded SQLite"
+  },
+  "note": "Local rule-SQL/HTTP workload with the model disabled; this is not LLM or production capacity evidence."
+}

@@ -723,3 +723,212 @@ def run_evaluation(
         "intents": len({case["intent"] for case in selected_cases}),
         "cases": results_by_case,
     }
+
+
+RETRIEVAL_CASES = (
+    {"question": "哪个渠道贡献的收入最多？", "expected": {"orders"}},
+    {"question": "投放的钱花在哪里了，回报怎么样？", "expected": {"marketing_spend", "orders"}},
+    {"question": "售后问题主要集中在哪里？", "expected": {"refunds", "orders"}},
+    {"question": "卖得最多的是哪些类目？", "expected": {"order_items", "orders"}},
+    {"question": "会员和复购情况如何？", "expected": {"customers", "orders"}},
+    {"question": "网页端和抖音端每单平均花多少钱？", "expected": {"orders"}},
+    {"question": "华东和西南的生意差距大吗？", "expected": {"orders"}},
+    {"question": "这个月每天卖得怎么样？", "expected": {"orders"}},
+    {"question": "退的钱都是因为什么？", "expected": {"refunds", "orders"}},
+    {"question": "广告被看见和点开的情况如何？", "expected": {"marketing_spend"}},
+    {"question": "哪些商品买的人多但单价低？", "expected": {"order_items", "orders"}},
+    {"question": "不同城市客户的消费能力有什么差异？", "expected": {"customers", "orders"}},
+)
+
+
+def _retrieval_metrics(retriever, weights: dict[str, float]) -> dict[str, Any]:
+    cases = []
+    reciprocal_ranks: list[float] = []
+    for case in RETRIEVAL_CASES:
+        returned = [hit.table for hit in retriever.search(case["question"], limit=4, **weights)]
+        expected = set(case["expected"])
+        positions = [returned.index(table) + 1 for table in expected if table in returned]
+        top1 = bool(returned and returned[0] in expected)
+        full_recall = expected.issubset(returned)
+        reciprocal_rank = 1.0 / min(positions) if positions else 0.0
+        reciprocal_ranks.append(reciprocal_rank)
+        cases.append(
+            {
+                "question": case["question"],
+                "expected_tables": sorted(expected),
+                "retrieved_tables": returned,
+                "top1_hit": top1,
+                "full_recall": full_recall,
+                "reciprocal_rank": round(reciprocal_rank, 4),
+            }
+        )
+    total = len(cases)
+    top1_count = sum(item["top1_hit"] for item in cases)
+    recall_count = sum(item["full_recall"] for item in cases)
+    return {
+        "total": total,
+        "top1_hits": top1_count,
+        "full_recall_cases": recall_count,
+        "top1_accuracy": round(top1_count * 100 / total, 1),
+        "mrr": round(sum(reciprocal_ranks) / total, 4),
+        "full_recall_at_4": round(recall_count * 100 / total, 1),
+        "metric": "top1_accuracy / MRR / all_expected_tables_present_in_top_4",
+        "cases": cases,
+    }
+
+
+def run_retrieval_ablation(retriever=None) -> dict[str, Any]:
+    """Compare lexical-only, semantic-only and the shipped fusion weights."""
+    from app.nl2sql.retrieval import HybridSchemaRetriever
+
+    retriever = retriever or HybridSchemaRetriever()
+    variants = {
+        "lexical_only": {"semantic_weight": 0.0, "lexical_weight": 1.0},
+        "semantic_only": {"semantic_weight": 1.0, "lexical_weight": 0.0},
+        "hybrid_0.56_0.44": {"semantic_weight": 0.56, "lexical_weight": 0.44},
+    }
+    results = {name: _retrieval_metrics(retriever, weights) for name, weights in variants.items()}
+    return {
+        "suite_version": "retrieval-ablation-v1",
+        "total": len(RETRIEVAL_CASES),
+        "selected": "hybrid_0.56_0.44",
+        "retrieval_backend": retriever.describe(),
+        "variants": results,
+        "limitations": (
+            "Small labelled set with only five schema tables; top-1, MRR and full table recall "
+            "do not prove SQL correctness. Check retrieval_backend before comparing variants."
+        ),
+    }
+
+
+def run_natural_language_evaluation(retriever=None) -> dict[str, Any]:
+    """Check scope, plan semantics, retrieval and execution on paraphrases."""
+    from app.nl2sql.holdout import NATURAL_HOLDOUT_CASES
+    from app.nl2sql.intent_guard import assess_question
+    from app.nl2sql.retrieval import HybridSchemaRetriever
+    from app.nl2sql.workflow import run_query
+
+    retriever = retriever or HybridSchemaRetriever()
+    results = []
+    for case in NATURAL_HOLDOUT_CASES:
+        started = time.perf_counter()
+        expected = set(case["expected_tables"])
+        expected_outcome = case.get("expected_outcome", "answered")
+        decision = assess_question(case["question"])
+        result = run_query(case["question"], narrate=False)
+        answered = expected_outcome == "answered"
+        tables = (
+            {hit.table for hit in retriever.search(case["question"], limit=4)}
+            if answered
+            else set()
+        )
+        actual_metric = next(iter(result.plan.metrics), "")
+        outcome_ok = decision.outcome == expected_outcome and result.outcome == expected_outcome
+        intent_ok = (
+            result.plan.intent == case.get("expected_intent", "")
+            if answered
+            else result.plan.intent == ""
+        )
+        metric_ok = (
+            result.plan.metrics == [case["expected_metric"]]
+            if answered
+            else result.plan.metrics == []
+        )
+        # Clarification cases are intentionally stopped before retrieval, so
+        # they have no table requirement to satisfy.
+        retrieval_ok = expected.issubset(tables) if answered else True
+        metric_column_ok = (
+            any(_normalize(column) in {
+                _normalize(alias)
+                for alias in (
+                    METRIC_NAME_ALIASES.get(case["expected_metric"], set())
+                    | METRIC_ALIASES.get(case["expected_metric"].lower(), set())
+                )
+            } for column in result.columns)
+            if answered
+            else True
+        )
+        rows_ok = (
+            bool(result.rows) and bool(result.sql) and result.attempts and result.attempts[-1]["status"] == "success"
+            if answered
+            else not result.rows and not result.sql and not result.attempts
+        )
+        end_to_end_pass = outcome_ok and intent_ok and metric_ok and retrieval_ok and metric_column_ok and rows_ok
+        results.append(
+            {
+                "id": case["id"],
+                "question": case["question"],
+                "expected_outcome": expected_outcome,
+                "actual_outcome": decision.outcome,
+                "actual_result_outcome": result.outcome,
+                "expected_intent": case.get("expected_intent", ""),
+                "actual_intent": result.plan.intent,
+                "expected_metric": case.get("expected_metric", ""),
+                "actual_metric": actual_metric,
+                "expected_tables": sorted(expected),
+                "retrieved_tables": sorted(tables),
+                "outcome_ok": outcome_ok,
+                "intent_ok": intent_ok,
+                "metric_ok": metric_ok,
+                "metric_column_ok": metric_column_ok,
+                "table_recall": retrieval_ok,
+                "rows_ok": rows_ok,
+                "row_count": len(result.rows),
+                "sql_mode": result.mode,
+                "end_to_end_pass": end_to_end_pass,
+                "hit": end_to_end_pass,
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+            }
+        )
+    passed = sum(bool(item["end_to_end_pass"]) for item in results)
+    answerable = sum(item["expected_outcome"] == "answered" for item in results)
+    total = len(results)
+    return {
+        "suite_version": "natural-language-holdout-v1",
+        "mode": "deterministic-rule-with-execution",
+        "total": total,
+        "passed": passed,
+        "hit_rate": round(passed * 100 / total, 1) if total else 0.0,
+        "answerable": answerable,
+        "clarification": sum(item["expected_outcome"] == "clarification" for item in results),
+        "retrieval_backend": retriever.describe(),
+        "table_recall_at_4": round(
+            sum(bool(item["table_recall"]) for item in results if item["expected_outcome"] == "answered")
+            * 100 / max(1, answerable),
+            1,
+        ),
+        "cases": results,
+        "limitations": (
+            "Independent wording and end-to-end deterministic path, but this is not an online "
+            "model-accuracy benchmark or an open-domain semantic-SQL dataset."
+        ),
+    }
+
+
+def run_natural_language_scope_evaluation() -> dict[str, Any]:
+    from app.nl2sql.holdout import NATURAL_HOLDOUT_CASES
+    from app.nl2sql.intent_guard import assess_question
+
+    cases = []
+    for case in NATURAL_HOLDOUT_CASES:
+        decision = assess_question(case["question"])
+        expected = case.get("expected_outcome", "answered")
+        cases.append(
+            {
+                "id": case["id"],
+                "question": case["question"],
+                "expected_outcome": expected,
+                "actual_outcome": decision.outcome,
+                "reason_code": decision.reason_code,
+                "hit": decision.outcome == expected,
+            }
+        )
+    passed = sum(item["hit"] for item in cases)
+    return {
+        "suite_version": "natural-language-scope-v1",
+        "total": len(cases),
+        "passed": passed,
+        "hit_rate": round(passed * 100 / len(cases), 1) if cases else 0.0,
+        "cases": cases,
+        "limitations": "Deterministic scope regression, not a semantic SQL benchmark.",
+    }

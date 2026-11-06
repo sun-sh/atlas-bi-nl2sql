@@ -16,7 +16,7 @@
       "sql": "",
       "rows": 0,
       "mode": "clarification",
-      "elapsed_ms": 2271.2,
+      "elapsed_ms": 2503.6,
       "hit": true
     },
     {
@@ -29,7 +29,7 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 6.0,
+      "elapsed_ms": 6.1,
       "hit": true
     },
     {
@@ -42,7 +42,7 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 6.2,
+      "elapsed_ms": 5.8,
       "hit": true
     },
     {
@@ -55,7 +55,7 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 8.0,
+      "elapsed_ms": 7.2,
       "hit": true
     },
     {
@@ -68,7 +68,7 @@
       "sql": "",
       "rows": 0,
       "mode": "clarification",
-      "elapsed_ms": 6.4,
+      "elapsed_ms": 6.7,
       "hit": true
     },
     {
@@ -81,7 +81,7 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 6.8,
+      "elapsed_ms": 6.6,
       "hit": true
     },
     {
@@ -94,17 +94,17 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 5.7,
+      "elapsed_ms": 5.6,
       "hit": true
     }
   ],
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 2325.7,
-    "source_sha256": "87bb5414232740d1e2c674450062743f6cc8655a39983563ce7b8c08def9d0ef"
+    "wall_elapsed_ms": 2557.7,
+    "source_sha256": "8cf6d0d7dea0c8c294965a4e28349a495dfd6afb5964b721e8a0981d9e6dbbcd"
   },
   "evaluation_contract": "scope-guard-v1",
-  "case_manifest_sha256": "35606fd9b498f6ebe6d086dbf313a0b73cf49c442a413bb5c9e62dfe5d3aa025",
+  "case_manifest_sha256": "edd0b2624fa81f52afd497a0ef0388f4f993020860b877d2fc24477a5b270e64",
   "quality_gate": {
     "min_hit_rate": 100.0,
     "passed": true

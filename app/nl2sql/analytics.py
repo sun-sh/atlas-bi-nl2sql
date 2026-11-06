@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from app.nl2sql.settings import get_settings
 
 
-def overview_metrics() -> dict[str, Any]:
+def overview_metrics(db_path: str | Path | None = None) -> dict[str, Any]:
     settings = get_settings()
-    conn = sqlite3.connect(f"file:{settings.db_path}?mode=ro", uri=True)
+    target = Path(db_path) if db_path else settings.db_path
+    conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(

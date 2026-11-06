@@ -17,7 +17,7 @@ curl http://127.0.0.1:8000/api/health
 curl http://127.0.0.1:8000/api/overview
 ```
 
-`/api/health` reports database availability, active retrieval backends, model activation and repair limits. A healthy response has `status: ok` and `database: true`.
+`/api/health` reports the resolved analysis database, active retrieval backends, model activation and repair limits. A healthy response has `status: ok` and `database: true`; inspect `query_database.source_id` and `query_database.fallback` to confirm which source is live. `/api/metrics` returns process-local request counts, error rates and P50/P95/max latency for the synchronous and streaming query paths.
 
 ## Model configuration
 
@@ -28,6 +28,8 @@ curl http://127.0.0.1:8000/api/overview
 5. Save and enable the model.
 
 Runtime configuration is stored at `data/model_config.json` (override with `ATLAS_MODEL_CONFIG_PATH`) and excluded from Git. The public configuration API never returns the API key; it does return the saved Base URL and a boolean `api_key_configured`. If a model call fails, the query response includes the failure in `warnings` and falls back to rule SQL when possible. Result narration uses the same model only after SQL execution succeeds; a narration failure falls back to a deterministic digest and never invalidates the query result.
+
+If `ATLAS_ADMIN_API_TOKEN` is set, model configuration/test, model probing, data-source mutations, quality rules, metrics, evaluation datasets/experiments/feedback/tasks and queue claims require `X-Admin-Token`. The browser reads the token from `localStorage` and sends it on mutating API calls. This shared secret protects the operator surface only; it is not user authentication, RBAC or a replacement for an ingress policy.
 
 ## Session data
 
@@ -44,9 +46,12 @@ For Qwen-family models, both SQL generation/repair and result narration send `ch
 ```bash
 python -m pytest -q
 python -m app.evaluation.run
+python -m app.evaluation.run --suite scope --min-hit-rate 100
+python -m app.evaluation.run --suite retrieval --min-hit-rate 100
+python -m app.evaluation.run --suite natural --min-hit-rate 100
 ```
 
-A release candidate should have all tests passing and no unexpected warning regressions.
+A release candidate should have all tests passing and no unexpected warning regressions. The scope, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores.
 
 SQL execution is bounded by `QUERY_TIMEOUT_SECONDS` (default 5 seconds) and `MAX_RESULT_ROWS`. Running queries can be cancelled with `POST /api/query/cancel/{trace_id}`; the browser stops its SSE reader and the server interrupts the SQLite progress handler. The harness also rejects recursive CTEs, CROSS JOIN, more than three JOINs and projection-level `*` in subqueries. Raise these limits only with a matching load test; do not silently widen them for one-off demos. Evaluation uses the configured model in strict mode: record `execution_rate`, `hit_rate` and `model_rate` as observed, and never treat rule fallback as a model pass. Model-dependent scores are a dated snapshot, not a deterministic CI gate.
 
@@ -61,12 +66,26 @@ SQL execution is bounded by `QUERY_TIMEOUT_SECONDS` (default 5 seconds) and `MAX
 | Evaluation result changes | Fixture seed and strict regression-case definitions | Regenerate a clean database and rerun tests |
 | Configuration appears stale | Runtime config path and service process | Restart the service after changing environment variables |
 
+## Load test
+
+Start the service with `LLM_ENABLED=false`, `ATLAS_DISABLE_MODEL=1` and `USE_BGE=false`, then run a bounded local workload:
+
+```bash
+python -m app.evaluation.loadtest --base-url http://127.0.0.1:8000 --requests 20 --concurrency 4 --output docs/evaluations/http-loadtest-YYYY-MM-DD.json
+```
+
+Record the saved JSON and state the environment. The script covers HTTP plus deterministic rule SQL against the seeded SQLite database; it does not measure LLM latency, token cost, multi-worker contention, connection-pool saturation, failover or production capacity. Do not extrapolate its throughput to the model-enabled path.
+
+## Active analysis source
+
+List sources at `GET /api/data-platform/sources`, sync one, then activate it with `POST /api/data-platform/sources/{id}/activate`. Activation requires a ready, schema-compatible SQLite source with the fixed five tables; CSV imports and incompatible databases are rejected. `/api/health` exposes the active source and fallback flag. If an activated source file disappears, query and overview return 503 rather than silently querying a different database.
+
 ## Deployment checks
 
 - Keep `data/`, `.env` and model credentials outside version control.
-- Terminate TLS at the ingress and restrict model configuration routes to trusted operators.
+- Terminate TLS at the ingress, set `ATLAS_ADMIN_API_TOKEN`, and restrict model/data-platform/evaluation operator routes to trusted networks.
 - Run the database account with read-only permissions.
-- Export health, latency, trace ID and validation-failure metrics to the monitoring stack.
+- Export health, process metrics, trace ID and validation-failure metrics to the monitoring stack; aggregate `/api/metrics` across workers externally.
 - Apply tenant and role context before exposing the service to multiple business units.
 
 ## Data-platform storage

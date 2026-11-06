@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Iterator, TypedDict
 
 from langgraph.config import get_stream_writer
@@ -46,6 +47,7 @@ class GraphState(TypedDict, total=False):
     narrative: NarrativeResult
     generation_retries: int
     decision: dict[str, Any]
+    db_path: str
     final: QueryResult
 
 
@@ -95,10 +97,21 @@ def retrieve_node(state: GraphState) -> GraphState:
 def plan_node(state: GraphState) -> GraphState:
     decision = assess_question(state["question"], state.get("context"))
     if not decision.answerable:
-        plan = make_plan(state["question"], state.get("hits", []), state.get("context"))
-        plan.outcome = decision.outcome
-        plan.reason_code = decision.reason_code
-        plan.decision = decision.as_dict()
+        # A clarification/refusal is not an executable query plan. Keep the
+        # outcome visible without inventing a default metric or table intent.
+        plan = QueryPlan(
+            intent="",
+            tables=[],
+            metrics=[],
+            dimensions=[],
+            filters=[],
+            time_range="",
+            chart_type="table",
+            notes=["问题在可答性判定阶段停止，未进入 SQL 规划。"],
+            outcome=decision.outcome,
+            reason_code=decision.reason_code,
+            decision=decision.as_dict(),
+        )
         return {"plan": plan, "decision": decision.as_dict()}
     _emit_stage("plan")
     plan = make_plan(state["question"], state["hits"], state.get("context"))
@@ -154,7 +167,11 @@ def execute_node(state: GraphState) -> GraphState:
     warnings = list(state.get("warnings", []))
     try:
         safe_sql = validate_sql(sql)
-        result = execute_sql(safe_sql, cancel_trace_id=state.get("trace_id"))
+        result = execute_sql(
+            safe_sql,
+            cancel_trace_id=state.get("trace_id"),
+            db_path=state.get("db_path"),
+        )
         if result["rows"] and all(
             value is None
             for row in result["rows"]
@@ -352,6 +369,7 @@ def _initial_state(
     narrate: bool,
     allow_rule_fallback: bool,
     trace_id: str | None = None,
+    db_path: str | Path | None = None,
 ) -> GraphState:
     trace_id = trace_id or uuid.uuid4().hex[:12]
     return {
@@ -367,6 +385,7 @@ def _initial_state(
         ).as_dict(),
         "narrate": narrate,
         "allow_rule_fallback": allow_rule_fallback,
+        "db_path": str(db_path) if db_path else "",
     }
 
 
@@ -377,6 +396,7 @@ def query_stream_events(
     narrate: bool = False,
     allow_rule_fallback: bool = True,
     trace_id: str | None = None,
+    db_path: str | Path | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield graph stage updates followed by the finalized QueryResult."""
     global _GRAPH
@@ -388,6 +408,7 @@ def query_stream_events(
         narrate=narrate,
         allow_rule_fallback=allow_rule_fallback,
         trace_id=trace_id,
+        db_path=db_path,
     )
     state: GraphState = {}
     try:
@@ -423,6 +444,7 @@ def run_query(
     narrate: bool = True,
     allow_rule_fallback: bool = True,
     trace_id: str | None = None,
+    db_path: str | Path | None = None,
 ) -> QueryResult:
     global _GRAPH
     if _GRAPH is None:
@@ -433,6 +455,7 @@ def run_query(
         narrate=narrate,
         allow_rule_fallback=allow_rule_fallback,
         trace_id=trace_id,
+        db_path=db_path,
     )
     state = _GRAPH.invoke(initial)
     return state["final"]

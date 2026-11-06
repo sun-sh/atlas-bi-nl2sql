@@ -233,3 +233,76 @@ def test_scope_guard_suite_passes():
     assert report["total"] >= 7
     assert report["passed"] == report["total"]
     assert all(case["sql"] == "" and case["rows"] == 0 for case in report["cases"])
+
+
+def test_natural_language_metric_must_actually_execute(monkeypatch):
+    from app.nl2sql import workflow
+    from app.nl2sql.evaluation import run_natural_language_evaluation
+    from app.nl2sql.models import QueryResult
+
+    original = workflow.run_query
+
+    def wrong_metric(question, **kwargs):
+        result = original(question, **kwargs)
+        if question == "每单平均花多少钱？":
+            return QueryResult(
+                question=result.question,
+                sql=result.sql,
+                rows=[{"渠道": "App", "销售额": 100.0}],
+                columns=["渠道", "销售额"],
+                chart_type=result.chart_type,
+                answer=result.answer,
+                plan=result.plan,
+                retrieval=result.retrieval,
+                attempts=result.attempts,
+                elapsed_ms=result.elapsed_ms,
+                mode=result.mode,
+            )
+        return result
+
+    monkeypatch.setattr(workflow, "run_query", wrong_metric)
+    report = run_natural_language_evaluation()
+    case = next(item for item in report["cases"] if item["question"] == "每单平均花多少钱？")
+    assert case["metric_ok"] is True
+    assert case["metric_column_ok"] is False
+    assert case["end_to_end_pass"] is False
+    assert report["passed"] == report["total"] - 1
+
+
+def test_natural_language_suite_and_retrieval_ablation():
+    from app.nl2sql.evaluation import (
+        run_natural_language_evaluation,
+        run_natural_language_scope_evaluation,
+        run_retrieval_ablation,
+    )
+    from app.nl2sql.holdout import NATURAL_HOLDOUT_CASES
+
+    scope = run_natural_language_scope_evaluation()
+    assert scope["total"] == len(NATURAL_HOLDOUT_CASES)
+    assert scope["passed"] == scope["total"]
+
+    natural = run_natural_language_evaluation()
+    assert natural["total"] == len(NATURAL_HOLDOUT_CASES)
+    assert natural["answerable"] == 8
+    assert natural["clarification"] == 7
+    assert natural["passed"] == natural["total"]
+    assert all(case["end_to_end_pass"] for case in natural["cases"])
+    for case in natural["cases"]:
+        if case["expected_outcome"] == "answered":
+            assert case["sql_mode"] in {"rule", "llm", "llm-repair"}
+            assert case["row_count"] > 0
+            assert case["metric_column_ok"] is True
+        else:
+            assert case["row_count"] == 0
+            assert case["sql_mode"] == "clarification"
+            assert case["actual_intent"] == ""
+            assert case["actual_metric"] == ""
+
+    ablation = run_retrieval_ablation()
+    assert {"lexical_only", "semantic_only", "hybrid_0.56_0.44"} <= set(ablation["variants"])
+    for variant in ablation["variants"].values():
+        assert {"top1_accuracy", "mrr", "full_recall_at_4", "cases"} <= set(variant)
+    selected = ablation["variants"]["hybrid_0.56_0.44"]
+    assert selected["full_recall_at_4"] >= 80
+    assert selected["top1_accuracy"] >= 80
+    assert selected["mrr"] >= 0.8

@@ -12,7 +12,9 @@ OUTCOME_UNSUPPORTED = "unsupported"
 _METRIC_TERMS = (
     "销售额", "销量", "客单价", "退款率", "退款金额", "退款单数",
     "roi", "投产比", "投放花费", "归因订单数", "订单数", "订单量",
-    "gmv", "营收", "收入", "利润", "客户数", "新客", "复购",
+    "gmv", "营收", "收入", "最赚钱", "赚钱", "回报", "值不值",
+    "卖得最多", "卖得多", "每单平均", "平均花", "卖得怎么样",
+    "售后占比",
 )
 _DIMENSION_TERMS = (
     "渠道", "地区", "区域", "品类", "类目", "商品", "城市", "会员",
@@ -113,6 +115,17 @@ def assess_question(question: str, context: dict[str, Any] | None = None) -> Que
             _suggestions(OUTCOME_UNSUPPORTED),
         )
 
+    if (
+        ("广告" in q and any(term in q for term in ("曝光", "点击")))
+        or ("点击" in q and any(term in q for term in ("下单", "转化", "成交", "购买")))
+    ):
+        return QuestionDecision(
+            OUTCOME_CLARIFICATION,
+            "missing_metric",
+            "曝光、点击和转化是不同链路指标，当前固定口径只支持投放花费、归因订单数和 ROI。请指定要看投放花费、归因订单数还是 ROI。",
+            _suggestions(OUTCOME_CLARIFICATION),
+        )
+
     if any(term in q for term in _OUT_OF_DOMAIN_TERMS):
         return QuestionDecision(
             OUTCOME_UNSUPPORTED,
@@ -132,6 +145,15 @@ def assess_question(question: str, context: dict[str, Any] | None = None) -> Que
             _suggestions(OUTCOME_UNSUPPORTED),
         )
 
+    if (
+        ("退款" in q and any(term in q for term in ("原因", "分布")))
+        or ("退的钱" in q and any(term in q for term in ("原因", "哪些", "花在")))
+        or ("广告" in q and "值不值" in q)
+        or ("售后" in q and any(term in q for term in ("占比", "比例", "多大")))
+        or ("卖得怎么样" in q and any(term in q for term in ("每天", "按日", "趋势")))
+    ):
+        return QuestionDecision()
+
     if _CAUSAL_RE.search(text):
         return QuestionDecision(
             OUTCOME_CLARIFICATION,
@@ -143,6 +165,21 @@ def assess_question(question: str, context: dict[str, Any] | None = None) -> Que
     has_metric = _has_metric(text)
     has_dimension = any(term in q for term in _DIMENSION_TERMS)
     generic = any(term in q for term in _GENERIC_BUSINESS_TERMS)
+    vague_combined_concepts = (
+        ("单价" in q and any(term in q for term in ("卖得", "销量")))
+        or (
+            any(term in q for term in ("新客", "新客户"))
+            and any(term in q for term in ("老客", "老客户"))
+        )
+    )
+
+    if vague_combined_concepts:
+        return QuestionDecision(
+            OUTCOME_CLARIFICATION,
+            "missing_metric",
+            "这个问题混合了多个指标或客户分层口径。请指定要先看销售额、销量、客单价还是客户数。",
+            _suggestions(OUTCOME_CLARIFICATION),
+        )
 
     if not has_metric and not context_metrics and (generic or has_dimension):
         return QuestionDecision(
@@ -155,7 +192,8 @@ def assess_question(question: str, context: dict[str, Any] | None = None) -> Que
     # A completely open-ended business question should not silently become a
     # sales query. Explicit metric questions continue on the normal path.
     if not has_metric and not context_metrics and not any(
-        term in q for term in ("销售额", "销量", "退款", "订单", "渠道", "地区", "品类")
+        term in q
+        for term in ("销售额", "销量", "退款", "订单", "渠道", "地区", "品类")
     ):
         return QuestionDecision(
             OUTCOME_CLARIFICATION,

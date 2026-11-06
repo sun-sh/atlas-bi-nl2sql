@@ -12,10 +12,10 @@ CATEGORY_TERMS = ("运动鞋服", "食品饮料", "数码家电", "美妆个护"
 MEMBER_TERMS = ("普通", "银卡", "金卡")
 FOLLOW_UP_TERMS = ("那", "换成", "改成", "再看", "继续", "呢", "这个", "这些", "同样", "那个", "它")
 INTENT_TERMS = {
-    "refund_analysis": ("退款率", "售后", "退货", "退款"),
-    "marketing_efficiency": ("roi", "投放", "广告", "获客成本", "花费"),
-    "category_analysis": ("品类", "类目", "商品", "销量", "件数"),
-    "sales_overview": ("销售额", "销售", "趋势", "每天", "按日", "订单", "渠道", "地区"),
+    "refund_analysis": ("退款率", "售后", "退货", "退款", "退的钱"),
+    "marketing_efficiency": ("roi", "投产比", "投放", "广告", "获客成本", "花费", "值不值"),
+    "category_analysis": ("品类", "类目", "商品", "销量", "卖得最多", "卖得多", "件数"),
+    "sales_overview": ("销售额", "销售", "趋势", "每天", "按日", "订单", "渠道", "地区", "最赚钱", "收入", "每单平均", "客单价"),
 }
 
 
@@ -140,17 +140,19 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
         inherited.append("品类：" + str(context.get("category_label") or "继承上一轮"))
 
     metrics: list[str] = []
-    if "退款率" in q:
+    if "退款率" in q or ("售后" in q and any(term in q for term in ("占比", "比例", "多大"))):
         metrics.append("退款率")
-    elif "退款金额" in q:
+    elif "退款金额" in q or "退的钱" in q:
+        metrics.append("退款金额")
+    elif "退款" in q and any(term in q for term in ("原因", "分布")):
         metrics.append("退款金额")
     elif "退款" in q and any(term in q for term in ("单数", "申请数")):
         metrics.append("退款单数")
-    if "roi" in q or "投产比" in q:
+    if "roi" in q or "投产比" in q or ("广告" in q and "值不值" in q):
         metrics.append("ROI")
-    if "客单价" in q:
+    if "客单价" in q or "每单平均" in q or "平均花" in q:
         metrics.append("客单价")
-    if "销量" in q or "件数" in q:
+    if "销量" in q or "件数" in q or "卖得最多" in q or "卖得多" in q:
         metrics.append("销量")
     previous_metrics = list(context.get("metrics") or [])
     if is_follow_up:

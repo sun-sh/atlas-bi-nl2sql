@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import time
+from pathlib import Path
 from typing import Any
 
 import sqlglot
@@ -72,12 +73,18 @@ def validate_sql(sql: str) -> str:
     return statement.sql(dialect="sqlite")
 
 
-def execute_sql(sql: str, limit: int | None = None, cancel_trace_id: str | None = None) -> dict[str, Any]:
+def execute_sql(
+    sql: str,
+    limit: int | None = None,
+    cancel_trace_id: str | None = None,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
     settings = get_settings()
     safe_sql = validate_sql(sql)
     row_limit = limit or settings.max_rows
     started = time.perf_counter()
-    conn = sqlite3.connect(f"file:{settings.db_path}?mode=ro", uri=True)
+    target = Path(db_path) if db_path else settings.db_path
+    conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     deadline = time.monotonic() + settings.query_timeout_seconds
 

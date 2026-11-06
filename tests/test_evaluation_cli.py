@@ -112,3 +112,59 @@ def test_evaluation_queue_accepts_multiple_but_claims_one(monkeypatch, tmp_path)
     claimed = evaluation_tasks.claim_next_evaluation_task()
     assert claimed['id'] == first['id']
     assert evaluation_tasks.claim_next_evaluation_task() is None
+
+
+def test_retrieval_gate_uses_selected_variant_not_best_variant(monkeypatch, tmp_path):
+    def fake_ablation():
+        return {
+            "suite_version": "retrieval-ablation-v1",
+            "total": 2,
+            "selected": "hybrid_0.56_0.44",
+            "variants": {
+                "lexical_only": {
+                    "full_recall_at_4": 100.0,
+                    "full_recall_cases": 2,
+                    "top1_accuracy": 100.0,
+                    "mrr": 1.0,
+                },
+                "hybrid_0.56_0.44": {
+                    "full_recall_at_4": 50.0,
+                    "full_recall_cases": 1,
+                    "top1_accuracy": 50.0,
+                    "mrr": 0.5,
+                },
+            },
+            "limitations": "test",
+        }
+
+    monkeypatch.setattr(run, "run_retrieval_ablation", fake_ablation)
+    output = tmp_path / "retrieval.json"
+    assert run.main(["--suite", "retrieval", "--min-hit-rate", "80", "--output", str(output)]) == 2
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["passed"] == 1
+    assert report["hit_rate"] == 50.0
+    assert report["quality_gate"]["passed"] is False
+
+
+def test_natural_gate_requires_end_to_end_not_only_scope(monkeypatch, tmp_path):
+    def fake_natural():
+        return {
+            "suite_version": "natural-language-holdout-v1",
+            "total": 2,
+            "passed": 1,
+            "hit_rate": 50.0,
+            "answerable": 2,
+            "clarification": 0,
+            "table_recall_at_4": 100.0,
+            "cases": [
+                {"id": "a", "hit": True, "end_to_end_pass": True},
+                {"id": "b", "hit": False, "end_to_end_pass": False},
+            ],
+            "limitations": "test",
+        }
+
+    monkeypatch.setattr(run, "run_natural_language_evaluation", fake_natural)
+    output = tmp_path / "natural.json"
+    assert run.main(["--suite", "natural", "--min-hit-rate", "80", "--output", str(output)]) == 2
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["quality_gate"]["passed"] is False
