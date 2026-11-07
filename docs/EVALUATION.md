@@ -40,9 +40,13 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 除了严格模型评测，项目保留三类可离线重复运行的证据：
 
+### 规则链路结果等价
+
+`rule-equivalence-v1` 不调用模型，而是把 `strict-model-v3-100` 的 100 条问题逐条送入离线规划、规则 SQL 生成、AST 门禁和只读执行，再复用独立基准 SQL 核对结果。11 条追问会先执行前置问题，再验证继承上下文。2026-11-08 结果为 **100/100**，说明离线回退路径的业务口径、聚合粒度和结果形状与基准一致。该结果专门防止“规则模式看起来能答、实际悄悄换指标”的回归；它不代表模型能力或开放域泛化。
+
 ### 自然语言变体与真实执行
 
-`natural-language-holdout-v1` 有 15 条独立问法，其中 8 条应回答、7 条应澄清。每个可回答用例同时检查范围判定、意图、指标、预期的 Schema 表和真实执行结果；澄清用例必须没有 SQL、没有数据行，且不保留默认指标。只有这五项都通过，才记为端到端通过。当前为 **15/15**，但它是确定性规则链路加固定 SQLite 的真实执行验证，不是在线模型准确率，也不能替代开放域语义 SQL 测试。报告见 [自然语言评测 JSON](evaluations/natural-language-holdout-2026-11-06.json)。
+`natural-language-holdout-v1` 有 15 条独立问法，其中 8 条应回答、7 条应澄清。每个可回答用例同时检查范围判定、意图、指标、预期的 Schema 表和真实执行结果；澄清用例必须没有 SQL、没有数据行，且不保留默认指标。只有范围、意图、指标、指标列、时间范围、表召回和执行行都通过，才记为端到端通过。当前为 **15/15**，但它是确定性规则链路加固定 SQLite 的真实执行验证，不是在线模型准确率，也不能替代开放域语义 SQL 测试。报告见 [自然语言评测 JSON](evaluations/natural-language-holdout-2026-11-06.json)。
 
 ### 检索消融
 
@@ -152,6 +156,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 python -m app.evaluation.run
 python -m app.evaluation.run --suite scope --min-hit-rate 100
+python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
 node --check app/static/app.js

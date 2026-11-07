@@ -99,8 +99,16 @@ def test_sales_query_end_to_end():
     assert result.plan.intent == "sales_overview"
 
 
+def test_category_refund_amount_uses_refund_amount_not_rate():
+    result = run_query("本月各品类退款金额，按退款金额降序", narrate=False)
+    assert result.rows
+    assert result.columns == ["品类", "退款单数", "退款金额"]
+    assert result.rows == sorted(result.rows, key=lambda row: row["退款金额"], reverse=True)
+
+
 def test_refund_query_end_to_end():
     result = run_query("退款率最高的品类是什么？")
+    assert len(result.rows) == 1
     assert result.rows[0]["品类"] == "美妆个护"
     assert 0 < result.rows[0]["退款率"] < 20
 
@@ -132,6 +140,23 @@ def test_marketing_region_filter_is_rejected_clearly(retriever: HybridSchemaRetr
     plan = make_plan(question, retriever.search(question))
     with pytest.raises(ValueError, match="不包含地区或品类字段"):
         generate_rule_sql(question, plan, retriever.search(question))
+
+
+def test_rule_roi_aggregates_spend_and_revenue_before_join():
+    result = run_query("上个月各渠道ROI", narrate=False)
+    assert result.rows
+    assert "m.spend_date BETWEEN '2026-01-01' AND '2026-01-31'" in result.sql
+    assert "o.status = 'paid'" in result.sql
+    assert "SUM(spend)" in result.sql
+    expected = execute_sql(
+        "SELECT ROUND(s.revenue / m.spend, 2) AS ROI "
+        "FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend "
+        "WHERE spend_date BETWEEN '2026-01-01' AND '2026-01-31' GROUP BY channel) m "
+        "JOIN (SELECT channel, SUM(paid_amount) AS revenue FROM orders "
+        "WHERE status = 'paid' AND order_date BETWEEN '2026-01-01' AND '2026-01-31' "
+        "GROUP BY channel) s ON s.channel = m.channel WHERE m.channel = 'Web'"
+    )["rows"][0]["ROI"]
+    assert next(row["ROI"] for row in result.rows if row["渠道"] == "Web") == expected
 
 
 def test_repair_node_passes_error_and_original_sql_to_llm(monkeypatch):
@@ -209,9 +234,11 @@ def test_strict_model_query_never_calls_rule_fallback(monkeypatch):
     monkeypatch.setattr("app.nl2sql.workflow.generate_rule_sql", forbidden_rule)
     result = run_query("各渠道销售额", allow_rule_fallback=False)
     assert result.mode == "model-failed"
+    assert result.outcome == "failed"
     assert result.sql == ""
     assert result.attempts[-1]["status"] == "failed"
     assert any("不回退规则" in warning for warning in result.warnings)
+    assert any("不是业务结论" in warning for warning in result.warnings)
 
 
 def test_empty_model_sql_gets_one_strict_model_retry(monkeypatch):

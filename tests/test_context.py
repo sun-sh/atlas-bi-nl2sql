@@ -60,3 +60,9 @@ def test_marketing_followup_inherits_intent_and_roi_metric():
     assert followup.intent == "marketing_efficiency"
     assert followup.metrics == ["ROI"]
     assert any("o.order_date BETWEEN '2026-01-01' AND '2026-01-31'" in item for item in followup.filters)
+
+
+def test_colloquial_current_month_applies_month_filter():
+    plan = make_plan("这个月每天卖得怎么样？", [])
+    assert plan.time_range == "2026-02-01 至 2026-02-28"
+    assert any("2026-02-01" in item and "2026-02-28" in item for item in plan.filters)

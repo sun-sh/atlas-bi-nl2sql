@@ -32,7 +32,7 @@ def _time_filter(question: str) -> tuple[str, str, str]:
     if "上个月" in q or "上月" in q:
         start, end = _last_month_sql()
         return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", "上个月"
-    if "本月" in q:
+    if "本月" in q or "这个月" in q:
         return "o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28'", "2026-02-01 至 2026-02-28", "本月"
     if "近30天" in q or "最近30天" in q:
         return "o.order_date BETWEEN '2026-01-30' AND '2026-02-28'", "2026-01-30 至 2026-02-28", "近30天"

@@ -616,14 +616,14 @@
   "hit_rate": 100.0,
   "top1_accuracy": 91.7,
   "mrr": 0.9583,
-  "evaluated_at": "2026-11-06T02:32:42.741694+00:00",
+  "evaluated_at": "2026-11-07T17:24:32.823570+00:00",
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 2885.4,
-    "source_sha256": "5b45ef5080764e5d8f804f56a7779e1e3457aca93ebf26caeb08bed037eb5d9d"
+    "wall_elapsed_ms": 4453.9,
+    "source_sha256": "02f61b1d5dea403d905a5b2fa9bb5efd84a9d3b2f3e3113986a43c0b645f64de"
   },
   "evaluation_contract": "retrieval-ablation-v1",
-  "case_manifest_sha256": "309c96263a30233335d7c8ea634115e0cd0d222c66ef3ec935558e3b180e23ed",
+  "case_manifest_sha256": "90a13c5ae113edcef0d6ad266d58290e4f5823773f0bc640e2bf87f402073212",
   "quality_gate": {
     "min_hit_rate": 100.0,
     "passed": true

@@ -168,3 +168,36 @@ def test_natural_gate_requires_end_to_end_not_only_scope(monkeypatch, tmp_path):
     assert run.main(["--suite", "natural", "--min-hit-rate", "80", "--output", str(output)]) == 2
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["quality_gate"]["passed"] is False
+
+
+def test_rule_equivalence_gate_requires_all_cases(monkeypatch, tmp_path):
+    def fake_rules(**kwargs):
+        return {
+            "suite_version": "rule-equivalence-v1",
+            "mode": "deterministic-rule",
+            "available": True,
+            "total": 2,
+            "passed": 1,
+            "hit_rate": 50.0,
+            "cases": [
+                {"id": "a", "hit": True},
+                {"id": "b", "hit": False},
+            ],
+            "limitations": "test",
+        }
+
+    monkeypatch.setattr(run, "run_rule_equivalence_evaluation", fake_rules)
+    output = tmp_path / "rules.json"
+    assert run.main(["--suite", "rules", "--min-hit-rate", "100", "--output", str(output)]) == 2
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["evaluation_contract"] == "rule-equivalence-v1"
+    assert report["quality_gate"]["passed"] is False
+
+
+def test_manifest_hash_is_stable_across_runs(monkeypatch, tmp_path):
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
+    first = tmp_path / "first.json"
+    second = tmp_path / "second.json"
+    assert run.main(["--suite", "scope", "--output", str(first)]) == 0
+    assert run.main(["--suite", "scope", "--output", str(second)]) == 0
+    assert json.loads(first.read_text(encoding="utf-8"))["case_manifest_sha256"] == json.loads(second.read_text(encoding="utf-8"))["case_manifest_sha256"]

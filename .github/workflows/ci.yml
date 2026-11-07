@@ -34,6 +34,8 @@ jobs:
         run: python -m app.evaluation.run
       - name: Run scope guard evaluation
         run: python -m app.evaluation.run --suite scope --min-hit-rate 100
+      - name: Run rule-equivalence evaluation
+        run: python -m app.evaluation.run --suite rules --min-hit-rate 100
       - name: Run retrieval ablation gate
         run: python -m app.evaluation.run --suite retrieval --min-hit-rate 100
       - name: Run natural-language end-to-end gate

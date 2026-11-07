@@ -801,6 +801,63 @@ def run_retrieval_ablation(retriever=None) -> dict[str, Any]:
     }
 
 
+def run_rule_equivalence_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+    """Check the deterministic rule path against every independent gold SQL.
+
+    This is deliberately separate from the strict model suites. It validates
+    planning, filters, aggregation grain and result shape without calling a
+    model, so CI can catch silent business-definition regressions.
+    """
+    cases_by_id = {case["id"]: case for case in CASES}
+    results: list[dict[str, Any]] = []
+    for case in CASES:
+        started = time.perf_counter()
+        context = None
+        error = ""
+        result = None
+        steps = [cases_by_id[case["setup"]], case] if case["setup"] else [case]
+        try:
+            for step in steps:
+                result = run_query(step["question"], context=context, narrate=False)
+                if result.outcome != "answered":
+                    error = f"规则链路未回答：{result.outcome}/{result.plan.reason_code}"
+                    break
+                if step is case:
+                    error = _check_rows(case, result.rows)
+                context = {**result.plan.as_dict(), **result.plan.context, "question": step["question"]}
+        except Exception as exc:
+            error = str(exc)
+        item = {
+            "id": case["id"],
+            "question": case["question"],
+            "expected_metric": case["metric"],
+            "actual_columns": list(result.columns) if result else [],
+            "row_count": len(result.rows) if result else 0,
+            "sql_mode": result.mode if result else "error",
+            "hit": not error,
+            "error": error or None,
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+        results.append(item)
+        if on_case:
+            on_case(item)
+    passed = sum(bool(item["hit"]) for item in results)
+    total = len(results)
+    return {
+        "suite_version": "rule-equivalence-v1",
+        "mode": "deterministic-rule",
+        "available": True,
+        "total": total,
+        "passed": passed,
+        "hit_rate": round(passed * 100 / total, 1) if total else 0.0,
+        "cases": results,
+        "limitations": (
+            "Rule-path result equivalence on the fixed 100-case benchmark. "
+            "It does not measure model quality or open-domain generalization."
+        ),
+    }
+
+
 def run_natural_language_evaluation(retriever=None) -> dict[str, Any]:
     """Check scope, plan semantics, retrieval and execution on paraphrases."""
     from app.nl2sql.holdout import NATURAL_HOLDOUT_CASES
@@ -848,12 +905,26 @@ def run_natural_language_evaluation(retriever=None) -> dict[str, Any]:
             if answered
             else True
         )
+        expected_time_range = case.get("expected_time_range", "")
+        time_range_ok = (
+            result.plan.time_range == expected_time_range
+            if answered and expected_time_range
+            else True
+        )
         rows_ok = (
             bool(result.rows) and bool(result.sql) and result.attempts and result.attempts[-1]["status"] == "success"
             if answered
             else not result.rows and not result.sql and not result.attempts
         )
-        end_to_end_pass = outcome_ok and intent_ok and metric_ok and retrieval_ok and metric_column_ok and rows_ok
+        end_to_end_pass = (
+            outcome_ok
+            and intent_ok
+            and metric_ok
+            and retrieval_ok
+            and metric_column_ok
+            and time_range_ok
+            and rows_ok
+        )
         results.append(
             {
                 "id": case["id"],
@@ -871,6 +942,8 @@ def run_natural_language_evaluation(retriever=None) -> dict[str, Any]:
                 "intent_ok": intent_ok,
                 "metric_ok": metric_ok,
                 "metric_column_ok": metric_column_ok,
+                "expected_time_range": expected_time_range,
+                "time_range_ok": time_range_ok,
                 "table_recall": retrieval_ok,
                 "rows_ok": rows_ok,
                 "row_count": len(result.rows),

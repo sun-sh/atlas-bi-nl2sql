@@ -235,6 +235,25 @@ def test_scope_guard_suite_passes():
     assert all(case["sql"] == "" and case["rows"] == 0 for case in report["cases"])
 
 
+def test_natural_language_time_range_is_checked(monkeypatch):
+    from app.nl2sql import workflow
+    from app.nl2sql.evaluation import run_natural_language_evaluation
+
+    original = workflow.run_query
+
+    def wrong_time(question, **kwargs):
+        result = original(question, **kwargs)
+        if question == "这个月每天卖得怎么样？":
+            result.plan.time_range = "全部数据（2025-10-01 至 2026-02-28）"
+        return result
+
+    monkeypatch.setattr(workflow, "run_query", wrong_time)
+    report = run_natural_language_evaluation()
+    case = next(item for item in report["cases"] if item["question"] == "这个月每天卖得怎么样？")
+    assert case["time_range_ok"] is False
+    assert case["end_to_end_pass"] is False
+
+
 def test_natural_language_metric_must_actually_execute(monkeypatch):
     from app.nl2sql import workflow
     from app.nl2sql.evaluation import run_natural_language_evaluation
@@ -292,6 +311,7 @@ def test_natural_language_suite_and_retrieval_ablation():
             assert case["sql_mode"] in {"rule", "llm", "llm-repair"}
             assert case["row_count"] > 0
             assert case["metric_column_ok"] is True
+            assert case["time_range_ok"] is True
         else:
             assert case["row_count"] == 0
             assert case["sql_mode"] == "clarification"
@@ -306,3 +326,13 @@ def test_natural_language_suite_and_retrieval_ablation():
     assert selected["full_recall_at_4"] >= 80
     assert selected["top1_accuracy"] >= 80
     assert selected["mrr"] >= 0.8
+
+
+def test_rule_equivalence_suite_matches_all_100_gold_results():
+    from app.nl2sql.evaluation import run_rule_equivalence_evaluation
+
+    report = run_rule_equivalence_evaluation()
+    assert report["suite_version"] == "rule-equivalence-v1"
+    assert report["total"] == 100
+    assert report["passed"] == 100
+    assert all(case["hit"] for case in report["cases"])

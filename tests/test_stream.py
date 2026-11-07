@@ -128,6 +128,45 @@ def test_stream_narrative_uses_model_delta_when_available(monkeypatch):
     assert final.model == 'fake-model'
 
 
+def test_stream_failed_query_reports_failure_not_business_conclusion(monkeypatch, tmp_path):
+    import app.api.main as api_main
+    from app.nl2sql.models import QueryResult
+    from app.nl2sql.planner import make_plan
+
+    monkeypatch.setenv('ATLAS_SESSION_DB_PATH', str(tmp_path / 'sessions.db'))
+    plan = make_plan('各渠道销售额', [])
+
+    def failed_events(*args, **kwargs):
+        result = QueryResult(
+            question='各渠道销售额',
+            sql='',
+            rows=[],
+            columns=[],
+            chart_type='bar',
+            answer='查询未成功执行，不能给出业务结论。',
+            plan=plan,
+            retrieval=[],
+            attempts=[{'attempt': 1, 'status': 'failed', 'sql': '', 'error': 'SQL 为空'}],
+            elapsed_ms=1,
+            mode='model-failed',
+            outcome='failed',
+            narrative_mode='error',
+            trace_id=kwargs['trace_id'],
+        )
+        yield {'type': 'result', 'result': result}
+
+    monkeypatch.setattr(api_main, 'query_stream_events', failed_events)
+    created = client.post('/api/sessions', json={}).json()
+    events = _query_stream(client, '各渠道销售额', created['id'])
+    result = next(data for name, data in events if name == 'result')['result']
+    assert result['outcome'] == 'failed'
+    assert result['rows'] == []
+    assert result['narrative']['mode'] == 'error'
+    assert '查询未成功执行' in result['answer']
+    assert '查询已成功执行' not in result['answer']
+    assert 'delta' not in [name for name, _ in events]
+
+
 def test_stream_cancel_during_sql_execution_returns_cancelled_event(monkeypatch, tmp_path):
     import app.api.main as api_main
 

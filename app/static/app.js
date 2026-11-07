@@ -169,6 +169,7 @@ const SQL_SOURCE_LABELS = {
   'model-repair-failed': '模型修复失败',
   clarification: '需要补充条件',
   unsupported: '不在可回答范围',
+  failed: '执行失败',
   unavailable: '未运行',
   error: '异常',
 };
@@ -202,7 +203,7 @@ function renderResultBody(
   table,
 ) {
   return `
-    <div class="result-answer${result.outcome && result.outcome !== 'answered' ? ' result-guard' : ''}"><strong>${result.outcome === 'clarification' ? '需要补充信息' : result.outcome === 'unsupported' ? '暂不能回答' : '分析结论'}</strong> <span class="narrative-tag">${result.outcome && result.outcome !== 'answered' ? '范围检查' : result.narrative?.mode === 'model' ? `模型解读 · ${escapeHtml(result.narrative.model || '已完成')}` : '确定性摘要'}</span><div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div></div>
+    <div class="result-answer${result.outcome && result.outcome !== 'answered' ? ' result-guard' : ''}"><strong>${result.outcome === 'clarification' ? '需要补充信息' : result.outcome === 'unsupported' ? '暂不能回答' : result.outcome === 'failed' ? '查询未完成' : '分析结论'}</strong> <span class="narrative-tag">${result.outcome === 'failed' ? '执行失败' : result.outcome && result.outcome !== 'answered' ? '范围检查' : result.narrative?.mode === 'model' ? `模型解读 · ${escapeHtml(result.narrative.model || '已完成')}` : '确定性摘要'}</span><div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div></div>
     ${(result.warnings || []).length ? `<div class="result-meta">${result.warnings.map((w) => `<span class="small-pill">${escapeHtml(w)}</span>`).join('')}</div>` : ''}
     <div class="result-meta">
       <span class="small-pill">${sqlSourceLabel(result.mode)}</span>
@@ -291,15 +292,16 @@ function updateStreamStage(card, data = {}) {
 
 function renderGuardResult(result, options = {}) {
   const isClarification = result.outcome === 'clarification';
-  const title = isClarification ? '需要补充信息' : '暂不能回答';
-  const kind = isClarification ? 'clarification' : 'unsupported';
+  const isFailure = result.outcome === 'failed';
+  const title = isClarification ? '需要补充信息' : isFailure ? '查询未完成' : '暂不能回答';
+  const kind = isClarification ? 'clarification' : isFailure ? 'failed' : 'unsupported';
   const body = `
     <div class="result-answer result-guard ${kind}">
       <strong>${title}</strong>
       <div class="narrative-text">${escapeHtml(result.answer).replace(/\n/g, '<br>')}</div>
     </div>
     <div class="result-meta">
-      <span class="small-pill">${isClarification ? '范围检查 · 需要补充条件' : '范围检查 · 只读请求'}</span>
+      <span class="small-pill">${isClarification ? '范围检查 · 需要补充条件' : isFailure ? '执行失败 · 未产出业务结论' : '范围检查 · 只读请求'}</span>
       <span class="small-pill">${escapeHtml(result.elapsed_ms)} 毫秒</span>
     </div>`;
   const thread = $('#conversation-thread');

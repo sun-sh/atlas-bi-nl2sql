@@ -212,7 +212,7 @@ NATURAL_HOLDOUT_CASES = (
     {"id": "natural-membership", "question": "会员复购情况怎么样？", "expected_tables": {"customers", "orders"}, "expected_outcome": "clarification"},
     {"id": "natural-aov", "question": "每单平均花多少钱？", "expected_tables": {"orders"}, "expected_intent": "sales_overview", "expected_metric": "客单价", "expected_outcome": "answered"},
     {"id": "natural-region-gap", "question": "华东和西南的生意差多少？", "expected_tables": {"orders"}, "expected_outcome": "clarification"},
-    {"id": "natural-daily", "question": "这个月每天卖得怎么样？", "expected_tables": {"orders"}, "expected_intent": "sales_overview", "expected_metric": "销售额", "expected_outcome": "answered"},
+    {"id": "natural-daily", "question": "这个月每天卖得怎么样？", "expected_tables": {"orders"}, "expected_intent": "sales_overview", "expected_metric": "销售额", "expected_outcome": "answered", "expected_time_range": "2026-02-01 至 2026-02-28"},
     {"id": "natural-refund-money", "question": "退的钱都花在哪些原因上？", "expected_tables": {"refunds", "orders"}, "expected_intent": "refund_analysis", "expected_metric": "退款金额", "expected_outcome": "answered"},
     {"id": "natural-ads", "question": "广告曝光和点击效果如何？", "expected_tables": {"marketing_spend"}, "expected_outcome": "clarification"},
     {"id": "natural-conversion", "question": "点击之后到底有多少人下单？", "expected_tables": {"marketing_spend", "orders"}, "expected_outcome": "clarification"},

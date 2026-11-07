@@ -47,11 +47,12 @@ For Qwen-family models, both SQL generation/repair and result narration send `ch
 python -m pytest -q
 python -m app.evaluation.run
 python -m app.evaluation.run --suite scope --min-hit-rate 100
+python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
 ```
 
-A release candidate should have all tests passing and no unexpected warning regressions. The scope, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores.
+A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores.
 
 SQL execution is bounded by `QUERY_TIMEOUT_SECONDS` (default 5 seconds) and `MAX_RESULT_ROWS`. Running queries can be cancelled with `POST /api/query/cancel/{trace_id}`; the browser stops its SSE reader and the server interrupts the SQLite progress handler. The harness also rejects recursive CTEs, CROSS JOIN, more than three JOINs and projection-level `*` in subqueries. Raise these limits only with a matching load test; do not silently widen them for one-off demos. Evaluation uses the configured model in strict mode: record `execution_rate`, `hit_rate` and `model_rate` as observed, and never treat rule fallback as a model pass. Model-dependent scores are a dated snapshot, not a deterministic CI gate.
 

@@ -199,18 +199,21 @@ def _prepare_query(payload: QueryRequest) -> tuple[str, str | None, dict, str]:
     session = get_session(session_id) if session_id else None
     if session_id and session is None:
         raise HTTPException(status_code=404, detail="会话不存在或已过期，请新建会话")
-    query_db = active_query_database(settings.workspace_id)
-    if not query_db["path"].exists():
-        if query_db["fallback"]:
-            generate_database(settings.db_path)
-        else:
+
+    # Resolve this request's database in one place. Only the demo fallback may
+    # be created on demand; an explicitly activated source is never replaced.
+    fallback_db = active_query_database(settings.workspace_id)
+    if not fallback_db["path"].exists():
+        if not fallback_db["fallback"]:
             raise HTTPException(status_code=503, detail="当前分析数据源文件不存在，请重新同步或切换数据源")
+        generate_database(settings.db_path)
+
     context: dict = {}
     if session and session.get("turns"):
         latest_turn = session["turns"][-1]
         context = dict(session.get("context") or {})
         context.update({"question": latest_turn.get("question", "")})
-    return question, session_id, context, str(query_db["path"])
+    return question, session_id, context, str(fallback_db["path"])
 
 
 def _persist_turn(session_id: str | None, question: str, result) -> dict | None:

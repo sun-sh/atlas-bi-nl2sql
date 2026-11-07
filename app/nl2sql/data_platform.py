@@ -839,8 +839,29 @@ def data_service_query(workspace_id: str, source_id: str, table: str, *, limit: 
     limit = min(max(int(limit), 1), 500)
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        cur = conn.execute(f"SELECT * FROM {_quote(table)} LIMIT ?", (limit,))
-        columns = [d[0] for d in cur.description]
+        table_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+            (table,),
+        ).fetchone()
+        if table_exists is None:
+            raise DataPlatformError("数据服务表不存在")
+        # The data service is read-only but still a presentation surface:
+        # never expose columns that the NL2SQL semantic layer marks restricted.
+        restricted = {
+            column.name.lower()
+            for catalog_table in SCHEMA
+            for column in catalog_table.columns
+            if column.sensitivity != "public"
+        }
+        physical_columns = [
+            str(row[1])
+            for row in conn.execute(f"PRAGMA table_info({_quote(table)})").fetchall()
+        ]
+        columns = [column for column in physical_columns if column.lower() not in restricted]
+        if not columns:
+            raise DataPlatformError("该表没有可展示的公开字段")
+        projection = ", ".join(_quote(column) for column in columns)
+        cur = conn.execute(f"SELECT {projection} FROM {_quote(table)} LIMIT ?", (limit,))
         rows = [dict(zip(columns, row)) for row in cur.fetchmany(limit)]
     finally:
         conn.close()

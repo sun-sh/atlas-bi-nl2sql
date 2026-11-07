@@ -124,6 +124,7 @@ flowchart TD
 | 运行观测 | `/api/metrics` 暴露进程内请求数、错误数、P50/P95/Max；带管理令牌的运营接口与本地 HTTP 压测脚本可用于回归 |
 | 检索验证 | 12 条标注集比较纯词法、纯语义和已发布的 0.56/0.44 融合方案，同时报告 Top-1、MRR 和完整表召回 |
 | 语言变体验证 | 15 条独立自然语言问法逐条检查范围、意图、指标、表召回和真实执行行；8 条应回答，7 条应澄清 |
+| 规则口径验证 | 100 条基准逐条走离线规划、规则 SQL 和只读执行，核对结果与独立业务基准等价 |
 | Schema 召回 | BGE + Qdrant 语义检索与 Elasticsearch BM25 / 本地 IDF 双路召回，最终得分 `0.56 × semantic + 0.44 × lexical` |
 | SQL 安全 | sqlglot AST、单条 SELECT、表/函数白名单、拒绝 `SELECT *`、敏感字段拦截、只读连接和结果行数限制 |
 | 流式结果 | SSE 先推送查询结果、SQL、检索依据和确定性摘要，再流式生成模型结论；失败时用 `reset` 换成完整摘要 |
@@ -164,6 +165,10 @@ flowchart TD
 两套评测集都限定在固定电商数据和业务口径内，不代表开放域泛化。
 
 另有 7 条不调用模型的 `scope-guard-v1` 范围评测，覆盖模糊业务问题、因果问题、写操作、敏感字段和域外请求，当前 **7/7 在生成 SQL 前正确澄清或拒绝**，报告见 [范围评测 JSON](docs/evaluations/scope-guard-2026-11-05.json)。这验证的是“不该答时不要硬答”，不是业务查询准确率。
+
+### 规则链路结果等价验证
+
+严格模型评测之外，项目新增了不调用模型的 `rule-equivalence-v1`：把 100 条基准 SQL 逐条交给离线规划、规则生成和只读执行，再核对行数、维度、指标值、排序和追问上下文。2026-11-08 的结果为 **100/100**，说明离线回退不是“随便返回一个销售表”，而是和同一独立业务基准等价。它验证的是规则链路口径，不代表模型能力，报告见 [规则等价 JSON](docs/evaluations/rule-equivalence-2026-11-08.json)。
 
 ### 自然语言与检索验证
 
@@ -289,10 +294,11 @@ python -m app.evaluation.run
 python -m app.evaluation.run --suite scope --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
+python -m app.evaluation.run --suite rules --min-hit-rate 100
 node --check app/static/app.js
 ```
 
-`pytest` 会关闭在线模型和 BGE 下载，用本地数据和受控的模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **133 项测试全部通过**。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行测试和确定性质量门禁，不产生在线模型分数；`scope`、`retrieval`、`natural` 三套门禁不依赖模型 Key。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
+`pytest` 会关闭在线模型和 BGE 下载，用本地数据和受控的模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **142 项测试全部通过**。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行测试和确定性质量门禁，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
 
 ## 本地运行
 

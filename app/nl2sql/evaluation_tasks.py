@@ -626,7 +626,11 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
         for path in sorted(source_root.rglob("*.py")):
             source_hash.update(path.relative_to(source_root).as_posix().encode())
             source_hash.update(path.read_bytes())
-        manifest = dataset_row["case_ids_json"].encode("utf-8")
+        manifest = json.dumps(
+            [case["id"] for case in selected_cases],
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
         report["runtime"] = {
             "workers": int(task["workers"]),
             "wall_elapsed_ms": round((time.perf_counter() - started) * 1000, 1),

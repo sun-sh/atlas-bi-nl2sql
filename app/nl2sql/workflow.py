@@ -289,6 +289,11 @@ def finalize_node(state: GraphState) -> GraphState:
     result = state.get("result") or {"rows": [], "columns": [], "row_count": 0, "truncated": False, "elapsed_ms": 0}
     rows = result.get("rows", [])
     columns = result.get("columns", [])
+    execution_succeeded = bool(
+        state.get("result")
+        and state.get("attempts")
+        and state["attempts"][-1].get("status") == "success"
+    )
     digest = build_result_digest(
         state["question"],
         plan,
@@ -316,6 +321,23 @@ def finalize_node(state: GraphState) -> GraphState:
     mode = state.get("mode", "rule")
     if mode.startswith("rule"):
         warnings.append("当前离线模式使用规则 SQL 生成器；可在模型配置中启用模型生成。")
+    if not execution_succeeded:
+        warnings.append("查询未成功执行；没有可信数据结果，当前回答不是业务结论。")
+        failure = warnings[-2] if len(warnings) > 1 else "查询未成功执行"
+        narrative = NarrativeResult(
+            text=(
+                "查询未成功执行，不能给出业务结论。\n"
+                f"失败原因：{failure}\n"
+                "请检查 SQL 生成、筛选条件或模型配置后重试。"
+            ),
+            mode="error",
+        )
+        narrative_check = {
+            "passed": True,
+            "errors": [],
+            "warnings": [],
+            "contract": "execution-failure-v1",
+        }
     final = QueryResult(
         question=state["question"],
         sql=state.get("sql", ""),
@@ -335,7 +357,11 @@ def finalize_node(state: GraphState) -> GraphState:
         narrative_retries=narrative.retries,
         generation_retries=state.get("generation_retries", 0),
         run_context=state.get("run_context", {}),
-        outcome=OUTCOME_ANSWERED,
+        outcome=(
+            OUTCOME_ANSWERED
+            if execution_succeeded
+            else "failed"
+        ),
         narrative_validation=narrative_check,
     )
     return {"final": final}

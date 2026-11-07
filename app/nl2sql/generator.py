@@ -5,6 +5,7 @@ import json
 
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.models import QueryPlan, SchemaHit
+from app.nl2sql.planner import CATEGORY_TERMS
 from app.nl2sql.schema_catalog import semantic_schema_prompt
 
 
@@ -55,43 +56,115 @@ def generate_rule_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> 
     q = question.lower()
     filters = list(plan.filters)
     if plan.intent == "marketing_efficiency":
-        where = _where(_marketing_filters(plan))
+        # Aggregate each grain before joining. Joining daily spend directly to
+        # orders repeats the spend for every matching order and understates ROI.
+        filters = _marketing_filters(plan)
+        spend_where = _where(filters)
+        order_filters: list[str] = []
+        for item in filters:
+            if "m.spend_date" in item:
+                order_filters.append(
+                    item.replace("m.spend_date", "o.order_date").replace(
+                        "m.channel", "o.channel"
+                    )
+                )
+            elif "m.channel" in item:
+                order_filters.append(item.replace("m.channel", "o.channel"))
+        # ROI revenue is paid revenue. Keep this invariant in the rule path even
+        # when the planner did not add a status filter.
+        if not any("o.status" in item for item in order_filters):
+            order_filters.append("o.status = 'paid'")
+        order_where = _where(order_filters)
         return (
-            "SELECT m.channel AS 渠道, ROUND(SUM(m.spend), 2) AS 投放花费, "
-            "ROUND(SUM(m.attributed_orders), 0) AS 归因订单数, "
-            "ROUND(SUM(o.paid_amount), 2) AS 归因销售额, "
-            "ROUND(SUM(o.paid_amount) / NULLIF(SUM(m.spend), 0), 2) AS ROI "
-            "FROM marketing_spend m LEFT JOIN orders o ON o.channel = m.channel "
-            "AND o.order_date = m.spend_date AND o.status = 'paid' "
-            + where + " GROUP BY m.channel ORDER BY ROI DESC"
+            "SELECT m.channel AS 渠道, ROUND(m.spend, 2) AS 投放花费, "
+            "ROUND(m.attributed_orders, 0) AS 归因订单数, "
+            "ROUND(o.revenue, 2) AS 归因销售额, "
+            "ROUND(o.revenue / NULLIF(m.spend, 0), 2) AS ROI "
+            "FROM (SELECT channel, SUM(spend) AS spend, SUM(attributed_orders) AS attributed_orders "
+            "FROM marketing_spend m " + spend_where + " GROUP BY channel) m "
+            "LEFT JOIN (SELECT channel, SUM(paid_amount) AS revenue FROM orders o "
+            + order_where + " GROUP BY channel) o ON o.channel = m.channel "
+            "ORDER BY ROI DESC"
         )
     if plan.intent == "refund_analysis":
         if "原因" in q:
+            reason_metric = "退款金额" if "退款金额" in q else "退款单数"
             return (
                 "SELECT r.reason AS 退款原因, COUNT(*) AS 退款单数, "
                 "ROUND(SUM(r.refund_amount), 2) AS 退款金额 FROM refunds r "
                 "JOIN orders o ON o.order_id = r.order_id " + _where(filters)
-                + " GROUP BY r.reason ORDER BY 退款单数 DESC"
+                + " GROUP BY r.reason ORDER BY " + reason_metric + " DESC"
             )
+        if "退款金额" in q:
+            # Refund amount is additive; using the refund-rate query here would
+            # silently answer a different business question.
+            item_category = "商品行" in q or "商品明细" in q
+            category_expr = "oi.category" if item_category else "o.category"
+            join = (
+                "JOIN order_items oi ON oi.order_id = o.order_id JOIN orders o ON o.order_id = oi.order_id"
+                if item_category
+                else "JOIN orders o ON o.order_id = r.order_id"
+            )
+            return (
+                f"SELECT {category_expr} AS 品类, COUNT(*) AS 退款单数, "
+                "ROUND(SUM(r.refund_amount), 2) AS 退款金额 FROM refunds r "
+                + join + _where(filters)
+                + " GROUP BY " + category_expr + " ORDER BY 退款金额 DESC"
+            )
+        top_only = (
+            any(term in q for term in ("最高", "最大", "第一", "top 1", "top1"))
+            or any(term in q for term in ("哪一个", "哪个品类", "哪个类目"))
+        )
         return (
             "SELECT o.category AS 品类, COUNT(DISTINCT o.order_id) AS 订单数, "
             "COUNT(DISTINCT r.refund_id) AS 退款单数, "
             "ROUND(COUNT(DISTINCT r.refund_id) * 100.0 / COUNT(DISTINCT o.order_id), 2) AS 退款率 "
             "FROM orders o LEFT JOIN refunds r ON r.order_id = o.order_id " + _where(filters)
             + " GROUP BY o.category ORDER BY 退款率 DESC"
+            + (" LIMIT 1" if top_only else "")
         )
     if plan.intent == "category_analysis":
+        item_grain = any(term in q for term in ("商品行", "商品明细"))
+        aggregate_only = not any(
+            term in q
+            for term in ("各品类", "按品类", "分品类", "品类排名", "类目排名", "哪些品类", "哪些类目")
+        ) and any(term in q for term in CATEGORY_TERMS)
         if "销量" in q or "件数" in q or "卖得最多" in q or "卖得多" in q:
+            if aggregate_only:
+                return (
+                    "SELECT SUM(oi.quantity) AS 销量 FROM order_items oi "
+                    "JOIN orders o ON o.order_id = oi.order_id "
+                    + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+                )
             return (
                 "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 "
                 "FROM order_items oi JOIN orders o ON o.order_id = oi.order_id "
-                + _where(filters) + " GROUP BY oi.category ORDER BY 销量 DESC"
+                + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+                + " GROUP BY oi.category ORDER BY 销量 DESC"
             )
+        if item_grain:
+            # Amounts live on orders. For item-grain grouping, aggregate order
+            # amounts first, otherwise a two-line order repeats its paid amount.
+            return (
+                "SELECT oi.category AS 品类, ROUND(SUM(order_amount), 2) AS 销售额 "
+                "FROM order_items oi JOIN (SELECT order_id, "
+                "ROUND(SUM(paid_amount), 2) AS order_amount FROM orders o "
+                + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+                + " GROUP BY order_id) o ON o.order_id = oi.order_id "
+                "GROUP BY oi.category ORDER BY 销售额 DESC"
+            )
+        if aggregate_only:
+            return (
+                "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
+                + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+            )
+        # The semantic layer defines category sales on the order grain unless
+        # the question explicitly asks for item-line grain.
         return (
-            "SELECT oi.category AS 品类, COUNT(DISTINCT o.order_id) AS 订单数, "
+            "SELECT o.category AS 品类, COUNT(*) AS 订单数, "
             "ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
-            "JOIN order_items oi ON oi.order_id = o.order_id " + _where(filters)
-            + " GROUP BY oi.category ORDER BY 销售额 DESC"
+            + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+            + " GROUP BY o.category ORDER BY 销售额 DESC"
         )
     where = _where(filters)
     paid_where = where + " AND o.status = 'paid'" if where else " WHERE o.status = 'paid'"
@@ -101,16 +174,42 @@ def generate_rule_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> 
             "COUNT(*) AS 订单数 FROM orders o " + paid_where
             + " GROUP BY o.order_date ORDER BY o.order_date"
         )
+    asks_region_dimension = any(
+        term in q for term in ("各地区", "按地区", "分地区", "地区客单价", "区域客单价")
+    )
     if "客单价" in q or "每单平均" in q or "平均花" in q:
-        return (
-            "SELECT o.channel AS 渠道, COUNT(*) AS 订单数, ROUND(SUM(o.paid_amount), 2) AS 销售额, "
-            "ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders o " + paid_where
-            + " GROUP BY o.channel ORDER BY 客单价 DESC"
+        group, label = (
+            ("o.region", "地区") if asks_region_dimension else ("o.channel", "渠道")
         )
-    if "地区" in q or any(x in q for x in ("华东", "华南", "华北", "西南")):
+        return (
+            f"SELECT {group} AS {label}, COUNT(*) AS 订单数, ROUND(SUM(o.paid_amount), 2) AS 销售额, "
+            "ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders o " + paid_where
+            + f" GROUP BY {group} ORDER BY 客单价 DESC"
+        )
+    region_filter = next(
+        (item for item in filters if "o.region" in item),
+        "",
+    )
+    channel_filter = next(
+        (item for item in filters if "o.channel" in item),
+        "",
+    )
+    asks_channel_group = any(term in q for term in ("各渠道", "按渠道", "分渠道", "渠道排名", "渠道对比"))
+    asks_region_group = any(term in q for term in ("各地区", "按地区", "分地区", "地区排名", "地区对比"))
+    single_region_total = region_filter and not asks_channel_group
+    single_channel_total = channel_filter and not asks_region_group
+    if single_region_total or single_channel_total:
+        # A single-region/single-channel question without an explicit grouping
+        # dimension is a scalar total, not a breakdown by the other dimension.
+        return (
+            "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o " + paid_where
+        )
+    if asks_region_group:
         group, label = "o.region", "地区"
-    else:
+    elif asks_channel_group:
         group, label = "o.channel", "渠道"
+    else:
+        group, label = "o.region", "地区"
     return (
         f"SELECT {group} AS {label}, COUNT(*) AS 订单数, ROUND(SUM(o.paid_amount), 2) AS 销售额 "
         "FROM orders o " + paid_where + f" GROUP BY {group} ORDER BY 销售额 DESC"

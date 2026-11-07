@@ -43,13 +43,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 4,
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 28.0
+      "elapsed_ms": 85.3
     },
     {
       "id": "natural-ad-return",
@@ -75,13 +77,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 4,
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 10.6
+      "elapsed_ms": 13.0
     },
     {
       "id": "natural-refund-cause",
@@ -107,13 +111,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 5,
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 5.2
+      "elapsed_ms": 11.4
     },
     {
       "id": "natural-category-volume",
@@ -139,13 +145,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 4,
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 6.9
+      "elapsed_ms": 19.2
     },
     {
       "id": "natural-membership",
@@ -166,13 +174,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 0,
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 1.4
+      "elapsed_ms": 3.4
     },
     {
       "id": "natural-aov",
@@ -197,13 +207,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 4,
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 7.0
+      "elapsed_ms": 13.5
     },
     {
       "id": "natural-region-gap",
@@ -223,13 +235,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 0,
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 1.7
+      "elapsed_ms": 2.5
     },
     {
       "id": "natural-daily",
@@ -254,13 +268,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "2026-02-01 至 2026-02-28",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
-      "row_count": 151,
+      "row_count": 28,
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 6.1
+      "elapsed_ms": 9.3
     },
     {
       "id": "natural-refund-money",
@@ -286,13 +302,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 5,
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 4.4
+      "elapsed_ms": 11.3
     },
     {
       "id": "natural-ads",
@@ -312,13 +330,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 0,
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 1.3
+      "elapsed_ms": 3.2
     },
     {
       "id": "natural-conversion",
@@ -339,13 +359,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 0,
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 1.3
+      "elapsed_ms": 3.0
     },
     {
       "id": "natural-city",
@@ -365,13 +387,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 0,
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 1.3
+      "elapsed_ms": 3.1
     },
     {
       "id": "natural-refund-ratio",
@@ -397,13 +421,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 4,
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 7.5
+      "elapsed_ms": 12.1
     },
     {
       "id": "natural-low-price",
@@ -424,13 +450,15 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 0,
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 1.3
+      "elapsed_ms": 2.0
     },
     {
       "id": "natural-new-customer",
@@ -451,25 +479,27 @@
       "intent_ok": true,
       "metric_ok": true,
       "metric_column_ok": true,
+      "expected_time_range": "",
+      "time_range_ok": true,
       "table_recall": true,
       "rows_ok": true,
       "row_count": 0,
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 1.3
+      "elapsed_ms": 2.5
     }
   ],
   "limitations": "Independent wording and end-to-end deterministic path, but this is not an online model-accuracy benchmark or an open-domain semantic-SQL dataset.",
   "available": true,
-  "evaluated_at": "2026-11-06T02:32:26.506633+00:00",
+  "evaluated_at": "2026-11-07T17:24:28.610696+00:00",
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 94.2,
-    "source_sha256": "5b45ef5080764e5d8f804f56a7779e1e3457aca93ebf26caeb08bed037eb5d9d"
+    "wall_elapsed_ms": 222.3,
+    "source_sha256": "02f61b1d5dea403d905a5b2fa9bb5efd84a9d3b2f3e3113986a43c0b645f64de"
   },
   "evaluation_contract": "natural-language-holdout-v1",
-  "case_manifest_sha256": "84758e9cdf92a7aae9d0d11d3670533460b77f3c8629f95af7c545d1f36e9b51",
+  "case_manifest_sha256": "20ceb0859f927b1b9b4088def8fa73349a3b872b1be5a158c10f4b302db80754",
   "quality_gate": {
     "min_hit_rate": 100.0,
     "passed": true

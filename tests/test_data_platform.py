@@ -141,3 +141,13 @@ def test_synced_source_can_become_active_query_database(monkeypatch, tmp_path):
     active = data_platform.active_query_database()
     assert active["source_id"] == source["id"]
     assert active["fallback"] is False
+
+
+def test_data_service_hides_restricted_columns_and_unknown_tables():
+    data_platform.ensure_data_platform()
+    data_platform.sync_data_source('ds_commerce')
+    result = data_platform.data_service_query('default', 'ds_commerce', 'orders', limit=2)
+    assert 'customer_id' not in result['columns']
+    assert all('customer_id' not in row for row in result['rows'])
+    with pytest.raises(data_platform.DataPlatformError, match='数据服务表不存在'):
+        data_platform.data_service_query('default', 'ds_commerce', 'missing_table')
