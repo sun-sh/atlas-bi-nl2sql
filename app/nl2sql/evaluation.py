@@ -516,6 +516,7 @@ def _diagnostics(cases: list[dict[str, Any]]) -> dict[str, Any]:
         by_intent.append({"intent": intent, "total": len(items), "passed": passed,
                           "hit_rate": round(passed * 100 / len(items), 1)})
     failures: dict[str, int] = {}
+    failure_reasons: dict[str, int] = {}
     for case in cases:
         if case["hit"]:
             continue
@@ -533,9 +534,26 @@ def _diagnostics(cases: list[dict[str, Any]]) -> dict[str, Any]:
         else:
             category = "result"
         failures[category] = failures.get(category, 0) + 1
+        warning = " ".join(case.get("warnings") or [])
+        detail = (error + " " + warning).lower()
+        if "connect" in detail or "timeout" in detail or "timed out" in detail:
+            reason = "provider_connectivity"
+        elif "token" in detail and ("budget" in detail or "预算" in detail):
+            reason = "token_budget"
+        elif "事实一致性" in detail or "摘要外数值" in detail or "非榜首" in detail:
+            reason = "narrative_grounding"
+        elif "前置问题" in error:
+            reason = "setup"
+        elif "模型未生成" in detail or "model-failed" in detail:
+            reason = "model_generation"
+        elif "sql" in detail and ("执行" in detail or "校验" in detail):
+            reason = "sql_execution"
+        else:
+            reason = "other"
+        failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
     repaired = [case for case in cases if case.get("repair_used") or case.get("sql_mode") == "llm-repair"]
     return {
-        "by_intent": by_intent, "failures": failures,
+        "by_intent": by_intent, "failures": failures, "failure_reasons": failure_reasons,
         "self_healing": {"attempted_cases": len(repaired),
                          "passed_cases": sum(bool(case["hit"]) for case in repaired)},
     }

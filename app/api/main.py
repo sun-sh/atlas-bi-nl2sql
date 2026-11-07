@@ -72,6 +72,7 @@ from app.nl2sql.result_insight import (
     validate_narrative,
 )
 from app.nl2sql.runtime_metrics import observe, snapshot as metrics_snapshot
+from app.nl2sql.model_runtime import snapshot as model_metrics_snapshot
 from app.nl2sql.seed import generate_database
 from app.nl2sql.session_store import append_turn, create_session, delete_session, get_session, list_sessions
 from app.nl2sql.harness import is_cancelled, register_cancel, release_cancel, request_cancel
@@ -262,7 +263,10 @@ def health() -> dict:
 
 @app.get("/api/metrics")
 def runtime_metrics() -> dict:
-    return metrics_snapshot()
+    return {
+        **metrics_snapshot(),
+        "model_calls": model_metrics_snapshot(),
+    }
 
 
 @app.get("/api/overview")

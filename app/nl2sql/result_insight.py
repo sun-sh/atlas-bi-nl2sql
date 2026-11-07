@@ -8,6 +8,7 @@ from typing import Any, Iterator
 
 from app.nl2sql.harness import is_cancelled
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
+from app.nl2sql.model_runtime import model_call_slot, record_usage
 from app.nl2sql.models import QueryPlan
 
 _NUMBER_RE = re.compile(r"(?<![A-Za-z_])[-+]?\d+(?:,\d{3})*(?:\.\d+)?")
@@ -54,6 +55,91 @@ def _digest_numbers(digest: dict[str, Any]) -> set[float]:
     return values
 
 
+def _context_numbers(digest: dict[str, Any]) -> set[float]:
+    """Numbers supplied by the user/question are valid context, not facts.
+
+    A narrative may repeat "近30天", "乘100" or a date component from the
+    question. Those values are not claims about the result dataset.
+    """
+    text = " ".join(
+        str(value or "")
+        for value in (digest.get("question"), digest.get("time_range"))
+    )
+    values = set()
+    for match in _NUMBER_RE.findall(text):
+        number = _number(match)
+        if number is not None:
+            values.add(round(abs(number), 4))
+    return values
+
+
+def _number_is_grounded(value: float, allowed: set[float]) -> bool:
+    if value in allowed:
+        return True
+    # Narratives commonly round averages/ratios (e.g. 1.6625 -> 1.66). Accept
+    # displays that match a digest value at the precision the model used.
+    for candidate in allowed:
+        if abs(value - candidate) <= max(0.0051, abs(value) * 0.0002):
+            return True
+        text_value = f"{candidate:.8f}".rstrip("0").rstrip(".")
+        if text_value.startswith(f"{value:g}") or f"{value:.2f}" == f"{candidate:.2f}":
+            return True
+    return False
+
+
+def _claim_clause(answer: str, start: int, end: int) -> str:
+    # A claim about a dimension is normally bounded by the metric word and the
+    # nearest punctuation. Do not cross a punctuation boundary.
+    boundaries = "。！？；，,\n"
+    left = max(answer.rfind(mark, 0, start) for mark in boundaries) + 1
+    right_candidates = [answer.find(mark, end) for mark in boundaries if answer.find(mark, end) >= 0]
+    right = min(right_candidates) if right_candidates else len(answer)
+    return answer[left:right]
+
+
+def _claim_targets_metric(answer: str, match: re.Match[str], preferred_metric: str) -> bool:
+    """A dimension label can be "highest" for a non-target column.
+
+    For example, an AOV result can legitimately say "App 订单数最高" while the
+    target metric is 客单价. Only enforce ranking when the clause refers to the
+    preferred metric, or does not name a different metric at all.
+    """
+    clause = _claim_clause(answer, match.start(), match.end()).lower()
+    compact = re.sub(r"[\s_\-]+", "", clause)
+    target_key = re.sub(r"[\s_\-]+", "", preferred_metric.strip().lower())
+    target_aliases = {
+        target_key,
+        *{
+            re.sub(r"[\s_\-]+", "", alias.strip().lower())
+            for alias in METRIC_ALIASES.get(preferred_metric, set())
+        },
+    }
+    if any(alias and alias in compact for alias in target_aliases):
+        return True
+    other_aliases = {
+        re.sub(r"[\s_\-]+", "", alias.strip().lower())
+        for canonical, aliases in METRIC_ALIASES.items()
+        if canonical != preferred_metric
+        for alias in {canonical, *aliases}
+    }
+    if any(alias and alias in compact for alias in other_aliases):
+        return False
+    # "Web最高、App最低" is a comparison of the target metric, while
+    # "App 订单数最高" names a different metric and is handled above.
+    return True
+
+
+def _top_claim_pattern(label: str) -> re.Pattern[str]:
+    # Limit the gap and never cross a sentence/strong punctuation boundary.
+    # A label can be preceded by "最高" in a parallel contrast such as
+    # "Web最高、App最低"; the caller disambiguates the direction afterwards.
+    escaped = re.escape(label)
+    gap = r"[^。！？\n；，,]{0,12}"
+    return re.compile(
+        rf"(?:最高|第一|榜首|领先){gap}{escaped}|{escaped}{gap}(?:最高|第一|榜首|领先)"
+    )
+
+
 def validate_narrative(
     text: str,
     digest: dict[str, Any],
@@ -62,19 +148,29 @@ def validate_narrative(
 ) -> dict[str, Any]:
     """Check narrative numbers and ranking/trend claims against the digest."""
     answer = str(text or "").strip()
-    numeric_text = re.sub(r"\d{4}-\d{2}-\d{2}", " ", answer)
+    # YYYY-MM and ranges ("近30天") are context, not result claims. Remove date
+    # tokens before extracting numbers, while still checking all metric values.
+    numeric_text = re.sub(r"\d{4}-\d{2}(?:-\d{2})?", " ", answer)
+    numeric_text = re.sub(r"近\s*\d+\s*天|最近\s*\d+\s*天", " ", numeric_text)
+    # Natural-language dates such as 2月15日 are labels, not result values.
+    numeric_text = re.sub(r"\d{1,2}\s*月\s*\d{1,2}\s*日", " ", numeric_text)
     errors: list[str] = []
     warnings: list[str] = []
     if not answer:
         errors.append("解读为空")
 
     allowed = _digest_numbers(digest)
+    context_numbers = _context_numbers(digest)
     if mode == "model":
         for match in _NUMBER_RE.findall(numeric_text):
             value = _number(match)
             if value is None:
                 continue
-            if value not in allowed and abs(value) > 1:
+            if (
+                not _number_is_grounded(value, allowed)
+                and abs(value) > 1
+                and abs(value) not in context_numbers
+            ):
                 change = abs(float((digest.get("trend") or {}).get("change_pct") or 0))
                 signed_trend = (
                     change > 1
@@ -90,19 +186,36 @@ def validate_narrative(
             top = ranking[0]
             top_label = str(top.get("label") or "")
             others = [str(item.get("label") or "") for item in ranking[1:] if item.get("label")]
-            top_pattern = re.compile(
-                r"(?:最高|第一|榜首|领先).{0,20}" + re.escape(top_label)
-                + "|" + re.escape(top_label) + ".{0,20}(?:最高|第一|榜首|领先)"
-            )
-            if top_label and top_pattern.search(answer) is None:
+            top_pattern = _top_claim_pattern(top_label) if top_label else None
+            if top_pattern and top_pattern.search(answer) is None:
                 warnings.append(f"未明确复述 {dimension} 榜首 {top_label}")
+            preferred_metric = str(digest.get("preferred_metric") or "")
             for label in others:
-                pattern = re.compile(
-                    r"(?:最高|第一|榜首|领先).{0,20}" + re.escape(label)
-                    + "|" + re.escape(label) + ".{0,20}(?:最高|第一|榜首|领先)"
-                )
-                if pattern.search(answer):
-                    errors.append(f"把非榜首 {label} 描述为最高")
+                for match in _top_claim_pattern(label).finditer(answer):
+                    clause = _claim_clause(answer, match.start(), match.end())
+                    # "Web 最高、App 最低" contains both labels in one clause.
+                    # Only flag the label if the superlative immediately before
+                    # or after it is 最高/第一/榜首/领先, not 最低/最后.
+                    local = match.group()
+                    label_pos = local.find(label)
+                    if label_pos >= 0:
+                        after = local[label_pos + len(label):]
+                        before = local[:label_pos]
+                        # Check the directional word adjacent to this label,
+                        # not merely anywhere in the matched window.
+                        if re.search(r"(?:最低|最后|末位)", after) and not re.search(
+                            r"(?:最高|第一|榜首|领先)", after
+                        ):
+                            continue
+                        if before and re.search(r"(?:最高|第一|榜首|领先)", before):
+                            # "Web最高、App最低" is handled by looking at the
+                            # original answer after the label, not the regex.
+                            original_after = answer[match.end():match.end() + 4]
+                            if re.search(r"(?:最低|最后|末位)", original_after):
+                                continue
+                    if _claim_targets_metric(answer, match, preferred_metric):
+                        errors.append(f"把非榜首 {label} 描述为最高")
+                        break
 
         change = (digest.get("trend") or {}).get("change_pct")
         if change is not None:
@@ -504,26 +617,28 @@ def stream_result_narrative(
                 request["extra_body"] = {
                     "chat_template_kwargs": {"enable_thinking": False},
                 }
-            response = client.chat.completions.create(**request)
-            for chunk in response:
-                if is_cancelled(trace_id):
-                    yield {"type": "cancelled"}
-                    return
-                if not getattr(chunk, "choices", None):
-                    continue
-                choice = chunk.choices[0]
-                finish_reason = getattr(choice, "finish_reason", None)
-                if finish_reason == "length":
-                    error = "模型解读因token预算耗尽而截断"
-                elif finish_reason not in (None, "stop"):
-                    error = f"模型解读未正常完成：{finish_reason}"
-                delta = getattr(choice.delta, "content", None)
-                if delta:
-                    parts.append(delta)
-                    emitted += delta
-                    yield {"type": "delta", "delta": delta}
-                elif getattr(choice.delta, "reasoning", None):
-                    yield {"type": "thinking"}
+            with model_call_slot("narrative"):
+                response = client.chat.completions.create(**request)
+                for chunk in response:
+                    if is_cancelled(trace_id):
+                        yield {"type": "cancelled"}
+                        return
+                    record_usage(getattr(chunk, "usage", None))
+                    if not getattr(chunk, "choices", None):
+                        continue
+                    choice = chunk.choices[0]
+                    finish_reason = getattr(choice, "finish_reason", None)
+                    if finish_reason == "length":
+                        error = "模型解读因token预算耗尽而截断"
+                    elif finish_reason not in (None, "stop"):
+                        error = f"模型解读未正常完成：{finish_reason}"
+                    delta = getattr(choice.delta, "content", None)
+                    if delta:
+                        parts.append(delta)
+                        emitted += delta
+                        yield {"type": "delta", "delta": delta}
+                    elif getattr(choice.delta, "reasoning", None):
+                        yield {"type": "thinking"}
         except Exception as exc:
             error = model_error_message(exc)
 
@@ -531,7 +646,12 @@ def stream_result_narrative(
         if not error and text:
             check = validate_narrative(text, digest, mode="model")
             if not check["passed"]:
-                error = "解读事实一致性校验失败：" + "；".join(check["errors"])
+                candidate = re.sub(r"\s+", " ", text)[:300]
+                error = (
+                    "解读事实一致性校验失败："
+                    + "；".join(check["errors"])
+                    + f"；候选解读：{candidate}"
+                )
             else:
                 yield {
                     "type": "done",

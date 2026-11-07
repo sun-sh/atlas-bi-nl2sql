@@ -473,3 +473,6 @@ def test_runtime_metrics_endpoint_tracks_sync_and_stream_latency(monkeypatch, tm
     assert stream_metrics["count"] >= 1
     assert stream_metrics["errors"] == 0
     assert "p95_ms" in query_metrics
+    assert metrics["model_calls"]["max_concurrency"] == 4
+    assert "total_tokens" in metrics["model_calls"]
+    assert "success_rate" in metrics["model_calls"]

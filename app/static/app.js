@@ -824,12 +824,13 @@ async function streamQuery(question, sessionId) {
         } else if (event === 'result') {
           result = data.result;
           result.session_id = data.session_id;
-          renderResult(result, { card });
           narrative = '';
           if (result.outcome && result.outcome !== 'answered') {
+            renderGuardResult(result, { card });
             card?.classList.remove('is-streaming');
             continue;
           }
+          renderResult(result, { card });
           setTurnNarrative(card, '', true);
           const tag = card?.querySelector('.narrative-tag');
           if (tag) tag.textContent = '正在组织分析结论…';

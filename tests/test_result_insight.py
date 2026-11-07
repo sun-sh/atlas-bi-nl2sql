@@ -16,8 +16,12 @@ def _mock_narrator(monkeypatch, responses):
             for content, reason in response:
                 if isinstance(content, Exception):
                     raise content
-                yield SimpleNamespace(choices=[SimpleNamespace(
-                    delta=SimpleNamespace(content=content), finish_reason=reason)])
+                yield SimpleNamespace(
+                    choices=[SimpleNamespace(
+                        delta=SimpleNamespace(content=content), finish_reason=reason
+                    )],
+                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                )
         return chunks()
 
     config = SimpleNamespace(enabled=True, active=True, model="test-model", provider="custom")
@@ -168,3 +172,164 @@ def test_narrative_rejects_wrong_top_channel_and_trend_direction():
     )
     assert check["passed"] is False
     assert any("趋势方向" in error for error in check["errors"])
+
+
+def test_context_numbers_and_next_sentence_do_not_create_false_positives():
+    from app.nl2sql.result_insight import validate_narrative
+
+    digest = _grounded_digest()
+    digest["question"] = "近30天各渠道销售额，乘100"
+    digest["time_range"] = "2026-02-01 至 2026-02-28"
+    check = validate_narrative(
+        "结论：App 渠道销售额最高，为 120。关键发现：Web 为 80。",
+        digest,
+    )
+    assert check["passed"] is True
+
+    check = validate_narrative(
+        "结论：App 渠道销售额最高。近30天数据乘100。Web 为 80。",
+        digest,
+    )
+    assert check["passed"] is True
+
+
+def test_actual_non_top_claim_still_fails():
+    from app.nl2sql.result_insight import validate_narrative
+
+    check = validate_narrative("结论：Web 最高。", _grounded_digest())
+    assert check["passed"] is False
+
+
+def test_rounded_average_and_ratio_values_are_grounded():
+    from app.nl2sql.result_insight import validate_narrative
+
+    digest = _grounded_digest()
+    digest["metrics"] = [
+        {"name": "ROI", "sum": None, "avg": 1.6625, "min": 0.49, "max": 2.27}
+    ]
+    digest["preferred_metric"] = "ROI"
+    digest["ranking"] = [
+        {"label": "App", "value": "2.27", "share_pct": None},
+        {"label": "Web", "value": "2.21", "share_pct": None},
+        {"label": "Douyin", "value": "0.49", "share_pct": None},
+    ]
+    digest["sample_rows"] = [
+        {"渠道": "App", "ROI": 2.27},
+        {"渠道": "Web", "ROI": 2.21},
+        {"渠道": "Douyin", "ROI": 0.49},
+    ]
+    check = validate_narrative(
+        "结论：App ROI 最高，为 2.27。关键发现：Douyin 最低为 0.49，均值 1.66。",
+        digest,
+    )
+    assert check["passed"] is True
+
+
+def test_non_target_metric_claim_is_not_a_metric_ranking_error():
+    from app.nl2sql.result_insight import validate_narrative
+
+    digest = {
+        "row_count": 4,
+        "facts": ["返回 4 行"],
+        "metrics": [
+            {"name": "客单价", "sum": 1612.61, "avg": 403.15, "min": 368.16, "max": 483.0}
+        ],
+        "sample_rows": [
+            {"渠道": "Web", "客单价": 483.0},
+            {"渠道": "App", "客单价": 368.16},
+        ],
+        "ranking": [
+            {"label": "Web", "value": "483", "share_pct": 29.95},
+            {"label": "App", "value": "368.16", "share_pct": 22.83},
+        ],
+        "preferred_metric": "客单价",
+        "dimension": "渠道",
+        "trend": None,
+    }
+    check = validate_narrative(
+        "结论：Web 客单价最高。关键发现：App 订单数最高。",
+        digest,
+    )
+    assert check["passed"] is True
+
+    check = validate_narrative("结论：App 客单价最高。", digest)
+    assert check["passed"] is False
+
+
+def test_rejected_candidate_is_preserved_in_warning(monkeypatch):
+    from types import SimpleNamespace
+    from app.nl2sql import result_insight as insight
+
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        def chunks():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content="结论：App 最高。"),
+                    finish_reason="stop",
+                )],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+        return chunks()
+
+    monkeypatch.setattr(insight, "get_model_config", lambda: SimpleNamespace(
+        enabled=True, active=True, model="test-model", provider="custom",
+    ))
+    monkeypatch.setattr(insight, "make_client", lambda _: SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    ))
+    digest = {
+        "row_count": 2,
+        "facts": ["返回 2 行"],
+        "metrics": [{"name": "销售额", "sum": 200, "avg": 100, "min": 80, "max": 120}],
+        "sample_rows": [{"渠道": "App", "销售额": 120}, {"渠道": "Web", "销售额": 80}],
+        "ranking": [
+            {"label": "App", "value": "120", "share_pct": 60},
+            {"label": "Web", "value": "80", "share_pct": 40},
+        ],
+        "preferred_metric": "销售额",
+        "dimension": "渠道",
+        "trend": None,
+    }
+    # The candidate is numerically grounded but claims Web (non-top) as top.
+    def create_wrong_top(**kwargs):
+        calls.append(kwargs)
+        def chunks():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content="结论：Web 最高。"),
+                    finish_reason="stop",
+                )],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+        return chunks()
+
+    monkeypatch.setattr(insight, "make_client", lambda _: SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create_wrong_top))
+    ))
+    events = list(insight.stream_result_narrative("各渠道销售额", SimpleNamespace(), digest))
+    final = events[-1]["narrative"]
+    assert final.mode == "digest"
+    assert "候选解读：结论：Web 最高。" in final.fallback_reason
+
+
+def test_natural_language_date_labels_do_not_count_as_hallucinated_numbers():
+    from app.nl2sql.result_insight import validate_narrative
+
+    digest = _grounded_digest()
+    digest["sample_rows"] = [
+        {"日期": "2026-02-15", "销售额": 100.0},
+        {"日期": "2026-02-16", "销售额": 80.0},
+    ]
+    digest["trend"] = {
+        "start_raw": 100.0,
+        "end_raw": 80.0,
+        "change_pct": -20.0,
+    }
+    check = validate_narrative(
+        "结论：2月15日销售额为 100，随后到 2月16日降至 80，下降 20%。",
+        digest,
+    )
+    assert check["passed"] is True

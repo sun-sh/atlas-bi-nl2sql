@@ -4,6 +4,7 @@ import re
 import json
 
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
+from app.nl2sql.model_runtime import model_call_slot, record_usage
 from app.nl2sql.models import QueryPlan, SchemaHit
 from app.nl2sql.planner import CATEGORY_TERMS
 from app.nl2sql.schema_catalog import semantic_schema_prompt
@@ -227,24 +228,26 @@ def _llm_sql(instructions: str, prompt: str) -> str | None:
         return None
     try:
         client = make_client(settings)
-        response = client.chat.completions.create(
-            model=settings.model,
-            messages=[
-                {"role": "system", "content": instructions},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-            max_tokens=1800,
-            **(
-                {
-                    "extra_body": {
-                        "chat_template_kwargs": {"enable_thinking": False},
+        with model_call_slot("sql"):
+            response = client.chat.completions.create(
+                model=settings.model,
+                messages=[
+                    {"role": "system", "content": instructions},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                max_tokens=1800,
+                **(
+                    {
+                        "extra_body": {
+                            "chat_template_kwargs": {"enable_thinking": False},
+                        }
                     }
-                }
-                if settings.provider.lower() == "qwen" or "qwen" in settings.model.lower()
-                else {}
-            ),
-        )
+                    if settings.provider.lower() == "qwen" or "qwen" in settings.model.lower()
+                    else {}
+                ),
+            )
+            record_usage(getattr(response, "usage", None))
         text = (response.choices[0].message.content or "").strip()
         finish_reason = getattr(response.choices[0], "finish_reason", None)
         if finish_reason == "length":

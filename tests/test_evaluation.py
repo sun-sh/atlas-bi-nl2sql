@@ -221,6 +221,8 @@ def test_failure_diagnostics_count_setup_and_narrative_separately():
     ]
     report = evaluation._diagnostics(cases)
     assert report["failures"] == {"setup": 1, "narrative": 1}
+    assert report["failure_reasons"]["setup"] == 1
+    assert report["failure_reasons"]["other"] == 1
     assert report["self_healing"] == {"attempted_cases": 1, "passed_cases": 1}
     assert next(item for item in report["by_intent"] if item["intent"] == "sales_overview")["hit_rate"] == 50
 

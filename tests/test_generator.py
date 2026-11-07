@@ -11,7 +11,8 @@ def test_qwen_sql_request_disables_thinking(monkeypatch):
         def create(self, **kwargs):
             captured.update(kwargs)
             return type("Response", (), {
-                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "SELECT COUNT(*) AS n FROM orders"})()})()]
+                "choices": [type("Choice", (), {"message": type("Message", (), {"content": "SELECT COUNT(*) AS n FROM orders"})()})()],
+                "usage": type("Usage", (), {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7})(),
             })()
 
     config = type("Config", (), {

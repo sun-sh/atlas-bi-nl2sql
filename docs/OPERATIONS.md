@@ -17,7 +17,7 @@ curl http://127.0.0.1:8000/api/health
 curl http://127.0.0.1:8000/api/overview
 ```
 
-`/api/health` reports the resolved analysis database, active retrieval backends, model activation and repair limits. A healthy response has `status: ok` and `database: true`; inspect `query_database.source_id` and `query_database.fallback` to confirm which source is live. `/api/metrics` returns process-local request counts, error rates and P50/P95/max latency for the synchronous and streaming query paths.
+`/api/health` reports the resolved analysis database, active retrieval backends, model activation and repair limits. A healthy response has `status: ok` and `database: true`; inspect `query_database.source_id` and `query_database.fallback` to confirm which source is live. `/api/metrics` returns process-local request counts, error rates and P50/P95/max latency for the synchronous and streaming query paths, plus model-call admission, failure, token and latency counters.
 
 ## Model configuration
 
@@ -52,7 +52,9 @@ python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
 ```
 
-A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores.
+A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores. The pytest suite includes four Playwright browser cases against a real local FastAPI process; CI installs Chromium for that gate.
+
+`/api/metrics` includes a `model_calls` block with a process-wide concurrency cap, admission timeout, started/succeeded/failed/rejected counts, provider token usage and queue/call latency. These counters are in-memory and per process; aggregate them externally when running multiple workers.
 
 SQL execution is bounded by `QUERY_TIMEOUT_SECONDS` (default 5 seconds) and `MAX_RESULT_ROWS`. Running queries can be cancelled with `POST /api/query/cancel/{trace_id}`; the browser stops its SSE reader and the server interrupts the SQLite progress handler. The harness also rejects recursive CTEs, CROSS JOIN, more than three JOINs and projection-level `*` in subqueries. Raise these limits only with a matching load test; do not silently widen them for one-off demos. Evaluation uses the configured model in strict mode: record `execution_rate`, `hit_rate` and `model_rate` as observed, and never treat rule fallback as a model pass. Model-dependent scores are a dated snapshot, not a deterministic CI gate.
 
