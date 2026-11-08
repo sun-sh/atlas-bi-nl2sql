@@ -44,13 +44,16 @@ from app.nl2sql.evaluation_tasks import (
     compare_evaluation_tasks,
     create_dataset,
     create_evaluation_task,
+    approve_regression_candidates,
     create_experiment,
     execute_evaluation_task,
+    ingest_failed_cases,
     get_evaluation_task,
     list_datasets,
     list_evaluation_tasks,
     list_experiments,
     list_feedback,
+    list_regression_candidates,
     retry_evaluation_task,
 )
 from app.nl2sql.model_config import (
@@ -77,6 +80,7 @@ from app.nl2sql.seed import generate_database
 from app.nl2sql.session_store import append_turn, create_session, delete_session, get_session, list_sessions
 from app.nl2sql.harness import is_cancelled, register_cancel, release_cancel, request_cancel
 from app.nl2sql.settings import get_settings
+from app.nl2sql.sql_engine import QueryTarget
 from app.nl2sql.workflow import get_retriever, query_stream_events, run_query
 
 
@@ -152,14 +156,21 @@ class FeedbackCreateRequest(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+class RegressionCandidateApproveRequest(BaseModel):
+    candidate_ids: list[str] = Field(min_length=1, max_length=500)
+    name: str = Field(min_length=2, max_length=80)
+    version: str = Field(default="v1", max_length=40)
+
+
 class SourceCreateRequest(BaseModel):
     workspace_id: str = DEFAULT_WORKSPACE
     name: str = Field(min_length=2, max_length=80)
     kind: str
-    location: str
+    location: str = ""
     sync_mode: str = "snapshot"
     sensitivity: str = "internal"
     schedule_minutes: int = Field(default=0, ge=0, le=10080)
+    dsn: str = Field(default="", max_length=2000)
 
 
 class MetricCreateRequest(BaseModel):
@@ -192,7 +203,7 @@ EXAMPLES = [
 ]
 
 
-def _prepare_query(payload: QueryRequest) -> tuple[str, str | None, dict, str]:
+def _prepare_query(payload: QueryRequest) -> tuple[str, str | None, dict, QueryTarget]:
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=422, detail="问题不能为空")
@@ -204,7 +215,8 @@ def _prepare_query(payload: QueryRequest) -> tuple[str, str | None, dict, str]:
     # Resolve this request's database in one place. Only the demo fallback may
     # be created on demand; an explicitly activated source is never replaced.
     fallback_db = active_query_database(settings.workspace_id)
-    if not fallback_db["path"].exists():
+    target = fallback_db["target"]
+    if target.path is not None and not target.path.exists():
         if not fallback_db["fallback"]:
             raise HTTPException(status_code=503, detail="当前分析数据源文件不存在，请重新同步或切换数据源")
         generate_database(settings.db_path)
@@ -214,7 +226,7 @@ def _prepare_query(payload: QueryRequest) -> tuple[str, str | None, dict, str]:
         latest_turn = session["turns"][-1]
         context = dict(session.get("context") or {})
         context.update({"question": latest_turn.get("question", "")})
-    return question, session_id, context, str(fallback_db["path"])
+    return question, session_id, context, fallback_db["target"]
 
 
 def _persist_turn(session_id: str | None, question: str, result) -> dict | None:
@@ -242,13 +254,19 @@ def health() -> dict:
     retriever = get_retriever()
     model = get_model_config()
     query_db = active_query_database(settings.workspace_id)
+    target = query_db["target"]
+    target_available = (
+        target.path.exists() if target.path is not None else bool(target.dsn)
+    )
     return {
         "status": "ok",
-        "database": query_db["path"].exists(),
+        "database": target_available,
         "query_database": {
             "workspace_id": query_db["workspace_id"],
             "source_id": query_db["source_id"],
             "database": query_db["database"],
+            "kind": target.kind,
+            "dialect": target.dialect,
             "read_only": query_db["read_only"],
             "fallback": query_db["fallback"],
         },
@@ -272,12 +290,16 @@ def runtime_metrics() -> dict:
 @app.get("/api/overview")
 def overview() -> dict:
     query_db = active_query_database(settings.workspace_id)
-    if not query_db["path"].exists():
+    target = query_db["target"]
+    if target.path is not None and not target.path.exists():
         if query_db["fallback"]:
             generate_database(settings.db_path)
         else:
             raise HTTPException(status_code=503, detail="当前分析数据源文件不存在，请重新同步或切换数据源")
-    return overview_metrics(query_db["path"])
+    try:
+        return overview_metrics(target)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"经营总览读取失败：{exc}") from exc
 
 
 @app.get("/api/examples")
@@ -315,8 +337,8 @@ def query(payload: QueryRequest) -> dict:
     started = time.perf_counter()
     error = False
     try:
-        question, session_id, context, db_path = _prepare_query(payload)
-        result = run_query(question, context=context, db_path=db_path)
+        question, session_id, context, query_target = _prepare_query(payload)
+        result = run_query(question, context=context, query_target=query_target)
         payload_result = result.as_dict()
         payload_result["session_id"] = session_id
         updated = _persist_turn(session_id, question, result)
@@ -379,7 +401,7 @@ def _stream_turn(
     session_id: str | None,
     context: dict,
     trace_id: str,
-    db_path: str,
+    query_target: QueryTarget,
 ) -> Iterator[str]:
     yield _sse("start", {"session_id": session_id, "trace_id": trace_id, "message": "正在分析问题"})
     result = None
@@ -388,7 +410,7 @@ def _stream_turn(
         context=context,
         narrate=False,
         trace_id=trace_id,
-        db_path=db_path,
+        query_target=query_target,
     )
     for event in events:
         state_data = event.get("state") or {}
@@ -495,7 +517,7 @@ def query_stream(payload: QueryRequest) -> StreamingResponse:
     started = time.perf_counter()
     error = False
     try:
-        question, session_id, context, db_path = _prepare_query(payload)
+        question, session_id, context, query_target = _prepare_query(payload)
     except HTTPException:
         error = True
         raise
@@ -508,7 +530,7 @@ def query_stream(payload: QueryRequest) -> StreamingResponse:
     def stream():
         nonlocal error
         try:
-            yield from _stream_turn(question, session_id, context, trace_id, db_path)
+            yield from _stream_turn(question, session_id, context, trace_id, query_target)
         except Exception:
             error = True
             raise
@@ -684,6 +706,35 @@ def evaluation_feedback(status: str | None = None) -> dict:
 def create_evaluation_feedback(payload: FeedbackCreateRequest, _: None = Depends(_require_admin_token)) -> dict:
     try:
         return add_feedback(**payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/evaluation/tasks/{task_id}/regression-candidates", status_code=201)
+def create_regression_candidates(task_id: str, _: None = Depends(_require_admin_token)) -> dict:
+    try:
+        candidates = ingest_failed_cases(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"candidates": candidates, "count": len(candidates)}
+
+
+@app.get("/api/evaluation/regression-candidates")
+def regression_candidates(status: str | None = None) -> dict:
+    return {"candidates": list_regression_candidates(status)}
+
+
+@app.post("/api/evaluation/regression-candidates/approve", status_code=201)
+def approve_candidates(
+    payload: RegressionCandidateApproveRequest,
+    _: None = Depends(_require_admin_token),
+) -> dict:
+    try:
+        return approve_regression_candidates(
+            payload.candidate_ids,
+            name=payload.name,
+            version=payload.version,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

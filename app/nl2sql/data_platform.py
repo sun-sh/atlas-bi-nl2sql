@@ -13,6 +13,7 @@ from typing import Any
 from app.nl2sql.data_assets import TABLE_PROFILES
 from app.nl2sql.schema_catalog import SCHEMA
 from app.nl2sql.settings import get_settings
+from app.nl2sql.sql_engine import QueryTarget
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -210,6 +211,10 @@ def init_data_platform() -> None:
             conn.execute(
                 "ALTER TABLE data_sources ADD COLUMN active_for_query INTEGER NOT NULL DEFAULT 0"
             )
+        if "dsn" not in columns:
+            conn.execute(
+                "ALTER TABLE data_sources ADD COLUMN dsn TEXT NOT NULL DEFAULT ''"
+            )
         now = _iso()
         conn.execute(
             "INSERT OR IGNORE INTO platform_workspaces(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -384,6 +389,74 @@ def _compatibility_error(report: dict[str, Any]) -> str:
     return QUERY_INCOMPATIBLE_MESSAGE + suffix
 
 
+def inspect_external_schema(dsn: str, kind: str) -> dict[str, Any]:
+    """Inspect a read-only external DB-API target against the five-table contract."""
+    report: dict[str, Any] = {
+        "compatible": False,
+        "contract": QUERY_SCHEMA_CONTRACT,
+        "required_tables": list(QUERY_REQUIRED_SCHEMA),
+        "missing_tables": [],
+        "missing_columns": {},
+        "columns_checked": sum(len(columns) for columns in QUERY_REQUIRED_SCHEMA.values()),
+    }
+    if not dsn:
+        report["error"] = "外部数据库缺少只读 DSN"
+        return report
+    try:
+        if kind == "postgresql":
+            import psycopg  # type: ignore
+            conn = psycopg.connect(dsn, autocommit=True)
+        else:
+            from app.nl2sql.sql_engine import DBAPIAdapter
+            conn = DBAPIAdapter(dsn, "mysql")._connect()
+    except ImportError as exc:
+        report["error"] = f"{kind} 驱动未安装：{exc.name}"
+        return report
+    except Exception as exc:
+        report["error"] = f"外部数据库连接失败：{str(exc)[:300]}"
+        return report
+    try:
+        cursor = conn.cursor()
+        try:
+            if kind == "postgresql":
+                for table, required in QUERY_REQUIRED_SCHEMA.items():
+                    cursor.execute(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema='public' AND table_name=%s",
+                        (table,),
+                    )
+                    existing = {str(row[0]).lower() for row in cursor.fetchall()}
+                    if not existing:
+                        report["missing_tables"].append(table)
+                        continue
+                    missing = [column for column in required if column.lower() not in existing]
+                    if missing:
+                        report["missing_columns"][table] = missing
+            else:
+                for table, required in QUERY_REQUIRED_SCHEMA.items():
+                    cursor.execute(
+                        "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s",
+                        (table,),
+                    )
+                    existing = {str(row[0]).lower() for row in cursor.fetchall()}
+                    if not existing:
+                        report["missing_tables"].append(table)
+                        continue
+                    missing = [column for column in required if column.lower() not in existing]
+                    if missing:
+                        report["missing_columns"][table] = missing
+        finally:
+            cursor.close()
+    except Exception as exc:
+        report["error"] = f"外部数据库 Schema 检查失败：{str(exc)[:300]}"
+        return report
+    finally:
+        conn.close()
+    report["compatible"] = not report["missing_tables"] and not report["missing_columns"]
+    return report
+
+
 def _query_compatibility_for_source(source: dict[str, Any]) -> dict[str, Any]:
     if source["kind"] == "csv":
         report = query_schema_compatibility(_warehouse_path())
@@ -392,6 +465,8 @@ def _query_compatibility_for_source(source: dict[str, Any]) -> dict[str, Any]:
             "error": "CSV 单表入库默认仅用于数据服务/治理，不能启用为 NL2SQL 分析库",
         })
         return report
+    if source["kind"] in {"postgresql", "mysql"}:
+        return inspect_external_schema(source.get("_dsn") or "", source["kind"])
     try:
         return query_schema_compatibility(_resolve_external_path(source["location"]))
     except DataPlatformError as exc:
@@ -418,6 +493,7 @@ def _source_row(row: sqlite3.Row) -> dict[str, Any]:
         "checksum": row["checksum"],
         "error": row["error"],
         "active_for_query": bool(row["active_for_query"]),
+        "dsn_configured": bool(row["dsn"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -426,17 +502,23 @@ def _source_row(row: sqlite3.Row) -> dict[str, Any]:
 def register_data_source(
     *, workspace_id: str, name: str, kind: str, location: str, sync_mode: str = "snapshot",
     sensitivity: str = "internal", schedule_minutes: int = 0, actor: str = "local", role: str = "admin",
+    dsn: str = "",
 ) -> dict[str, Any]:
     ensure_data_platform()
     _require_role(role, "admin")
     kind = kind.lower().strip()
-    if kind not in {"sqlite", "csv"}:
-        raise DataPlatformError("仅支持 sqlite 或 csv 数据源")
+    if kind not in {"sqlite", "csv", "postgresql", "mysql"}:
+        raise DataPlatformError("仅支持 sqlite、csv、postgresql 或 mysql 数据源")
     if sync_mode not in {"snapshot", "ingest"}:
         raise DataPlatformError("同步模式仅支持 snapshot 或 ingest")
     if schedule_minutes < 0 or schedule_minutes > 10080:
         raise DataPlatformError("调度周期需在 0–10080 分钟之间")
-    _resolve_external_path(location)
+    if kind in {"sqlite", "csv"}:
+        _resolve_external_path(location)
+    elif not dsn.strip():
+        raise DataPlatformError("PostgreSQL/MySQL 数据源必须提供只读 DSN")
+    else:
+        location = location.strip() or kind
     workspace_id = workspace_id or DEFAULT_WORKSPACE
     with _connect() as conn:
         if not conn.execute("SELECT 1 FROM platform_workspaces WHERE id = ?", (workspace_id,)).fetchone():
@@ -444,10 +526,18 @@ def register_data_source(
         source_id = "ds_" + uuid.uuid4().hex[:10]
         now = _now()
         conn.execute(
-            "INSERT INTO data_sources(id, workspace_id, name, kind, location, sync_mode, sensitivity, schedule_minutes, status, next_sync_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (source_id, workspace_id, name.strip()[:80] or "未命名数据源", kind, location.strip(), sync_mode, sensitivity, schedule_minutes, "registered", _iso(now + timedelta(minutes=schedule_minutes)) if schedule_minutes else None, _iso(now), _iso(now)),
+            "INSERT INTO data_sources(id, workspace_id, name, kind, location, sync_mode, sensitivity, schedule_minutes, status, next_sync_at, dsn, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (source_id, workspace_id, name.strip()[:80] or "未命名数据源", kind, location.strip(), sync_mode, sensitivity, schedule_minutes, "registered", _iso(now + timedelta(minutes=schedule_minutes)) if schedule_minutes else None, dsn.strip(), _iso(now), _iso(now)),
         )
-    audit(workspace_id, actor, role, "source.register", "data_source", source_id, {"kind": kind, "location": location})
+    audit(
+        workspace_id,
+        actor,
+        role,
+        "source.register",
+        "data_source",
+        source_id,
+        {"kind": kind, "location": location, "dsn_configured": bool(dsn.strip())},
+    )
     return get_data_source(source_id)
 
 
@@ -464,10 +554,14 @@ def list_data_sources(workspace_id: str = DEFAULT_WORKSPACE) -> list[dict[str, A
     ensure_data_platform()
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM data_sources WHERE workspace_id = ? ORDER BY created_at", (workspace_id,)).fetchall()
-    sources = [_source_row(row) for row in rows]
-    for source in sources:
+    sources = []
+    for row in rows:
+        source = _source_row(row)
         if source["status"] == "ready":
-            source["query_compatibility"] = _query_compatibility_for_source(source)
+            full_source = dict(source)
+            full_source["_dsn"] = str(row["dsn"] or "")
+            source["query_compatibility"] = _query_compatibility_for_source(full_source)
+        sources.append(source)
     return sources
 
 
@@ -538,12 +632,23 @@ def _sync_source(source_id: str, actor: str = "local", role: str = "admin") -> d
         target = _warehouse_path()
         if source["kind"] == "sqlite":
             src_path = _resolve_external_path(source["location"])
-            if source["location"].endswith("demo.db"):
-                tables, quality = _inspect_sqlite(src_path, source["name"])
-                checksum = "demo"
-            else:
-                tables, quality = _inspect_sqlite(src_path, source["name"])
-                checksum = f"{src_path.stat().st_size}:{src_path.stat().st_mtime_ns}"
+            tables, quality = _inspect_sqlite(src_path, source["name"])
+            checksum = (
+                "demo"
+                if source["location"].endswith("demo.db")
+                else f"{src_path.stat().st_size}:{src_path.stat().st_mtime_ns}"
+            )
+        elif source["kind"] in {"postgresql", "mysql"}:
+            # External databases are registered and activated behind a
+            # read-only DSN; this lightweight control plane does not pull their
+            # full catalog into the local SQLite metadata store yet.
+            tables = []
+            quality = {
+                "checks": [{"name": "external_dsn_configured", "passed": True, "value": 1}],
+                "passed": 1,
+                "failed": 0,
+            }
+            checksum = f"{source['kind']}:dsn"
         else:
             info = _copy_csv_to_warehouse(source, target)
             tables = [{"name": info["table"], "row_count": info["rows"], "columns": [{"name": c, "type": "TEXT", "not_null": False, "primary_key": False, "null_count": 0} for c in info["columns"]]}]
@@ -596,12 +701,23 @@ def activate_query_source(
     if source["kind"] == "csv":
         raise DataPlatformError(
             "CSV 数据源默认仅用于数据服务/治理，不能启用为 NL2SQL 分析库；"
-            "请接入包含固定五表契约的 SQLite 数据源。"
+            "请接入包含固定五表契约的 SQLite 或显式配置的 PostgreSQL/MySQL。"
         )
-    path = _resolve_external_path(source["location"])
-    compatibility = query_schema_compatibility(path)
-    if not compatibility["compatible"]:
-        raise DataPlatformError(_compatibility_error(compatibility))
+    if source["kind"] in {"postgresql", "mysql"}:
+        full_source = _source_with_secret(source_id)
+        compatibility = inspect_external_schema(
+            full_source.get("_dsn") or "",
+            source["kind"],
+        )
+        if not compatibility["compatible"]:
+            raise DataPlatformError(_compatibility_error(compatibility))
+        database_name = source["kind"]
+    else:
+        path = _resolve_external_path(source["location"])
+        compatibility = query_schema_compatibility(path)
+        if not compatibility["compatible"]:
+            raise DataPlatformError(_compatibility_error(compatibility))
+        database_name = path.name
     with _connect() as conn:
         conn.execute(
             "UPDATE data_sources SET active_for_query=0, updated_at=? WHERE workspace_id=?",
@@ -618,14 +734,38 @@ def activate_query_source(
         "source.activate",
         "data_source",
         source_id,
-        {"database": path.name},
+        {"database": database_name},
     )
     return {
         "source": get_data_source(source_id),
-        "database": path.name,
+        "database": database_name,
         "read_only": True,
         "compatibility": compatibility,
     }
+
+
+def query_target_for_source(source: dict[str, Any]) -> QueryTarget:
+    if source["kind"] == "sqlite":
+        return QueryTarget(
+            "sqlite",
+            "sqlite",
+            path=_resolve_external_path(source["location"]),
+        )
+    if source["kind"] == "postgresql":
+        return QueryTarget("postgresql", "postgres", dsn=source.get("_dsn") or "")
+    if source["kind"] == "mysql":
+        return QueryTarget("mysql", "mysql", dsn=source.get("_dsn") or "")
+    raise DataPlatformError("CSV 单表来源不能作为 NL2SQL 查询目标")
+
+
+def _source_with_secret(source_id: str) -> dict[str, Any]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM data_sources WHERE id=?", (source_id,)).fetchone()
+    if row is None:
+        raise DataSourceNotFound("数据源不存在")
+    value = _source_row(row)
+    value["_dsn"] = str(row["dsn"] or "")
+    return value
 
 
 def active_query_database(workspace_id: str = DEFAULT_WORKSPACE) -> dict[str, Any]:
@@ -644,20 +784,19 @@ def active_query_database(workspace_id: str = DEFAULT_WORKSPACE) -> dict[str, An
             "workspace_id": workspace_id,
             "database": path.name,
             "path": path,
+            "target": QueryTarget("sqlite", "sqlite", path=path),
             "read_only": True,
             "fallback": True,
         }
     source = _source_row(row)
-    path = (
-        _warehouse_path()
-        if source["kind"] == "csv"
-        else _resolve_external_path(source["location"])
-    )
+    source["_dsn"] = str(row["dsn"] or "")
+    target = query_target_for_source(source)
     return {
         "source_id": source["id"],
         "workspace_id": source["workspace_id"],
-        "database": path.name,
-        "path": path,
+        "database": target.path.name if target.path else source["kind"],
+        "path": target.path,
+        "target": target,
         "read_only": True,
         "fallback": False,
     }

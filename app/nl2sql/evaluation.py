@@ -19,6 +19,23 @@ MODEL_MODE = "model"
 SUITE_VERSION = "strict-model-v3-100"
 # Evaluation runs the strict model path and never invokes rule SQL fallback.
 MODEL_SQL_MODES = {"llm", "llm-repair"}
+
+
+def _run_rule_query(question: str, *, context: dict[str, Any] | None = None) -> Any:
+    """Run the deterministic rule path even if a model is configured."""
+    # Resolve the entry point at call time so callers and tests can consistently
+    # patch the workflow boundary without bypassing the forced-rule contract.
+    from app.nl2sql.workflow import run_query as workflow_run_query
+
+    return workflow_run_query(
+        question,
+        context=context,
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+
+
 JAN = "o.order_date BETWEEN '2026-01-01' AND '2026-01-31'"
 FEB = "o.order_date BETWEEN '2026-02-01' AND '2026-02-28'"
 LAST30 = "o.order_date BETWEEN '2026-01-30' AND '2026-02-28'"
@@ -429,7 +446,7 @@ def run_scope_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None
     results = []
     for case in SCOPE_CASES:
         started = time.perf_counter()
-        result = run_query(case["question"], narrate=False)
+        result = _run_rule_query(case["question"])
         passed = (
             result.outcome == case["outcome"]
             and result.plan.reason_code == case["reason_code"]
@@ -598,6 +615,7 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
             "setup_question": setup["question"] if setup else None,
             "question": case["question"],
             "intent": case["intent"],
+            "expected_metric": case.get("metric", ""),
             "executed": executed,
             "hit": hit,
             "model_used": model_used,
@@ -680,6 +698,7 @@ def run_evaluation(
                     "setup_question": next((item["question"] for item in selected_cases if item["id"] == case["setup"]), None),
                     "question": case["question"],
                     "intent": case["intent"],
+                    "expected_metric": case.get("metric", ""),
                     "executed": False,
                     "hit": False,
                     "model_used": False,
@@ -836,7 +855,7 @@ def run_rule_equivalence_evaluation(on_case: Callable[[dict[str, Any]], None] | 
         steps = [cases_by_id[case["setup"]], case] if case["setup"] else [case]
         try:
             for step in steps:
-                result = run_query(step["question"], context=context, narrate=False)
+                result = _run_rule_query(step["question"], context=context)
                 if result.outcome != "answered":
                     error = f"规则链路未回答：{result.outcome}/{result.plan.reason_code}"
                     break
@@ -881,8 +900,6 @@ def run_natural_language_evaluation(retriever=None) -> dict[str, Any]:
     from app.nl2sql.holdout import NATURAL_HOLDOUT_CASES
     from app.nl2sql.intent_guard import assess_question
     from app.nl2sql.retrieval import HybridSchemaRetriever
-    from app.nl2sql.workflow import run_query
-
     retriever = retriever or HybridSchemaRetriever()
     results = []
     for case in NATURAL_HOLDOUT_CASES:
@@ -890,7 +907,7 @@ def run_natural_language_evaluation(retriever=None) -> dict[str, Any]:
         expected = set(case["expected_tables"])
         expected_outcome = case.get("expected_outcome", "answered")
         decision = assess_question(case["question"])
-        result = run_query(case["question"], narrate=False)
+        result = _run_rule_query(case["question"])
         answered = expected_outcome == "answered"
         tables = (
             {hit.table for hit in retriever.search(case["question"], limit=4)}

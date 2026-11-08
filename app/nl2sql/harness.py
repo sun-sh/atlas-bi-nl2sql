@@ -40,11 +40,14 @@ def create_run_context(*, trace_id: str, timeout_seconds: float, max_repair_atte
     return RunContext(trace_id=trace_id, deadline_seconds=timeout_seconds, max_repair_attempts=max_repair_attempts, max_result_rows=max_result_rows, budget={"repairs": max_repair_attempts, "result_rows": max_result_rows})
 
 
-def validate_policy(sql: str, parsed=None) -> None:
-    """Reject query shapes that can exhaust the local SQLite worker."""
+def validate_policy(sql: str, parsed=None, *, dialect: str = "sqlite") -> None:
+    """Reject query shapes that can exhaust the bounded query worker."""
     import sqlglot
     from sqlglot import exp
-    statement = parsed or sqlglot.parse_one(sql, read="sqlite")
+    parse_dialect = {"postgresql": "postgres", "mysql": "mysql", "sqlite": "sqlite"}.get(
+        dialect, dialect
+    )
+    statement = parsed or sqlglot.parse_one(sql, read=parse_dialect)
     if any(cte.args.get("recursive") for cte in statement.find_all(exp.With)):
         raise HarnessPolicyError("递归 CTE 不在当前查询能力范围内")
     joins = list(statement.find_all(exp.Join))

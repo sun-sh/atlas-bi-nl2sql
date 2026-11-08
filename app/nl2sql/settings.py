@@ -32,6 +32,11 @@ class Settings:
     max_repair_attempts: int = int(os.getenv("MAX_REPAIR_ATTEMPTS", "2"))
     max_rows: int = int(os.getenv("MAX_RESULT_ROWS", "200"))
     query_timeout_seconds: float = float(os.getenv("QUERY_TIMEOUT_SECONDS", "5"))
+    model_call_timeout_seconds: float = float(os.getenv("MODEL_CALL_TIMEOUT_SECONDS", "30"))
+    model_max_concurrency: int = int(os.getenv("MODEL_MAX_CONCURRENCY", "4"))
+    model_admission_timeout_seconds: float = float(os.getenv("MODEL_ADMISSION_TIMEOUT_SECONDS", "5"))
+    model_sql_max_tokens: int = int(os.getenv("MODEL_SQL_MAX_TOKENS", "1800"))
+    model_sql_retry_max_tokens: int = int(os.getenv("MODEL_SQL_RETRY_MAX_TOKENS", "3600"))
     workspace_id: str = os.getenv("ATLAS_WORKSPACE_ID", "default")
     admin_api_token: str = os.getenv("ATLAS_ADMIN_API_TOKEN", "").strip()
 

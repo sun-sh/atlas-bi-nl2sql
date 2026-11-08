@@ -110,7 +110,7 @@ def test_stream_narrative_uses_model_delta_when_available(monkeypatch):
         'active': True,
         'model': 'fake-model',
     })())
-    monkeypatch.setattr('app.nl2sql.result_insight.make_client', lambda config: FakeClient())
+    monkeypatch.setattr('app.nl2sql.result_insight.make_client', lambda *_args, **_kwargs: FakeClient())
     plan = make_plan('各渠道销售额', [])
     digest = build_result_digest(
         '各渠道销售额',

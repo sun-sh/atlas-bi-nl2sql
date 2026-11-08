@@ -179,9 +179,11 @@ The LangGraph state carries the question, retrieval question, trace ID, timer, s
 
 ## Active query database
 
-The data platform stores source metadata and snapshots separately from the query path. `POST /api/data-platform/sources/{id}/activate` is an operator action: it accepts only a synced SQLite source that implements the fixed five-table schema contract, verifies the live file, and marks one source active per workspace. CSV sources are intentionally limited to governance and the read-only data service because a single imported table cannot satisfy the semantic layer.
+The data platform stores source metadata and snapshots separately from the query path. `POST /api/data-platform/sources/{id}/activate` is an operator action: it accepts a synced SQLite file or externally configured PostgreSQL/MySQL source that implements the fixed five-table schema contract, verifies the live file or DSN schema, and marks one source active per workspace. CSV sources are intentionally limited to governance and the read-only data service because a single imported table cannot satisfy the semantic layer.
 
-`/api/query`, `/api/query/stream` and `/api/overview` resolve the active database at request time and pass its read-only path through the LangGraph state. `/api/health` reports the resolved source ID, database filename and whether it is a fallback. This is a real source switch, not a display-only selector. It does not include a database adapter abstraction for MySQL/Postgres, connection pooling, per-tenant row filters or replicated failover.
+`/api/query`, `/api/query/stream` and `/api/overview` resolve the active query target at request time and pass a dialect-aware read-only target through the LangGraph state. `/api/health` reports the resolved source ID, database filename or external kind, dialect and fallback state. This is a real source switch, not a display-only selector.
+
+`app/nl2sql/sql_engine.py` separates SQL validation from execution adapters. SQLite executes through a read-only file connection; PostgreSQL and MySQL use optional DB-API drivers behind the same validator and bounded result contract. External targets are registered with an explicit read-only DSN and must pass a five-table schema inspection before activation. The project still does not provide connection pooling, per-tenant row filters, replicated failover or automatic external catalog synchronization.
 
 ## Operational controls and metrics
 
@@ -211,6 +213,6 @@ All operator mutations on data-platform, evaluation and model-probe routes pass 
 
 - Add a table by updating the schema catalog, seed fixture and strict regression cases.
 - Add a model provider through an OpenAI-compatible endpoint; orchestration remains unchanged.
-- Add a database adapter behind the execution boundary while retaining the AST validator contract.
+- Add a production database adapter/pool behind the execution boundary while retaining the AST validator contract; the current opt-in DB-API adapters do not include pooling or tenant filters.
 - Add authorization context to the schema catalog and validator before connecting multiple tenants.
 - Export trace and attempt records to an observability backend without changing the response model.

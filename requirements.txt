@@ -9,3 +9,8 @@ elasticsearch>=8.15,<10
 fastembed>=0.5,<1
 sqlglot>=26,<30
 openai>=1.60
+# Optional external query adapters: install the matching driver only when
+# activating a PostgreSQL or MySQL source. They are intentionally optional so
+# the default SQLite demo remains lightweight.
+# psycopg[binary]>=3.2,<4
+# pymysql>=1.1,<2

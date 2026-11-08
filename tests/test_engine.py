@@ -162,7 +162,7 @@ def test_rule_roi_aggregates_spend_and_revenue_before_join():
 def test_repair_node_passes_error_and_original_sql_to_llm(monkeypatch):
     captured = {}
 
-    def fake_repair(question, plan, hits, previous_sql, error):
+    def fake_repair(question, plan, hits, previous_sql, error, **kwargs):
         captured.update(
             question=question,
             previous_sql=previous_sql,
@@ -217,7 +217,7 @@ def test_every_rule_query_compiles_and_passes_validator():
 
 
 def test_model_failure_is_visible_when_falling_back_to_rules(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: None)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: None)
     monkeypatch.setattr("app.nl2sql.generator.LAST_LLM_ERROR", "模拟网络失败")
     result = run_query("各渠道销售额")
     assert result.mode == "rule"
@@ -225,7 +225,7 @@ def test_model_failure_is_visible_when_falling_back_to_rules(monkeypatch):
 
 
 def test_strict_model_query_never_calls_rule_fallback(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: None)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: None)
     monkeypatch.setattr("app.nl2sql.generator.LAST_LLM_ERROR", "模拟空返回")
 
     def forbidden_rule(*args):
@@ -242,10 +242,10 @@ def test_strict_model_query_never_calls_rule_fallback(monkeypatch):
 
 
 def test_empty_model_sql_gets_one_strict_model_retry(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: None)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         "app.nl2sql.workflow.generate_llm_repair_sql",
-        lambda *args: "SELECT COUNT(*) AS n FROM orders",
+        lambda *args, **kwargs: "SELECT COUNT(*) AS n FROM orders",
     )
     result = run_query("各渠道销售额", allow_rule_fallback=False)
     assert result.mode == "llm-repair"
@@ -256,8 +256,8 @@ def test_empty_model_sql_gets_one_strict_model_retry(monkeypatch):
 
 def test_model_retry_budget_includes_empty_generation(monkeypatch):
     calls = []
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: None)
-    def broken(*args):
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: None)
+    def broken(*args, **kwargs):
         calls.append(args)
         return "SELECT missing_column FROM orders"
     monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", broken)
@@ -269,9 +269,9 @@ def test_model_retry_budget_includes_empty_generation(monkeypatch):
 
 
 def test_all_null_aggregation_reenters_model_repair_without_broadening_filters(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: "SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = '支付'")
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: "SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = '支付'")
     captured = []
-    def repair(question, plan, hits, sql, error):
+    def repair(question, plan, hits, sql, error, **kwargs):
         captured.append((plan, error))
         return "SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = 'paid' AND order_date BETWEEN '2026-01-01' AND '2026-01-31' AND region = '华东'"
     monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", repair)
@@ -283,7 +283,7 @@ def test_all_null_aggregation_reenters_model_repair_without_broadening_filters(m
 
 
 def test_zero_value_is_valid_and_does_not_trigger_repair(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args: "SELECT COUNT(*) AS 订单数 FROM orders WHERE status = 'absent'")
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: "SELECT COUNT(*) AS 订单数 FROM orders WHERE status = 'absent'")
     def forbidden(*args):
         raise AssertionError("valid zero counts must not trigger repair")
     monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", forbidden)
@@ -359,3 +359,192 @@ def test_evaluation_rejects_digest_narrative_as_model_pass(monkeypatch):
     assert report["model_rate"] == 0.0
     assert all(case["narrative_mode"] == "digest" for case in report["cases"])
     assert all("确定性摘要" in case["error"] for case in report["cases"])
+
+def test_sql_validation_supports_postgres_and_mysql_dialects():
+    from app.nl2sql.sql_engine import validate_sql
+
+    postgres = validate_sql(
+        "SELECT o.channel AS channel, SUM(o.paid_amount) AS revenue "
+        "FROM orders o GROUP BY o.channel",
+        dialect="postgresql",
+    )
+    mysql = validate_sql(
+        "SELECT o.channel AS channel, SUM(o.paid_amount) AS revenue "
+        "FROM orders o GROUP BY o.channel",
+        dialect="mysql",
+    )
+    assert "orders" in postgres
+    assert "orders" in mysql
+    with pytest.raises(SQLValidationError):
+        validate_sql("SELECT customer_id FROM orders", dialect="postgresql")
+
+
+def test_unavailable_dbapi_driver_fails_clearly(monkeypatch):
+    from app.nl2sql import sql_engine
+
+    target = sql_engine.QueryTarget(
+        "postgresql", "postgres", dsn="postgresql://readonly@localhost/atlas"
+    )
+    adapter = sql_engine.adapter_for(target)
+    monkeypatch.setattr(sql_engine, "adapter_for", lambda _: adapter)
+    import builtins
+
+    real_import = builtins.__import__
+
+    def blocked(name, *args, **kwargs):
+        if name == "psycopg":
+            raise ImportError("not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked)
+    with pytest.raises(sql_engine.QueryAdapterError, match="psycopg"):
+        sql_engine.execute_sql(
+            "SELECT SUM(o.paid_amount) AS revenue FROM orders o",
+            target=target,
+        )
+
+
+def test_mysql_dbapi_adapter_parses_dsn_and_maps_bounded_rows(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from app.nl2sql import sql_engine
+
+    captured = {}
+
+    class Cursor:
+        description = (("channel",), ("revenue",))
+
+        def __init__(self):
+            self.sql = ""
+
+        def execute(self, sql):
+            self.sql = sql
+            captured["sql"] = sql
+
+        def fetchmany(self, size):
+            captured["fetch_size"] = size
+            return [("App", 12.5), ("Web", 8.0), ("Douyin", 7.0)]
+
+        def close(self):
+            pass
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            captured["closed"] = True
+
+    def connect(**kwargs):
+        captured["connect"] = kwargs
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "pymysql", SimpleNamespace(connect=connect))
+    target = sql_engine.QueryTarget(
+        "mysql",
+        "mysql",
+        dsn="mysql://reader:p%40ss@db.internal:3307/commerce",
+    )
+    result = sql_engine.execute_sql(
+        "SELECT o.channel AS channel, SUM(o.paid_amount) AS revenue "
+        "FROM orders o GROUP BY o.channel",
+        limit=2,
+        target=target,
+    )
+    assert captured["connect"]["host"] == "db.internal"
+    assert captured["connect"]["port"] == 3307
+    assert captured["connect"]["user"] == "reader"
+    assert captured["connect"]["password"] == "p@ss"
+    assert captured["connect"]["database"] == "commerce"
+    assert captured["fetch_size"] == 3
+    assert result["columns"] == ["channel", "revenue"]
+    assert result["rows"] == [{"channel": "App", "revenue": 12.5}, {"channel": "Web", "revenue": 8.0}]
+    assert result["row_count"] == 2
+    assert result["truncated"] is True
+    assert captured["closed"] is True
+
+
+def test_postgres_dbapi_adapter_maps_rows_and_always_closes(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from app.nl2sql import sql_engine
+
+    captured = {}
+
+    class Cursor:
+        description = (("category",), ("refund_rate",))
+
+        def execute(self, sql):
+            captured["sql"] = sql
+
+        def fetchmany(self, size):
+            captured["fetch_size"] = size
+            return [("数码", 3.25)]
+
+        def close(self):
+            captured["cursor_closed"] = True
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            captured["connection_closed"] = True
+
+    def connect(dsn, autocommit):
+        captured["dsn"] = dsn
+        captured["autocommit"] = autocommit
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=connect))
+    target = sql_engine.QueryTarget("postgresql", "postgres", dsn="postgresql://reader@db/atlas")
+    result = sql_engine.execute_sql(
+        "SELECT o.category AS category, AVG(o.paid_amount) AS refund_rate "
+        "FROM orders o GROUP BY o.category",
+        target=target,
+    )
+    assert captured["dsn"] == "postgresql://reader@db/atlas"
+    assert captured["autocommit"] is True
+    assert captured["cursor_closed"] is True
+    assert captured["connection_closed"] is True
+    assert result["rows"] == [{"category": "数码", "refund_rate": 3.25}]
+    assert result["truncated"] is False
+
+
+def test_dbapi_connection_error_redacts_dsn_password(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from app.nl2sql import sql_engine
+
+    dsn = "postgresql://reader:top-secret@db.internal/atlas"
+
+    def fail(dsn_value, autocommit):
+        raise RuntimeError(f"could not connect using {dsn_value}; password=top-secret")
+
+    monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=fail))
+    target = sql_engine.QueryTarget("postgresql", "postgres", dsn=dsn)
+    with pytest.raises(sql_engine.QueryAdapterError) as error:
+        sql_engine.execute_sql(
+            "SELECT SUM(o.paid_amount) AS revenue FROM orders o",
+            target=target,
+        )
+    message = str(error.value)
+    assert "top-secret" not in message
+    assert "[REDACTED]" in message
+
+
+def test_force_rule_never_calls_a_configured_model(monkeypatch):
+    from app.nl2sql import workflow
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("force_rule must not invoke the model")
+
+    monkeypatch.setattr(workflow, "generate_llm_sql", forbidden)
+    monkeypatch.setattr(workflow, "generate_llm_repair_sql", forbidden)
+    result = workflow.run_query("各渠道销售额", narrate=False, force_rule=True)
+    assert result.mode == "rule"
+    assert result.attempts[-1]["status"] == "success"
+    assert result.rows

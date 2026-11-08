@@ -151,3 +151,132 @@ def test_data_service_hides_restricted_columns_and_unknown_tables():
     assert all('customer_id' not in row for row in result['rows'])
     with pytest.raises(data_platform.DataPlatformError, match='数据服务表不存在'):
         data_platform.data_service_query('default', 'ds_commerce', 'missing_table')
+
+
+def test_external_database_source_requires_readonly_dsn_and_never_exposes_it():
+    data_platform.ensure_data_platform()
+    with pytest.raises(data_platform.DataPlatformError, match='只读 DSN'):
+        data_platform.register_data_source(
+            workspace_id='default',
+            name='外部订单库',
+            kind='postgresql',
+            location='',
+        )
+    source = data_platform.register_data_source(
+        workspace_id='default',
+        name='外部订单库',
+        kind='postgresql',
+        location='',
+        dsn='postgresql://readonly:secret@db.internal/atlas',
+    )
+    assert source['dsn_configured'] is True
+    assert 'secret' not in str({k: v for k, v in source.items() if k != '_dsn'})
+    synced = data_platform.sync_data_source(source['id'])
+    assert synced['tables'] == []
+    compatibility = data_platform.inspect_external_schema(source['_dsn'] if '_dsn' in source else '', 'postgresql')
+    assert compatibility['compatible'] is False
+    with pytest.raises(data_platform.DataPlatformError, match='驱动未安装'):
+        data_platform.activate_query_source(source['id'])
+
+
+def test_ready_external_source_never_leaks_dsn_in_public_or_overview_payloads(monkeypatch):
+    from types import SimpleNamespace
+
+    source = data_platform.register_data_source(
+        workspace_id='default',
+        name='外部订单库',
+        kind='postgresql',
+        location='',
+        dsn='postgresql://readonly:p%40ssword@db.internal/atlas',
+    )
+    # Force readiness without contacting a real database, then prove that the
+    # public list and overview payloads omit both the private key and secret.
+    with data_platform._connect() as conn:
+        conn.execute("UPDATE data_sources SET status='ready' WHERE id=?", (source['id'],))
+    monkeypatch.setattr(
+        data_platform,
+        'inspect_external_schema',
+        lambda dsn, kind: {'compatible': True, 'missing_tables': [], 'missing_columns': {}},
+    )
+    listed = data_platform.list_data_sources()
+    external = next(item for item in listed if item['id'] == source['id'])
+    assert '_dsn' not in external
+    assert 'p@ssword' not in str(external)
+    overview = data_platform.platform_overview()
+    assert 'p@ssword' not in str(overview)
+    assert '_dsn' not in str(overview)
+
+
+def test_dbapi_compat_probe_keeps_secret_out_of_returned_source(monkeypatch):
+    source = data_platform.register_data_source(
+        workspace_id='default',
+        name='MySQL 订单库',
+        kind='mysql',
+        location='',
+        dsn='mysql://reader:secret@db.internal/commerce',
+    )
+    with data_platform._connect() as conn:
+        conn.execute("UPDATE data_sources SET status='ready' WHERE id=?", (source['id'],))
+    captured = {}
+
+    def inspect(dsn, kind):
+        captured['dsn'] = dsn
+        captured['kind'] = kind
+        return {'compatible': True, 'missing_tables': [], 'missing_columns': {}}
+
+    monkeypatch.setattr(data_platform, 'inspect_external_schema', inspect)
+    external = next(item for item in data_platform.list_data_sources() if item['id'] == source['id'])
+    assert captured == {
+        'dsn': 'mysql://reader:secret@db.internal/commerce',
+        'kind': 'mysql',
+    }
+    assert '_dsn' not in external
+    assert 'secret' not in str(external)
+
+
+def test_external_schema_inspection_accepts_contract_and_reports_missing_columns(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    class Cursor:
+        def __init__(self, external):
+            self.external = external
+            self.rows = []
+
+        def execute(self, sql, params=None):
+            table = params[0] if params else ""
+            columns = self.external.get(table)
+            self.rows = [] if columns is None else [(column,) for column in columns]
+
+        def fetchall(self):
+            return self.rows
+
+        def close(self):
+            pass
+
+    class Connection:
+        def __init__(self, external):
+            self.external = external
+
+        def cursor(self):
+            return Cursor(self.external)
+
+        def close(self):
+            pass
+
+    complete = {
+        "orders": ("order_id", "order_date", "status", "channel", "region", "city", "category", "product_id", "quantity", "paid_amount", "discount_amount", "customer_id"),
+        "order_items": ("order_id", "line_no", "product_id", "product_name", "category", "quantity", "unit_price", "cost_price"),
+        "refunds": ("refund_id", "order_id", "request_date", "refund_amount", "reason", "status"),
+        "marketing_spend": ("spend_date", "channel", "campaign", "spend", "impressions", "clicks", "attributed_orders"),
+        "customers": ("customer_id", "register_date", "member_level", "city", "first_channel"),
+    }
+    monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=lambda dsn, autocommit=True: Connection(complete)))
+    report = data_platform.inspect_external_schema("postgresql://readonly@db/atlas", "postgresql")
+    assert report["compatible"] is True
+    incomplete = dict(complete)
+    incomplete["orders"] = tuple(column for column in complete["orders"] if column != "paid_amount")
+    monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=lambda dsn, autocommit=True: Connection(incomplete)))
+    report = data_platform.inspect_external_schema("postgresql://readonly@db/atlas", "postgresql")
+    assert report["compatible"] is False
+    assert report["missing_columns"]["orders"] == ["paid_amount"]

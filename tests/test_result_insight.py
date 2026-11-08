@@ -26,7 +26,7 @@ def _mock_narrator(monkeypatch, responses):
 
     config = SimpleNamespace(enabled=True, active=True, model="test-model", provider="custom")
     monkeypatch.setattr(insight, "get_model_config", lambda: config)
-    monkeypatch.setattr(insight, "make_client", lambda c: SimpleNamespace(
+    monkeypatch.setattr(insight, "make_client", lambda *_args, **_kwargs: SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
     return insight, calls
 
@@ -277,7 +277,7 @@ def test_rejected_candidate_is_preserved_in_warning(monkeypatch):
     monkeypatch.setattr(insight, "get_model_config", lambda: SimpleNamespace(
         enabled=True, active=True, model="test-model", provider="custom",
     ))
-    monkeypatch.setattr(insight, "make_client", lambda _: SimpleNamespace(
+    monkeypatch.setattr(insight, "make_client", lambda *_args, **_kwargs: SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
     ))
     digest = {
@@ -306,7 +306,7 @@ def test_rejected_candidate_is_preserved_in_warning(monkeypatch):
             )
         return chunks()
 
-    monkeypatch.setattr(insight, "make_client", lambda _: SimpleNamespace(
+    monkeypatch.setattr(insight, "make_client", lambda *_args, **_kwargs: SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create_wrong_top))
     ))
     events = list(insight.stream_result_narrative("各渠道销售额", SimpleNamespace(), digest))

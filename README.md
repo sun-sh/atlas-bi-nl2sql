@@ -24,7 +24,7 @@ Atlas BI 是一个电商经营分析问答项目，业务数据覆盖订单、�
 | 分析什么 | 销售额、品类、退款率、ROI、客单价、趋势和渠道结构 |
 | 一次查询会经过 | 可答性判定 → 双路 Schema 召回 → 意图规划 → 模型生成 SQL → AST 门禁 → 只读执行 → 有限修复 → 解读事实校验 |
 | 怎么用 | Web 工作台、FastAPI 查询接口、只读数据服务、OpenAPI 和 OpenAI 兼容模型接口 |
-| 数据侧 | SQLite/CSV 接入、快照、资产目录、质量规则、指标口径、字段血缘和审计；兼容 SQLite 可切换为当前分析库 |
+| 数据侧 | SQLite/CSV 接入、快照、资产目录、质量规则、指标口径、字段血缘和审计；兼容 SQLite 或显式配置的 PostgreSQL/MySQL 可切换为当前分析库 |
 | 评测侧 | SQL 结果等价验收、解读事实校验、范围/自然语言/检索消融、数据集版本、实验、队列、取消重试和失败回流 |
 | 会话 | 最多 20 轮、7 天过期；新问题里的条件优先，缺失的条件按需继承 |
 | 运行观测 | `/api/metrics` 进程内延迟摘要、可选 `X-Admin-Token` 运营门禁、本地 HTTP 压测脚本 |
@@ -120,7 +120,7 @@ flowchart TD
 | --- | --- |
 | 可答性判定 | 模糊问题先要求补充指标；因果问题只提供可查询的拆解方向；写操作、敏感字段和域外请求在生成 SQL 前拒绝；澄清和拒答不生成伪造查询计划 |
 | 解读事实校验 | 数字必须来自确定性摘要；非榜首不能写成最高；趋势方向不能与摘要相反；失败时回退确定性摘要 |
-| 数据源启用 | 同步后的五表兼容 SQLite 可切换为当前分析库；CSV 和结构不兼容来源只进入数据服务/治理，不冒充 NL2SQL 数据源 |
+| 数据源启用 | 同步且通过五表 Schema 校验的 SQLite/PostgreSQL/MySQL 可切换为当前分析库；CSV 和结构不兼容来源只进入数据服务/治理，不冒充 NL2SQL 数据源 |
 | 运行观测 | `/api/metrics` 暴露进程内请求数、错误数、P50/P95/Max；带管理令牌的运营接口与本地 HTTP 压测脚本可用于回归 |
 | 检索验证 | 12 条标注集比较纯词法、纯语义和已发布的 0.56/0.44 融合方案，同时报告 Top-1、MRR 和完整表召回 |
 | 语言变体验证 | 15 条独立自然语言问法逐条检查范围、意图、指标、表召回和真实执行行；8 条应回答，7 条应澄清 |
@@ -129,7 +129,7 @@ flowchart TD
 | SQL 安全 | sqlglot AST、单条 SELECT、表/函数白名单、拒绝 `SELECT *`、敏感字段拦截、只读连接和结果行数限制 |
 | 流式结果 | SSE 先推送查询结果、SQL、检索依据和确定性摘要，再流式生成模型结论；失败时用 `reset` 换成完整摘要 |
 | 数据中台 | SQLite/CSV 多源注册，支持快照和入库两种同步方式，另有资产目录、质量规则、指标口径、字段血缘、只读服务和审计 |
-| 评测中台 | 数据集版本、模型实验、优先级队列、取消与重试、1–3 个隔离进程、任务对比和失败用例回流 |
+| 评测中台 | 数据集版本、模型实验、优先级队列、取消与重试、1–3 个隔离进程、任务对比，以及失败用例审核后回流为回归集 |
 | 会话与追踪 | 20 轮 / 7 天短期上下文；每次查询保留计划、召回证据、SQL、尝试记录、告警和 `trace_id` |
 
 ## 接入模型
@@ -183,7 +183,7 @@ flowchart TD
 
 数据中台把项目里的 SQLite/CSV 数据接进来，记录数据结构、质量和来源：
 
-- 数据源注册，支持快照和入库两种同步方式，并在函数层区分查看者、分析师和管理员权限。
+- 数据源注册，支持 SQLite/CSV 快照与入库；PostgreSQL/MySQL 可通过显式只读 DSN 接入，并在激活前校验五表 Schema 契约。
 - 保存快照和资产目录；同步时按源表字段生成血缘，并维护 5 个指标口径和 6 条质量规则。
 - 提供到期同步入口、只读数据服务、操作审计和独立的数据资产巡检页。
 - 内置业务库有 `orders`、`order_items`、`refunds`、`marketing_spend` 和 `customers` 五张表，数据范围是 2025-10 到 2026-02。
@@ -266,7 +266,7 @@ curl -N -X POST http://127.0.0.1:8000/api/query/stream \
 | `GET/POST /api/data-platform/workspaces` | 工作区列表与创建 |
 | `GET/POST /api/data-platform/sources` | 数据源列表与注册 |
 | `POST /api/data-platform/sources/{id}/sync` | 执行快照或入库同步 |
-| `POST /api/data-platform/sources/{id}/activate` | 将兼容 SQLite 设为当前 NL2SQL 分析库 |
+| `POST /api/data-platform/sources/{id}/activate` | 将兼容 SQLite/PostgreSQL/MySQL 设为当前 NL2SQL 分析库 |
 | `GET/POST /api/data-platform/metrics` | 指标目录 |
 | `GET/POST /api/data-platform/quality-rules` | 质量规则 |
 | `POST /api/data-platform/sources/{id}/quality` | 执行质量巡检 |
@@ -274,7 +274,10 @@ curl -N -X POST http://127.0.0.1:8000/api/query/stream \
 | `POST /api/data-platform/scheduler/run` | 手动执行到期同步 |
 | `GET/POST /api/evaluation/datasets` | 评测数据集版本 |
 | `GET/POST /api/evaluation/experiments` | 评测实验 |
-| `GET/POST /api/evaluation/feedback` | 失败用例回流 |
+| `GET/POST /api/evaluation/feedback` | 失败用例反馈 |
+| `POST /api/evaluation/tasks/{id}/regression-candidates` | 从失败报告生成待审核回归候选 |
+| `GET /api/evaluation/regression-candidates` | 查看待审或已批准的回归候选 |
+| `POST /api/evaluation/regression-candidates/approve` | 审核候选并生成数据集版本 |
 | `GET/POST /api/evaluation/tasks` | 查看或提交评测任务 |
 | `GET /api/evaluation/tasks/{id}` | 任务进度与报告 |
 | `POST /api/evaluation/tasks/{id}/cancel` | 取消任务 |
@@ -299,7 +302,7 @@ python -m app.evaluation.run --suite rules --min-hit-rate 100
 node --check app/static/app.js
 ```
 
-`pytest` 会关闭在线模型和 BGE 下载，用本地数据和受控的模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **156 项测试全部通过**。测试包含 4 条 Playwright 浏览器端到端用例。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行测试和确定性质量门禁，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
+`pytest` 会关闭在线模型和 BGE 下载，用本地数据和受控的模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **169 项测试全部通过**。测试包含 4 条 Playwright 浏览器端到端用例。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行测试和确定性质量门禁，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
 
 ## 本地运行
 
@@ -343,6 +346,11 @@ Windows 可以直接运行 `run.ps1`，macOS / Linux 用 `./run.sh`。
 | `MAX_REPAIR_ATTEMPTS` | `2` | SQL 修复上限 |
 | `MAX_RESULT_ROWS` | `200` | 结果返回上限 |
 | `QUERY_TIMEOUT_SECONDS` | `5` | SQLite 查询执行时间上限 |
+| `MODEL_CALL_TIMEOUT_SECONDS` | `30` | 单次模型 HTTP 调用上限 |
+| `MODEL_MAX_CONCURRENCY` | `4` | 单进程模型并发上限 |
+| `MODEL_ADMISSION_TIMEOUT_SECONDS` | `5` | 模型并发排队超过该时间即拒绝 |
+| `MODEL_SQL_MAX_TOKENS` | `1800` | 首次 SQL 生成和解读 token 预算 |
+| `MODEL_SQL_RETRY_MAX_TOKENS` | `3600` | 模型重试时的 token 预算 |
 | `ATLAS_SESSION_DB_PATH` | `data/sessions.db` | 短期会话存储路径 |
 | `ATLAS_EVALUATION_DB_PATH` | `data/evaluation_tasks.db` | 评测任务、数据集、实验和失败用例存储路径 |
 | `ATLAS_DATA_PLATFORM_DB_PATH` | `data/data_platform.db` | 数据中台元数据与审计存储路径 |
@@ -374,7 +382,7 @@ tests/              # 自动化测试
 - 当前使用固定电商数据和固定业务口径，换成其他业务需要补 Schema、业务规则和评测用例。
 - 可答性判定以规则为主，覆盖常见澄清、写操作、敏感字段和域外请求；它会减少硬答，但不能替代完整的权限系统和人工复核。
 - 数据中台是单工作区、本地管理员，只有函数级角色检查；`X-Admin-Token` 只是可选的共享部署门禁，没有 SSO、多租户隔离、用户级授权和生产数据集群。
-- CSV 单表入库不能切换成 NL2SQL 分析库；只有包含固定五表契约的 SQLite 才能被启用为查询数据源。
+- CSV 单表入库不能切换成 NL2SQL 分析库；SQLite 和显式配置的 PostgreSQL/MySQL 才能被启用为查询数据源。外部库适配器暂不含连接池、租户行级过滤和自动资产目录同步；DSN 以明文保存在本地元数据中，公开接口不返回，但部署时仍需文件权限和密钥管理。
 - `/api/metrics` 是单进程内存窗口，进程重启即清零，也不包含网关、数据库连接池或模型供应商侧指标；HTTP 压测关闭模型，不能当作 LLM 容量结论。
 - 评测中台使用 SQLite 队列和单执行槽，没有跨组织标注、分布式后台进程或线上流量评测。
 

@@ -282,6 +282,30 @@ def test_data_platform_control_plane_endpoints(monkeypatch, tmp_path):
     assert synced.json()['row_count'] > 0
 
 
+def test_data_platform_api_never_returns_external_dsn(monkeypatch, tmp_path):
+    monkeypatch.setenv('ATLAS_DATA_PLATFORM_DB_PATH', str(tmp_path / 'platform.db'))
+    monkeypatch.setenv('ATLAS_PLATFORM_WAREHOUSE_DB_PATH', str(tmp_path / 'warehouse.db'))
+    created = client.post(
+        '/api/data-platform/sources',
+        json={
+            'workspace_id': 'default',
+            'name': '外部 PostgreSQL',
+            'kind': 'postgresql',
+            'location': '',
+            'dsn': 'postgresql://reader:super-secret@db.internal/atlas',
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body['dsn_configured'] is True
+    assert 'super-secret' not in str(body)
+    sources = client.get('/api/data-platform/sources').json()
+    overview = client.get('/api/data-platform').json()
+    for payload in (sources, overview):
+        assert 'super-secret' not in str(payload)
+        assert '_dsn' not in str(payload)
+
+
 def test_evaluation_platform_registry_endpoints(monkeypatch, tmp_path):
     monkeypatch.setenv('ATLAS_EVALUATION_DB_PATH', str(tmp_path / 'evaluation_tasks.db'))
     datasets = client.get('/api/evaluation/datasets')
@@ -402,6 +426,7 @@ def test_optional_admin_token_protects_write_routes(monkeypatch):
         ("post", "/api/evaluation/datasets", {"name": "令牌测试集", "version": "v1", "case_ids": ["sales-east"]}),
         ("post", "/api/evaluation/experiments", {"name": "令牌实验", "dataset_id": "dataset_v3_100"}),
         ("post", "/api/evaluation/feedback", {"task_id": "missing", "case_id": "missing", "category": "other"}),
+        ("post", "/api/evaluation/regression-candidates/approve", {"candidate_ids": ["missing"], "name": "失败回流"}),
         ("post", "/api/evaluation/tasks/missing/cancel", None),
         ("post", "/api/evaluation/tasks/missing/retry", None),
         ("post", "/api/evaluation/queue/claim", None),
@@ -432,19 +457,21 @@ def test_activation_moves_query_to_selected_database(monkeypatch, tmp_path):
         "workspace_id": workspace_id,
         "database": "selected.db",
         "path": selected,
+        "target": __import__("app.nl2sql.sql_engine", fromlist=["QueryTarget"]).QueryTarget("sqlite", "sqlite", selected),
         "read_only": True,
         "fallback": False,
     })
     captured = {}
 
-    def fake_run(question, *, context=None, db_path=None, **kwargs):
+    def fake_run(question, *, context=None, db_path=None, query_target=None, **kwargs):
         captured["db_path"] = db_path
+        captured["query_target"] = query_target
         raise RuntimeError("stop after capture")
 
     monkeypatch.setattr(api_main, "run_query", fake_run)
     response = client.post("/api/query", json={"question": "上个月销售额是多少？"})
     assert response.status_code == 500
-    assert captured["db_path"].endswith("selected.db")
+    assert captured["query_target"].path.name == "selected.db"
 
 
 def test_runtime_metrics_endpoint_tracks_sync_and_stream_latency(monkeypatch, tmp_path):

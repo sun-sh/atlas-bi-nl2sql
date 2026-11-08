@@ -25,7 +25,7 @@ from app.nl2sql.result_insight import (
 )
 from app.nl2sql.retrieval import HybridSchemaRetriever
 from app.nl2sql.settings import get_settings
-from app.nl2sql.sql_engine import QueryCancelled, execute_sql, explain_error, validate_sql
+from app.nl2sql.sql_engine import QueryCancelled, QueryTarget, execute_sql, explain_error, validate_sql
 
 
 class GraphState(TypedDict, total=False):
@@ -44,10 +44,12 @@ class GraphState(TypedDict, total=False):
     context: dict[str, Any]
     narrate: bool
     allow_rule_fallback: bool
+    force_rule: bool
     narrative: NarrativeResult
     generation_retries: int
     decision: dict[str, Any]
     db_path: str
+    query_target: QueryTarget
     final: QueryResult
 
 
@@ -126,7 +128,14 @@ def generate_node(state: GraphState) -> GraphState:
         return {"sql": "", "mode": "unsupported", "warnings": [], "generation_retries": 0}
     _emit_stage("generate")
     plan = state["plan"]
-    sql = generate_llm_sql(state["question"], plan, state["hits"])
+    if state.get("force_rule", False):
+        sql = generate_rule_sql(state["question"], plan, state["hits"])
+        warnings = list(state.get("warnings", []))
+        warnings.append("评测使用强制规则路径，未调用模型。")
+        return {"sql": sql, "mode": "rule", "warnings": warnings, "generation_retries": 0}
+    target = state.get("query_target")
+    dialect = target.dialect if target else "sqlite"
+    sql = generate_llm_sql(state["question"], plan, state["hits"], dialect=dialect)
     mode = "llm"
     warnings = list(state.get("warnings", []))
     if not sql:
@@ -138,6 +147,7 @@ def generate_node(state: GraphState) -> GraphState:
             sql = generate_llm_repair_sql(
                 state["question"], plan, state["hits"], "",
                 f"首次SQL未产出：{reason}。重新生成完整SELECT，保留原查询口径。",
+                dialect=dialect,
             )
             warnings.append("首次 SQL 为空，已触发模型重试")
             if sql:
@@ -166,11 +176,13 @@ def execute_node(state: GraphState) -> GraphState:
     attempts = list(state.get("attempts", []))
     warnings = list(state.get("warnings", []))
     try:
-        safe_sql = validate_sql(sql)
+        target = state.get("query_target")
+        safe_sql = validate_sql(sql, dialect=target.dialect if target else "sqlite")
         result = execute_sql(
             safe_sql,
             cancel_trace_id=state.get("trace_id"),
             db_path=state.get("db_path"),
+            target=target,
         )
         if result["rows"] and all(
             value is None
@@ -211,12 +223,20 @@ def repair_node(state: GraphState) -> GraphState:
     question = state["question"]
     attempts = state.get("attempts", [])
     last_error = attempts[-1]["error"] if attempts else ""
+    if state.get("force_rule", False):
+        return {
+            "sql": generate_rule_sql(question, plan, state["hits"]),
+            "mode": "rule-repair",
+            "warnings": state.get("warnings", [])
+            + [f"第 {len(attempts)} 次执行失败：{last_error}", "修复来源：rule-repair"],
+        }
     repaired = generate_llm_repair_sql(
         question,
         plan,
         state["hits"],
         state.get("sql", ""),
         last_error,
+        dialect=(state.get("query_target").dialect if state.get("query_target") else "sqlite"),
     )
     warning = f"第 {len(attempts)} 次执行失败：{last_error}"
     if repaired:
@@ -394,8 +414,10 @@ def _initial_state(
     *,
     narrate: bool,
     allow_rule_fallback: bool,
+    force_rule: bool,
     trace_id: str | None = None,
     db_path: str | Path | None = None,
+    query_target: QueryTarget | None = None,
 ) -> GraphState:
     trace_id = trace_id or uuid.uuid4().hex[:12]
     return {
@@ -411,7 +433,9 @@ def _initial_state(
         ).as_dict(),
         "narrate": narrate,
         "allow_rule_fallback": allow_rule_fallback,
+        "force_rule": force_rule,
         "db_path": str(db_path) if db_path else "",
+        "query_target": query_target,
     }
 
 
@@ -421,8 +445,10 @@ def query_stream_events(
     *,
     narrate: bool = False,
     allow_rule_fallback: bool = True,
+    force_rule: bool = False,
     trace_id: str | None = None,
     db_path: str | Path | None = None,
+    query_target: QueryTarget | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield graph stage updates followed by the finalized QueryResult."""
     global _GRAPH
@@ -433,8 +459,10 @@ def query_stream_events(
         context,
         narrate=narrate,
         allow_rule_fallback=allow_rule_fallback,
+        force_rule=force_rule,
         trace_id=trace_id,
         db_path=db_path,
+        query_target=query_target,
     )
     state: GraphState = {}
     try:
@@ -469,8 +497,10 @@ def run_query(
     *,
     narrate: bool = True,
     allow_rule_fallback: bool = True,
+    force_rule: bool = False,
     trace_id: str | None = None,
     db_path: str | Path | None = None,
+    query_target: QueryTarget | None = None,
 ) -> QueryResult:
     global _GRAPH
     if _GRAPH is None:
@@ -480,8 +510,10 @@ def run_query(
         context,
         narrate=narrate,
         allow_rule_fallback=allow_rule_fallback,
+        force_rule=force_rule,
         trace_id=trace_id,
         db_path=db_path,
+        query_target=query_target,
     )
     state = _GRAPH.invoke(initial)
     return state["final"]

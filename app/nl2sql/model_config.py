@@ -180,12 +180,12 @@ def candidate_config(
     )
 
 
-def make_client(config: ModelConfig):
+def make_client(config: ModelConfig, *, timeout: float = 30):
     if not config.api_key:
         raise ModelConfigurationError("API key is required")
     from openai import OpenAI
 
-    return OpenAI(api_key=config.api_key, base_url=config.base_url, timeout=30)
+    return OpenAI(api_key=config.api_key, base_url=config.base_url, timeout=timeout)
 
 
 def available_models(config: ModelConfig) -> list[str]:

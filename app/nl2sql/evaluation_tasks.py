@@ -241,6 +241,23 @@ def init_task_store() -> None:
                 updated_at TEXT NOT NULL,
                 UNIQUE(task_id, case_id)
             );
+            CREATE TABLE IF NOT EXISTS regression_candidates (
+                id TEXT PRIMARY KEY,
+                source_task_id TEXT NOT NULL,
+                source_case_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                intent TEXT NOT NULL DEFAULT '',
+                expected_metric TEXT NOT NULL DEFAULT '',
+                failure_reason TEXT NOT NULL DEFAULT '',
+                error TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                dataset_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(source_task_id, source_case_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_regression_candidates_status
+                ON regression_candidates(status, created_at DESC);
             """
         )
         conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN dataset_id TEXT NOT NULL DEFAULT 'dataset_v3_100'") if not _has_column(conn, 'evaluation_tasks', 'dataset_id') else None
@@ -519,6 +536,14 @@ def add_feedback(*, task_id: str, case_id: str, category: str, note: str = "") -
     return dict(row)
 
 
+def _candidate_gold(case_id: str) -> dict[str, Any]:
+    from app.nl2sql.evaluation import CASES
+    from app.nl2sql.holdout import HOLDOUT_CASES
+
+    case = next((item for item in (*CASES, *HOLDOUT_CASES) if item["id"] == case_id), None)
+    return {"intent": case.get("intent", "") if case else "", "expected_metric": case.get("metric", "") if case else ""}
+
+
 def list_feedback(status: str | None = None) -> list[dict[str, Any]]:
     init_task_store()
     with _connect() as conn:
@@ -527,6 +552,142 @@ def list_feedback(status: str | None = None) -> list[dict[str, Any]]:
         else:
             rows=conn.execute("SELECT * FROM evaluation_feedback ORDER BY updated_at DESC").fetchall()
     return [dict(row) for row in rows]
+
+
+def ingest_failed_cases(task_id: str) -> list[dict[str, Any]]:
+    """Create reviewable regression candidates from failed cases in one report.
+
+    A failed model attempt is evidence, not automatically a golden answer. The
+    candidate keeps the original question and failure diagnostics and must be
+    approved before it enters a dataset.
+    """
+    task = get_evaluation_task(task_id)
+    if task is None:
+        raise ValueError("评测任务不存在")
+    report = task.get("report") or {}
+    candidates: list[dict[str, Any]] = []
+    now = _now_iso()
+    with _connect() as conn:
+        for case in report.get("cases") or []:
+            if not isinstance(case, dict) or case.get("hit"):
+                continue
+            source_case_id = str(case.get("id") or "")
+            question = str(case.get("question") or "").strip()
+            if not source_case_id or not question:
+                continue
+            candidate_id = "cand_" + uuid.uuid4().hex[:10]
+            conn.execute(
+                """
+                INSERT INTO regression_candidates(
+                    id, source_task_id, source_case_id, question, intent,
+                    expected_metric, failure_reason, error, status,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                ON CONFLICT(source_task_id, source_case_id) DO UPDATE SET
+                    question=excluded.question,
+                    intent=excluded.intent,
+                    expected_metric=excluded.expected_metric,
+                    failure_reason=excluded.failure_reason,
+                    error=excluded.error,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    candidate_id,
+                    task_id,
+                    source_case_id,
+                    question,
+                    str(case.get("intent") or ""),
+                    str(case.get("expected_metric") or ""),
+                    str(case.get("failure_reason") or "review_required"),
+                    str(case.get("error") or ""),
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM regression_candidates WHERE source_task_id=? AND source_case_id=?",
+                (task_id, source_case_id),
+            ).fetchone()
+            if row:
+                candidates.append(dict(row))
+    return candidates
+
+
+def list_regression_candidates(status: str | None = None) -> list[dict[str, Any]]:
+    init_task_store()
+    with _connect() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM regression_candidates WHERE status=? ORDER BY created_at DESC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM regression_candidates ORDER BY created_at DESC"
+            ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item.update(_candidate_gold(item["source_case_id"]))
+        result.append(item)
+    return result
+
+
+def approve_regression_candidates(
+    candidate_ids: list[str],
+    *,
+    name: str,
+    version: str = "v1",
+) -> dict[str, Any]:
+    """Approve candidates only when their source case can be tied to gold SQL."""
+    from app.nl2sql.evaluation import CASES
+    from app.nl2sql.holdout import HOLDOUT_CASES
+
+    case_map = {case["id"]: case for case in (*CASES, *HOLDOUT_CASES)}
+    ids = list(dict.fromkeys(candidate_ids))
+    if not ids:
+        raise ValueError("至少选择一个失败用例")
+    init_task_store()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM regression_candidates WHERE id IN (%s)" % ",".join("?" for _ in ids),
+            tuple(ids),
+        ).fetchall()
+    by_id = {row["id"]: row for row in rows}
+    missing = [candidate_id for candidate_id in ids if candidate_id not in by_id]
+    if missing:
+        raise ValueError("失败用例不存在：" + ", ".join(missing[:5]))
+    already_approved = [
+        candidate_id
+        for candidate_id in ids
+        if by_id[candidate_id]["status"] != "pending"
+    ]
+    if already_approved:
+        raise ValueError(
+            "仅待审核候选可批准：" + ", ".join(already_approved[:5])
+        )
+    known_case_ids = []
+    for candidate_id in ids:
+        row = by_id[candidate_id]
+        if row["source_case_id"] not in case_map:
+            raise ValueError(f"源用例没有可执行基准：{row['source_case_id']}")
+        known_case_ids.append(row["source_case_id"])
+    dataset = create_dataset(
+        name=name,
+        version=version,
+        case_ids=known_case_ids,
+        description="从失败评测回流的候选用例，经人工审核后进入回归集。",
+    )
+    now = _now_iso()
+    with _connect() as conn:
+        for candidate_id in ids:
+            conn.execute(
+                "UPDATE regression_candidates SET status='approved', dataset_id=?, updated_at=? WHERE id=?",
+                (dataset["id"], now, candidate_id),
+            )
+    dataset["approved_candidates"] = len(ids)
+    dataset["case_ids"] = known_case_ids
+    return dataset
 
 
 def _advance_task(task_id: str) -> None:

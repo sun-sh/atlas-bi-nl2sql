@@ -54,7 +54,7 @@ python -m app.evaluation.run --suite natural --min-hit-rate 100
 
 A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores. The pytest suite includes four Playwright browser cases against a real local FastAPI process; CI installs Chromium for that gate.
 
-`/api/metrics` includes a `model_calls` block with a process-wide concurrency cap, admission timeout, started/succeeded/failed/rejected counts, provider token usage and queue/call latency. These counters are in-memory and per process; aggregate them externally when running multiple workers.
+`/api/metrics` includes a `model_calls` block with a process-wide concurrency cap, admission timeout, started/succeeded/failed/rejected counts, provider token usage and queue/call latency. These counters are in-memory and per process; aggregate them externally when running multiple workers. The call timeout and SQL token budgets are configurable through `MODEL_CALL_TIMEOUT_SECONDS`, `MODEL_MAX_CONCURRENCY`, `MODEL_ADMISSION_TIMEOUT_SECONDS`, `MODEL_SQL_MAX_TOKENS` and `MODEL_SQL_RETRY_MAX_TOKENS`.
 
 SQL execution is bounded by `QUERY_TIMEOUT_SECONDS` (default 5 seconds) and `MAX_RESULT_ROWS`. Running queries can be cancelled with `POST /api/query/cancel/{trace_id}`; the browser stops its SSE reader and the server interrupts the SQLite progress handler. The harness also rejects recursive CTEs, CROSS JOIN, more than three JOINs and projection-level `*` in subqueries. Raise these limits only with a matching load test; do not silently widen them for one-off demos. Evaluation uses the configured model in strict mode: record `execution_rate`, `hit_rate` and `model_rate` as observed, and never treat rule fallback as a model pass. Model-dependent scores are a dated snapshot, not a deterministic CI gate.
 
@@ -81,7 +81,13 @@ Record the saved JSON and state the environment. The script covers HTTP plus det
 
 ## Active analysis source
 
-List sources at `GET /api/data-platform/sources`, sync one, then activate it with `POST /api/data-platform/sources/{id}/activate`. Activation requires a ready, schema-compatible SQLite source with the fixed five tables; CSV imports and incompatible databases are rejected. `/api/health` exposes the active source and fallback flag. If an activated source file disappears, query and overview return 503 rather than silently querying a different database.
+List sources at `GET /api/data-platform/sources`, sync one, then activate it with `POST /api/data-platform/sources/{id}/activate`. Activation requires a ready source with the fixed five-table schema contract; SQLite files and explicitly configured PostgreSQL/MySQL DSNs are supported. CSV imports and incompatible databases are rejected. `/api/health` exposes the active source, dialect and fallback flag. If an activated SQLite file disappears, query and overview return 503 rather than silently querying a different database.
+
+## External query databases
+
+SQLite remains the default and the only backend covered by the fixed demo overview and offline evaluation fixtures. PostgreSQL and MySQL can be registered with an explicit read-only DSN, are inspected against the five-table schema contract before activation, and execute through the shared SQL AST guard and bounded adapter. The drivers are optional: install `psycopg` for PostgreSQL or `pymysql` for MySQL before using those targets. External databases do not yet have connection pooling, per-tenant row filters, automatic asset-catalog synchronization, or application-enforced server-side statement timeouts; set database/role statement timeouts and connect through a read-only account as deployment requirements.
+
+The DSN is stored as plain text in the local metadata database (`data/data_platform.db` by default) and is not returned by public source/overview APIs. Protect that file, `.env`, backups and logs with filesystem permissions and a secrets manager appropriate for the deployment; the API redaction is not encryption at rest. The read-only guarantee is enforced by the database account and SELECT-only AST policy, not by the local demo's optional admin token.
 
 ## Deployment checks
 

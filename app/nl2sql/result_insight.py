@@ -10,6 +10,7 @@ from app.nl2sql.harness import is_cancelled
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.model_runtime import model_call_slot, record_usage
 from app.nl2sql.models import QueryPlan
+from app.nl2sql.settings import get_settings
 
 _NUMBER_RE = re.compile(r"(?<![A-Za-z_])[-+]?\d+(?:,\d{3})*(?:\.\d+)?")
 _TREND_TERMS = {
@@ -592,7 +593,9 @@ def stream_result_narrative(
     error = ""
     emitted = ""
     retries = 0
-    for attempt, budget in enumerate((1800, 3600)):
+    for attempt, budget in enumerate(
+        (get_settings().model_sql_max_tokens, get_settings().model_sql_retry_max_tokens)
+    ):
         if attempt:
             retries += 1
             if emitted:
@@ -601,7 +604,7 @@ def stream_result_narrative(
         emitted = ""
         error = ""
         try:
-            client = make_client(config)
+            client = make_client(config, timeout=get_settings().model_call_timeout_seconds)
             request: dict[str, Any] = {
                 "model": config.model,
                 "messages": [

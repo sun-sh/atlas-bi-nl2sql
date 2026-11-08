@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 from contextlib import contextmanager
+
+from app.nl2sql.settings import get_settings
 
 
 class ModelCallError(RuntimeError):
@@ -17,8 +20,8 @@ class ModelCallRejected(ModelCallError):
     pass
 
 
-_MAX_CONCURRENCY = 4
-_ADMISSION_TIMEOUT_SECONDS = 5.0
+_MAX_CONCURRENCY = max(1, get_settings().model_max_concurrency)
+_ADMISSION_TIMEOUT_SECONDS = max(0.1, get_settings().model_admission_timeout_seconds)
 _SEMAPHORE = threading.BoundedSemaphore(_MAX_CONCURRENCY)
 _STATE_LOCK = threading.Lock()
 _STATS = {
@@ -100,6 +103,7 @@ def snapshot() -> dict:
         values = dict(_STATS)
     started = values["started"]
     return {
+        "pid": os.getpid(),
         "max_concurrency": _MAX_CONCURRENCY,
         "admission_timeout_seconds": _ADMISSION_TIMEOUT_SECONDS,
         **values,

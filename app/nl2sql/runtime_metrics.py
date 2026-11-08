@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import statistics
 import threading
 import time
@@ -44,6 +45,7 @@ def snapshot() -> dict[str, Any]:
                 "max_ms": round(max(values), 1) if values else 0.0,
             }
     return {
+        "pid": os.getpid(),
         "uptime_seconds": round(time.time() - _STARTED_AT, 1),
         "routes": routes,
         "sample_limit": 1000,

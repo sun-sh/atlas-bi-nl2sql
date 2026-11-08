@@ -22,7 +22,7 @@ def test_qwen_sql_request_disables_thinking(monkeypatch):
     })()
     client = type("Client", (), {"chat": type("Chat", (), {"completions": Completions()})()})()
     monkeypatch.setattr(generator, "get_model_config", lambda: config)
-    monkeypatch.setattr(generator, "make_client", lambda _: client)
+    monkeypatch.setattr(generator, "make_client", lambda *_args, **_kwargs: client)
 
     assert generator._llm_sql("system", "user")
     assert captured["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
@@ -65,6 +65,24 @@ def test_truncated_sql_is_rejected_before_execution(monkeypatch):
             message=SimpleNamespace(content="SELECT SUM(paid_amount"), finish_reason="length",
         )])
     monkeypatch.setattr(generator, "get_model_config", lambda: SimpleNamespace(enabled=True, provider="custom", model="test"))
-    monkeypatch.setattr(generator, "make_client", lambda _: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+    monkeypatch.setattr(generator, "make_client", lambda *_args, **_kwargs: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
     assert generator._llm_sql("system", "user") is None
     assert "finish_reason=length" in generator.LAST_LLM_ERROR
+
+
+def test_external_dialect_is_explicit_in_generation_and_repair(monkeypatch):
+    captured = []
+
+    def capture(instructions, prompt, **kwargs):
+        captured.append(instructions)
+        return "SELECT SUM(o.paid_amount) AS 销售额 FROM orders o"
+
+    monkeypatch.setattr(generator, "_llm_sql", capture)
+    plan = make_plan("上个月销售额", [])
+    generator.generate_llm_sql("上个月销售额", plan, [], dialect="postgres")
+    generator.generate_llm_repair_sql(
+        "上个月销售额", plan, [], "SELECT 1", "syntax error", dialect="mysql"
+    )
+    assert "PostgreSQL" in captured[0]
+    assert "SQLite 专有" in captured[0]
+    assert "MySQL" in captured[1]

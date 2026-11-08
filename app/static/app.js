@@ -25,6 +25,7 @@ const state = {
   datasets: [],
   experiments: [],
   feedback: [],
+  regressionCandidates: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -1296,7 +1297,7 @@ async function submitSource(event) {
   try {
     await api('/api/data-platform/sources', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ name: $('#source-name').value, kind: $('#source-kind').value, location: $('#source-location').value, sync_mode: $('#source-kind').value === 'csv' ? 'ingest' : 'snapshot', sensitivity: $('#source-sensitivity').value, schedule_minutes: Number($('#source-schedule').value || 0) }),
+      body: JSON.stringify({ name: $('#source-name').value, kind: $('#source-kind').value, location: $('#source-location').value, dsn: $('#source-dsn').value, sync_mode: $('#source-kind').value === 'csv' ? 'ingest' : 'snapshot', sensitivity: $('#source-sensitivity').value, schedule_minutes: Number($('#source-schedule').value || 0) }),
     });
     message.textContent = '数据源已注册，可点击“同步”建立首批快照，再启用为分析数据源。';
     $('#source-form').reset();
@@ -1331,15 +1332,44 @@ async function submitMetric(event) {
   } catch (error) { toast(error.message); }
 }
 
+async function ingestRegressionCandidates() {
+  const taskId = state.evalSelectedTask || $('#eval-baseline')?.value;
+  if (!taskId) return toast('请先选择一个评测任务');
+  try {
+    const data = await api(`/api/evaluation/tasks/${encodeURIComponent(taskId)}/regression-candidates`, { method: 'POST' });
+    toast(`已生成 ${data.count} 条待审核候选`);
+    await loadEvaluationTasks();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function approveRegressionCandidate(candidateId) {
+  const name = `失败回流 · ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+  try {
+    const data = await api('/api/evaluation/regression-candidates/approve', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({candidate_ids: [candidateId], name, version: 'v1'}),
+    });
+    toast(`已生成回归集 ${data.case_count} 条`);
+    await loadEvaluationTasks();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 async function loadEvaluationTasks(options = {}) {
   try {
-    const [data, datasets, experiments, feedback] = await Promise.all([
+    const [data, datasets, experiments, feedback, candidates] = await Promise.all([
       api('/api/evaluation/tasks'), api('/api/evaluation/datasets'),
       api('/api/evaluation/experiments'), api('/api/evaluation/feedback'),
+      api('/api/evaluation/regression-candidates'),
     ]);
     state.datasets = datasets.datasets || [];
     state.experiments = experiments.experiments || [];
     state.feedback = feedback.feedback || [];
+    state.regressionCandidates = candidates.candidates || [];
     renderEvaluationPlatform(data);
     state.evalTasksData = data;
     renderEvaluationTaskList(data);
@@ -1404,7 +1434,14 @@ function renderEvaluationPlatform(data) {
   $('#experiment-count').textContent = `${experiments.length} 个实验`;
   $('#experiment-list').innerHTML = experiments.length ? experiments.map((exp) => `<div class="experiment-card"><strong>${escapeHtml(exp.name)}</strong><p>${escapeHtml(exp.hypothesis || '暂无实验假设')}</p><small>${escapeHtml(exp.dataset_id)} · ${escapeHtml(formatEvaluatedAt(exp.created_at))}</small><div class="experiment-runs">${(exp.tasks || []).map((task) => `<span>${escapeHtml(task.model_name || '待运行')} · ${task.hit_rate}%</span>`).join('') || '<span>尚未关联评测任务</span>'}</div></div>`).join('') : '<p class="muted">暂无实验记录。</p>';
   $('#feedback-count').textContent = `${feedback.length} 条`;
-  $('#feedback-table').innerHTML = feedback.length ? `<table class="eval-table"><thead><tr><th>用例</th><th>任务</th><th>分类</th><th>状态</th></tr></thead><tbody>${feedback.map((item) => `<tr><td>${escapeHtml(item.case_id)}<div class="muted">${escapeHtml(item.note || '')}</div></td><td><code>${escapeHtml(item.task_id)}</code></td><td>${escapeHtml(FEEDBACK_CATEGORY_LABELS[item.category] || item.category)}</td><td>${statusBadge(item.status === 'open' ? 'queued' : 'ready')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无失败用例。</p>';
+  $('#feedback-table').innerHTML = feedback.length ? `<table class="eval-table"><thead><tr><th>用例</th><th>任务</th><th>分类</th><th>状态</th></tr></thead><tbody>${feedback.map((item) => `<tr><td>${escapeHtml(item.case_id)}<div class="muted">${escapeHtml(item.note || '')}</div></td><td><code>${escapeHtml(item.task_id)}</code></td><td>${escapeHtml(FEEDBACK_CATEGORY_LABELS[item.category] || item.category)}</td><td>${statusBadge(item.status === 'open' ? 'queued' : 'ready')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无失败反馈。</p>';
+  const candidates = state.regressionCandidates || [];
+  $('#candidate-count').textContent = `${candidates.length} 条`;
+  const candidateTable = $('#regression-candidate-table');
+  if (candidateTable) {
+    candidateTable.innerHTML = candidates.length ? `<table class="eval-table"><thead><tr><th>来源用例</th><th>预期指标</th><th>失败原因</th><th>状态</th><th></th></tr></thead><tbody>${candidates.map((item) => `<tr><td>${escapeHtml(item.question)}<div class="muted">${escapeHtml(item.source_case_id)}</div></td><td>${escapeHtml(item.expected_metric || '待补充')}</td><td>${escapeHtml(item.error || '')}</td><td>${statusBadge(item.status === 'pending' ? 'queued' : 'ready')}</td><td>${item.status === 'pending' ? `<button class="secondary-btn compact-btn" data-approve-candidate="${escapeHtml(item.id)}">批准</button>` : `<code>${escapeHtml(item.dataset_id || '')}</code>`}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无失败候选。先在任务详情中导入失败用例。</p>';
+    candidateTable.querySelectorAll('[data-approve-candidate]').forEach((button) => button.addEventListener('click', () => approveRegressionCandidate(button.dataset.approveCandidate)));
+  }
   const activeTask = data.active;
   const selected = state.evalSelectedTask;
   const runSelect = $('#eval-dataset');
@@ -1683,6 +1720,7 @@ function init() {
   $('#dataset-form')?.addEventListener('submit', submitDataset);
   $('#experiment-form')?.addEventListener('submit', submitExperiment);
   $('#feedback-form')?.addEventListener('submit', submitFeedback);
+  $('#ingest-candidates-btn')?.addEventListener('click', ingestRegressionCandidates);
   $('#run-eval-btn').addEventListener('click', runEvaluation);
   $('#compare-eval-btn')?.addEventListener('click', compareEvaluationTasks);
   $('#eval-baseline')?.addEventListener('change', () => { state.evalBaseline = $('#eval-baseline').value; });
