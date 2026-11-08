@@ -138,6 +138,7 @@ class DBAPIAdapter:
             message = message.replace(unquote(parsed.password), "[REDACTED]")
         return message[:500]
 
+
     def _connect(self):
         if self.dialect == "postgres":
             try:
@@ -243,13 +244,23 @@ def validate_sql(sql: str, *, dialect: str = "sqlite") -> str:
     if not isinstance(statement, exp.Select):
         raise SQLValidationError("只允许 SELECT 查询")
     cte_names = {cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE)}
-    tables = {t.name.lower() for t in statement.find_all(exp.Table) if t.name}
+    table_nodes = [t for t in statement.find_all(exp.Table) if t.name]
+    tables = {t.name.lower() for t in table_nodes}
     if not tables:
         raise SQLValidationError("只允许查询授权表")
     allowed = allowed_tables() | cte_names
     unknown = tables - allowed
     if unknown:
         raise SQLValidationError(f"查询了未授权表：{', '.join(sorted(unknown))}")
+    # sqlglot exposes `orders` for both `orders` and `other_schema.orders`.
+    # Treat an explicit non-default schema/database as an unapproved table so
+    # the allowlist cannot be bypassed through a same-name relation.
+    for table in table_nodes:
+        qualifier = table.args.get("db") or table.args.get("catalog")
+        if qualifier and table.name.lower() not in cte_names:
+            raise SQLValidationError(
+                f"不允许跨 Schema 访问表：{qualifier}.{table.name}"
+            )
     if any(isinstance(item, exp.Star) or item.name == "*" for item in statement.expressions):
         raise SQLValidationError("禁止 SELECT *，请显式列出字段")
     for func in statement.find_all(exp.Func):

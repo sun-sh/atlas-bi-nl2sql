@@ -13,6 +13,8 @@ def test_health_and_examples():
     assert health.status_code == 200
     body = health.json()
     assert body["status"] == "ok"
+    assert health.headers["X-Content-Type-Options"] == "nosniff"
+    assert health.headers["X-Frame-Options"] == "DENY"
     assert body["retrieval"]["tables"] == 5
     assert "fusion" in body["retrieval"]
     assert body["query_database"]["read_only"] is True
@@ -421,6 +423,12 @@ def test_optional_admin_token_protects_write_routes(monkeypatch):
         "S", (), {"admin_api_token": "unit-secret"}
     )())
     protected = [
+        ("get", "/api/data-platform", None),
+        ("get", "/api/data-platform/workspaces", None),
+        ("get", "/api/data-platform/sources", None),
+        ("get", "/api/data-platform/quality-rules", None),
+        ("get", "/api/data-platform/metrics", None),
+        ("get", "/api/model/config", None),
         ("post", "/api/data-platform/metrics", {"workspace_id": "default", "name": "测试指标", "grain": "订单", "definition": "SUM(paid_amount)", "owner": "test"}),
         ("post", "/api/data-platform/quality-rules", {"name": "测试规则", "rule_type": "row_min", "table_name": "orders", "expression": "1"}),
         ("post", "/api/evaluation/datasets", {"name": "令牌测试集", "version": "v1", "case_ids": ["sales-east"]}),

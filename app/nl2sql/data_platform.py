@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,25 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def _connection():
+    """Commit or roll back, then always close the SQLite handle.
+
+    ``with sqlite3.connect(...)`` only manages the transaction. Leaving the
+    handle to garbage collection causes avoidable file locks on Windows and
+    keeps tests from cleaning temporary directories reliably.
+    """
+    conn = _connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def _quote(identifier: str) -> str:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier or ""):
         raise DataPlatformError(f"非法标识符：{identifier}")
@@ -94,7 +114,7 @@ def _sanitize(value: Any) -> Any:
 
 
 def audit(workspace_id: str, actor: str, role: str, action: str, resource_type: str, resource_id: str, payload: dict | None = None) -> None:
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             "INSERT INTO platform_audit(id, workspace_id, actor, role, action, resource_type, resource_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             ("aud_" + uuid.uuid4().hex[:12], workspace_id, actor[:80], role, action, resource_type, resource_id[:120], json.dumps(_sanitize(payload or {}), ensure_ascii=False), _iso()),
@@ -102,7 +122,7 @@ def audit(workspace_id: str, actor: str, role: str, action: str, resource_type: 
 
 
 def init_data_platform() -> None:
-    with _connect() as conn:
+    with _connection() as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS platform_workspaces (
@@ -269,11 +289,11 @@ _bootstrapping_default_source = False
 def ensure_data_platform() -> None:
     global _bootstrapping_default_source
     init_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         _seed_default_sources(conn)
     if _bootstrapping_default_source:
         return
-    with _connect() as conn:
+    with _connection() as conn:
         needs_bootstrap = conn.execute(
             "SELECT 1 FROM data_sources s WHERE s.id = ? AND s.status = 'registered' "
             "AND NOT EXISTS (SELECT 1 FROM asset_snapshots snap WHERE snap.source_id = s.id) LIMIT 1",
@@ -292,7 +312,7 @@ def ensure_data_platform() -> None:
 
 def list_workspaces() -> list[dict[str, Any]]:
     ensure_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute("SELECT * FROM platform_workspaces ORDER BY created_at").fetchall()
     return [dict(row) for row in rows]
 
@@ -305,7 +325,7 @@ def create_workspace(*, name: str, description: str = "", actor: str = "local", 
         raise DataPlatformError("工作区名称至少 2 个字符")
     workspace_id = "ws_" + uuid.uuid4().hex[:10]
     now = _iso()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             "INSERT INTO platform_workspaces(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (workspace_id, name, description.strip()[:240], now, now),
@@ -402,6 +422,17 @@ def inspect_external_schema(dsn: str, kind: str) -> dict[str, Any]:
     if not dsn:
         report["error"] = "外部数据库缺少只读 DSN"
         return report
+    def safe_error(exc: Exception) -> str:
+        message = str(exc).strip() or type(exc).__name__
+        message = message.replace(dsn, "[REDACTED]")
+        parsed = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(dsn)
+        if parsed.password:
+            message = message.replace(parsed.password, "[REDACTED]")
+            message = message.replace(
+                __import__("urllib.parse", fromlist=["unquote"]).unquote(parsed.password),
+                "[REDACTED]",
+            )
+        return message[:300]
     try:
         if kind == "postgresql":
             import psycopg  # type: ignore
@@ -413,7 +444,7 @@ def inspect_external_schema(dsn: str, kind: str) -> dict[str, Any]:
         report["error"] = f"{kind} 驱动未安装：{exc.name}"
         return report
     except Exception as exc:
-        report["error"] = f"外部数据库连接失败：{str(exc)[:300]}"
+        report["error"] = f"外部数据库连接失败：{safe_error(exc)}"
         return report
     try:
         cursor = conn.cursor()
@@ -449,7 +480,7 @@ def inspect_external_schema(dsn: str, kind: str) -> dict[str, Any]:
         finally:
             cursor.close()
     except Exception as exc:
-        report["error"] = f"外部数据库 Schema 检查失败：{str(exc)[:300]}"
+        report["error"] = f"外部数据库 Schema 检查失败：{safe_error(exc)}"
         return report
     finally:
         conn.close()
@@ -520,7 +551,7 @@ def register_data_source(
     else:
         location = location.strip() or kind
     workspace_id = workspace_id or DEFAULT_WORKSPACE
-    with _connect() as conn:
+    with _connection() as conn:
         if not conn.execute("SELECT 1 FROM platform_workspaces WHERE id = ?", (workspace_id,)).fetchone():
             raise DataPlatformError("工作区不存在")
         source_id = "ds_" + uuid.uuid4().hex[:10]
@@ -543,7 +574,7 @@ def register_data_source(
 
 def get_data_source(source_id: str) -> dict[str, Any]:
     ensure_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute("SELECT * FROM data_sources WHERE id = ?", (source_id,)).fetchone()
     if row is None:
         raise DataSourceNotFound("数据源不存在")
@@ -552,7 +583,7 @@ def get_data_source(source_id: str) -> dict[str, Any]:
 
 def list_data_sources(workspace_id: str = DEFAULT_WORKSPACE) -> list[dict[str, Any]]:
     ensure_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute("SELECT * FROM data_sources WHERE workspace_id = ? ORDER BY created_at", (workspace_id,)).fetchall()
     sources = []
     for row in rows:
@@ -625,7 +656,7 @@ def _inspect_sqlite(path: Path, source_name: str) -> tuple[list[dict[str, Any]],
 
 
 def _sync_source(source_id: str, actor: str = "local", role: str = "admin") -> dict[str, Any]:
-    source = get_data_source(source_id)
+    source = _source_with_secret(source_id)
     _require_role(role, "analyst")
     now = _now()
     try:
@@ -639,16 +670,30 @@ def _sync_source(source_id: str, actor: str = "local", role: str = "admin") -> d
                 else f"{src_path.stat().st_size}:{src_path.stat().st_mtime_ns}"
             )
         elif source["kind"] in {"postgresql", "mysql"}:
-            # External databases are registered and activated behind a
-            # read-only DSN; this lightweight control plane does not pull their
-            # full catalog into the local SQLite metadata store yet.
+            # A DSN alone is not evidence that the source is usable. Probe the
+            # live schema here so a broken driver, credential or schema never
+            # gets persisted as a successful "ready" snapshot.
+            compatibility = inspect_external_schema(
+                source.get("_dsn") or "", source["kind"]
+            )
+            if not compatibility["compatible"]:
+                raise DataPlatformError(_compatibility_error(compatibility))
             tables = []
             quality = {
-                "checks": [{"name": "external_dsn_configured", "passed": True, "value": 1}],
+                "checks": [
+                    {"name": "external_schema_contract", "passed": True, "value": 1},
+                    {
+                        "name": "columns_checked",
+                        "passed": True,
+                        "value": int(compatibility.get("columns_checked") or 0),
+                    },
+                ],
                 "passed": 1,
                 "failed": 0,
             }
-            checksum = f"{source['kind']}:dsn"
+            checksum = "sha256:" + __import__("hashlib").sha256(
+                json.dumps(compatibility, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
         else:
             info = _copy_csv_to_warehouse(source, target)
             tables = [{"name": info["table"], "row_count": info["rows"], "columns": [{"name": c, "type": "TEXT", "not_null": False, "primary_key": False, "null_count": 0} for c in info["columns"]]}]
@@ -656,7 +701,7 @@ def _sync_source(source_id: str, actor: str = "local", role: str = "admin") -> d
             checksum = str(_resolve_external_path(source["location"]).stat().st_mtime_ns)
         row_count = sum(t["row_count"] for t in tables)
         snapshot_id = "snap_" + uuid.uuid4().hex[:12]
-        with _connect() as conn:
+        with _connection() as conn:
             conn.execute(
                 "INSERT INTO asset_snapshots(id, workspace_id, source_id, synced_at, tables_json, quality_json, checksum) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (snapshot_id, source["workspace_id"], source_id, _iso(now), json.dumps(tables, ensure_ascii=False), json.dumps(quality, ensure_ascii=False), checksum),
@@ -675,8 +720,15 @@ def _sync_source(source_id: str, actor: str = "local", role: str = "admin") -> d
         audit(source["workspace_id"], actor, role, "source.sync", "data_source", source_id, {"snapshot_id": snapshot_id, "rows": row_count})
         return {"snapshot_id": snapshot_id, "tables": tables, "quality": quality, "row_count": row_count, "synced_at": _iso(now)}
     except Exception as exc:
-        with _connect() as conn:
-            conn.execute("UPDATE data_sources SET status='error', error=?, updated_at=? WHERE id=?", (str(exc)[:500], _iso(now), source_id))
+        message = str(exc).strip() or type(exc).__name__
+        dsn = str(source.get("_dsn") or "")
+        if dsn:
+            message = message.replace(dsn, "[REDACTED]")
+            parsed = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(dsn)
+            if parsed.password:
+                message = message.replace(parsed.password, "[REDACTED]")
+        with _connection() as conn:
+            conn.execute("UPDATE data_sources SET status='error', error=?, updated_at=? WHERE id=?", (message[:500], _iso(now), source_id))
         raise
 
 
@@ -718,7 +770,7 @@ def activate_query_source(
         if not compatibility["compatible"]:
             raise DataPlatformError(_compatibility_error(compatibility))
         database_name = path.name
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             "UPDATE data_sources SET active_for_query=0, updated_at=? WHERE workspace_id=?",
             (_iso(), source["workspace_id"]),
@@ -759,7 +811,7 @@ def query_target_for_source(source: dict[str, Any]) -> QueryTarget:
 
 
 def _source_with_secret(source_id: str) -> dict[str, Any]:
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute("SELECT * FROM data_sources WHERE id=?", (source_id,)).fetchone()
     if row is None:
         raise DataSourceNotFound("数据源不存在")
@@ -771,7 +823,7 @@ def _source_with_secret(source_id: str) -> dict[str, Any]:
 def active_query_database(workspace_id: str = DEFAULT_WORKSPACE) -> dict[str, Any]:
     """Resolve the active query database, falling back to the demo warehouse."""
     ensure_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute(
             "SELECT * FROM data_sources WHERE workspace_id=? AND active_for_query=1 "
             "AND status='ready' ORDER BY updated_at DESC LIMIT 1",
@@ -804,14 +856,14 @@ def active_query_database(workspace_id: str = DEFAULT_WORKSPACE) -> dict[str, An
 
 def list_lineage(workspace_id: str = DEFAULT_WORKSPACE) -> list[dict[str, Any]]:
     ensure_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute("SELECT * FROM lineage_edges WHERE workspace_id=? ORDER BY downstream_node, upstream_node", (workspace_id,)).fetchall()
     return [dict(row) for row in rows]
 
 
 def list_metrics(workspace_id: str = DEFAULT_WORKSPACE) -> list[dict[str, Any]]:
     ensure_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute("SELECT * FROM metric_definitions WHERE workspace_id=? ORDER BY name", (workspace_id,)).fetchall()
     return [dict(row) for row in rows]
 
@@ -825,7 +877,7 @@ def create_metric(*, workspace_id: str, name: str, grain: str, definition: str, 
         raise DataPlatformError("指标名称和口径不能为空")
     metric_id = "m_" + uuid.uuid4().hex[:10]
     now = _iso()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             "INSERT INTO metric_definitions(id, workspace_id, name, grain, definition, owner, status, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (metric_id, workspace_id, name, grain.strip()[:60], definition, owner.strip()[:60], status if status in {"draft", "published", "deprecated"} else "draft", 1, now, now),
@@ -836,7 +888,7 @@ def create_metric(*, workspace_id: str, name: str, grain: str, definition: str, 
 
 def list_quality_rules(workspace_id: str = DEFAULT_WORKSPACE) -> list[dict[str, Any]]:
     ensure_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute("SELECT * FROM quality_rules WHERE workspace_id=? ORDER BY created_at", (workspace_id,)).fetchall()
     return [dict(row) for row in rows]
 
@@ -848,7 +900,7 @@ def create_quality_rule(*, workspace_id: str, source_id: str, name: str, rule_ty
         raise DataPlatformError("不支持的质量规则类型")
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name) or (column_name and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", column_name)):
         raise DataPlatformError("表名或字段名非法")
-    with _connect() as conn:
+    with _connection() as conn:
         source = conn.execute("SELECT 1 FROM data_sources WHERE id=? AND workspace_id=?", (source_id, workspace_id)).fetchone()
         if not source:
             raise DataSourceNotFound("数据源不存在")
@@ -901,12 +953,12 @@ def run_quality(workspace_id: str, source_id: str, *, actor: str = "local", role
     ensure_data_platform()
     _require_role(role, "analyst")
     source = get_data_source(source_id)
-    with _connect() as conn:
+    with _connection() as conn:
         rules = [dict(r) for r in conn.execute("SELECT * FROM quality_rules WHERE workspace_id=? AND source_id=? AND enabled=1 ORDER BY created_at", (workspace_id, source_id)).fetchall()]
     result = _run_quality(source, rules)
     run_id = "qrun_" + uuid.uuid4().hex[:12]
     now = _iso()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute("INSERT INTO quality_runs(id, workspace_id, source_id, status, passed, failed, result_json, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (run_id, workspace_id, source_id, "completed", result["passed"], result["failed"], json.dumps(result, ensure_ascii=False), now, now))
     audit(workspace_id, actor, role, "quality.run", "quality_run", run_id, {"source_id": source_id, "passed": result["passed"], "failed": result["failed"]})
     return {"id": run_id, "source_id": source_id, "ran_at": now, **result}
@@ -914,7 +966,7 @@ def run_quality(workspace_id: str, source_id: str, *, actor: str = "local", role
 
 def list_quality_runs(workspace_id: str = DEFAULT_WORKSPACE, limit: int = 20) -> list[dict[str, Any]]:
     ensure_data_platform()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute("SELECT id, workspace_id, source_id, status, passed, failed, started_at, finished_at FROM quality_runs WHERE workspace_id=? ORDER BY started_at DESC LIMIT ?", (workspace_id, min(max(limit, 1), 100))).fetchall()
     return [dict(row) for row in rows]
 
@@ -926,7 +978,7 @@ def platform_overview(workspace_id: str = DEFAULT_WORKSPACE) -> dict[str, Any]:
     metrics = list_metrics(workspace_id)
     runs = list_quality_runs(workspace_id, 5)
     lineage = list_lineage(workspace_id)
-    with _connect() as conn:
+    with _connection() as conn:
         audit_rows = conn.execute("SELECT * FROM platform_audit WHERE workspace_id=? ORDER BY created_at DESC LIMIT 20", (workspace_id,)).fetchall()
         schedules = conn.execute("SELECT id, name, next_sync_at FROM data_sources WHERE workspace_id=? AND schedule_minutes>0 ORDER BY next_sync_at", (workspace_id,)).fetchall()
     return {
@@ -972,6 +1024,10 @@ def data_service_query(workspace_id: str, source_id: str, table: str, *, limit: 
         raise DataPlatformError("数据源不属于该工作区")
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table):
         raise DataPlatformError("表名非法")
+    if source["kind"] in {"postgresql", "mysql"}:
+        raise DataPlatformError(
+            "外部数据库当前仅支持 NL2SQL 查询目标，数据服务尚未实现对应适配器"
+        )
     path = _warehouse_path() if source["kind"] == "csv" else _resolve_external_path(source["location"])
     if not path.exists():
         raise DataPlatformError("数据源尚未同步")
@@ -1012,7 +1068,7 @@ def dispatch_due_syncs(*, role: str = "admin", actor: str = "scheduler") -> dict
     ensure_data_platform()
     _require_role(role, "admin")
     now = _now()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute("SELECT id FROM data_sources WHERE schedule_minutes>0 AND (next_sync_at IS NULL OR next_sync_at<=?) ORDER BY created_at", (_iso(now),)).fetchall()
     results = []
     for row in rows:

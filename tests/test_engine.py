@@ -377,6 +377,12 @@ def test_sql_validation_supports_postgres_and_mysql_dialects():
     assert "orders" in mysql
     with pytest.raises(SQLValidationError):
         validate_sql("SELECT customer_id FROM orders", dialect="postgresql")
+    with pytest.raises(SQLValidationError, match="跨 Schema"):
+        validate_sql(
+            "SELECT o.channel, SUM(o.paid_amount) AS revenue "
+            "FROM other_schema.orders o GROUP BY o.channel",
+            dialect="postgresql",
+        )
 
 
 def test_unavailable_dbapi_driver_fails_clearly(monkeypatch):

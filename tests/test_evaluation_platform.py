@@ -64,6 +64,42 @@ def test_execute_uses_selected_dataset_and_cancel_retry(monkeypatch):
     assert cancelled['status'] == 'cancelled'
 
 
+def test_dataset_content_is_snapshotted_and_tampering_is_rejected(monkeypatch):
+    monkeypatch.setattr(evaluation_tasks, 'run_evaluation', fake_report)
+    ds = evaluation_tasks.create_dataset(
+        name='不可变小集', version='v1', case_ids=['sales-east']
+    )
+    task = evaluation_tasks.create_evaluation_task(
+        label='不可变', workers=1, dataset_id=ds['id']
+    )
+    with evaluation_tasks._connect() as conn:
+        conn.execute(
+            "UPDATE evaluation_datasets SET case_snapshot_json=? WHERE id=?",
+            ('[{"id":"sales-east","question":"被人改过","reference_sql":"SELECT 1"}]', ds['id']),
+        )
+    completed = evaluation_tasks.execute_evaluation_task(task['id'])
+    assert completed['status'] == 'failed'
+    assert '数据集内容已变更' in completed['error']
+
+
+def test_empty_dataset_does_not_fall_back_to_full_regression(monkeypatch):
+    from app.nl2sql import evaluation
+
+    monkeypatch.setattr(evaluation, 'get_model_config', lambda: SimpleNamespace(
+        enabled=True, active=True, model='test', provider='test'
+    ))
+    monkeypatch.setattr(
+        evaluation,
+        '_evaluate_case',
+        lambda case, cases=None: {
+            'id': case['id'], 'question': case['question'], 'intent': case['intent'],
+            'hit': True, 'executed': True, 'model_used': True,
+        },
+    )
+    with pytest.raises(ValueError, match='cannot be empty'):
+        evaluation.run_evaluation(cases=())
+
+
 def test_feedback_is_written_and_deduplicated():
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(evaluation_tasks, 'run_evaluation', fake_report)
@@ -138,3 +174,26 @@ def test_failed_cases_flow_into_reviewable_dataset(monkeypatch):
         evaluation_tasks.approve_regression_candidates(
             [candidate['id']], name='重复审批', version='v2'
         )
+
+
+def test_compare_marks_cross_dataset_differences_as_not_directly_comparable(monkeypatch):
+    monkeypatch.setattr(evaluation_tasks, 'get_model_config', lambda: SimpleNamespace(
+        enabled=True, active=True, model='same-model', provider='same-provider',
+        api_key='secret', base_url='https://example.com',
+    ))
+    def runner(**kwargs):
+        report = fake_report(**kwargs)
+        report['runtime'] = {'source_sha256': 'source-a'}
+        report['case_manifest_sha256'] = 'manifest-a'
+        return report
+    monkeypatch.setattr(evaluation_tasks, 'run_evaluation', runner)
+    first_ds = evaluation_tasks.create_dataset(name='A', version='v1', case_ids=['sales-east'])
+    second_ds = evaluation_tasks.create_dataset(name='B', version='v1', case_ids=['sales-east'])
+    first = evaluation_tasks.create_evaluation_task(label='A', workers=1, dataset_id=first_ds['id'])
+    second = evaluation_tasks.create_evaluation_task(label='B', workers=1, dataset_id=second_ds['id'])
+    evaluation_tasks.execute_evaluation_task(first['id'])
+    evaluation_tasks.execute_evaluation_task(second['id'])
+    comparison = evaluation_tasks.compare_evaluation_tasks(first['id'], second['id'])
+    assert comparison['comparable'] is False
+    assert comparison['comparability']['same_dataset'] is False
+    assert '不能作为单一变量因果结论' in comparison['comparison_note']

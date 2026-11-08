@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -42,8 +43,21 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def _connection():
+    conn = _connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def init_session_store() -> None:
-    with _connect() as conn:
+    with _connection() as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -87,7 +101,7 @@ def create_session(title: str | None = None) -> dict[str, Any]:
     now = _now()
     session_id = "s_" + uuid.uuid4().hex[:12]
     normalized_title = (title or DEFAULT_TITLE).strip()[:40] or DEFAULT_TITLE
-    with _connect() as conn:
+    with _connection() as conn:
         _prune_expired(conn, now)
         conn.execute(
             "INSERT INTO sessions(id, title, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -101,7 +115,7 @@ def create_session(title: str | None = None) -> dict[str, Any]:
 
 def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
     init_session_store()
-    with _connect() as conn:
+    with _connection() as conn:
         _prune_expired(conn)
         rows = conn.execute(
             """
@@ -123,7 +137,7 @@ def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
 
 def get_session(session_id: str) -> dict[str, Any] | None:
     init_session_store()
-    with _connect() as conn:
+    with _connection() as conn:
         _prune_expired(conn)
         session = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if session is None:
@@ -171,7 +185,10 @@ def append_turn(session_id: str, question: str, result: QueryResult) -> dict[str
     init_session_store()
     now = _now()
     payload = result.as_dict()
-    with _connect() as conn:
+    with _connection() as conn:
+        # Serialize writers for one session so two concurrent turns cannot both
+        # read the same previous state or evict the other one's newest turn.
+        conn.execute("BEGIN IMMEDIATE")
         session = conn.execute("SELECT id, title FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if session is None:
             return None
@@ -203,6 +220,6 @@ def append_turn(session_id: str, question: str, result: QueryResult) -> dict[str
 
 def delete_session(session_id: str) -> bool:
     init_session_store()
-    with _connect() as conn:
+    with _connection() as conn:
         cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     return cursor.rowcount > 0

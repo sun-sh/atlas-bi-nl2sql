@@ -51,7 +51,13 @@ function adminHeaders(extra = {}) {
 
 async function api(url, options = {}) {
   const next = { ...options };
-  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(String(next.method || 'GET').toUpperCase())) {
+  const method = String(next.method || 'GET').toUpperCase();
+  const protectedRead = method === 'GET' && (
+    url.startsWith('/api/data-platform') ||
+    url === '/api/model/config' ||
+    url.startsWith('/api/evaluation')
+  );
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method) || protectedRead) {
     next.headers = adminHeaders(next.headers || {});
   }
   const res = await fetch(url, next);
@@ -106,7 +112,7 @@ function renderTrend(rows) {
   $('#trend-chart').innerHTML = (rows || [])
     .map((row) => {
       const h = Math.max(3, (Number(row.revenue) / max) * 135);
-      return `<div class="bar-wrap" data-label="${row.date} · ${fmtMoney(row.revenue)}"><div class="bar" style="height:${h}px"></div></div>`;
+      return `<div class="bar-wrap" data-label="${escapeHtml(row.date)} · ${escapeHtml(fmtMoney(row.revenue))}"><div class="bar" style="height:${h}px"></div></div>`;
     })
     .join('');
 }
@@ -117,7 +123,7 @@ function renderChannels(rows) {
     .map(
       (row) => `
     <div class="channel-row">
-      <span>${row.channel}</span>
+      <span>${escapeHtml(row.channel)}</span>
       <span class="channel-track"><span class="channel-fill" style="width:${(Number(row.revenue) / max) * 100}%"></span></span>
       <span class="channel-value">${fmtMoney(row.revenue)}</span>
     </div>`,
@@ -150,7 +156,7 @@ async function loadExamples() {
   state.examples = data.examples;
   $('#example-list').innerHTML = data.examples
     .map(
-      (q) => `<button class="example-chip" data-question="${q}">${q}</button>`,
+      (q) => `<button class="example-chip" data-question="${escapeHtml(q)}">${escapeHtml(q)}</button>`,
     )
     .join('');
   $$('.example-chip').forEach((btn) =>
@@ -479,9 +485,9 @@ function renderEvidence(result) {
       .map(
         (hit, index) => `
     <article class="panel schema-card">
-      <div class="schema-head"><div><div class="schema-name">${hit.label} · ${hit.table}</div></div><span class="badge">融合 ${hit.score}</span></div>
-      <p class="schema-desc">${hit.description}</p>
-      <div class="score-grid"><div class="score-box"><div class="score-label">语义分数</div><div class="score-value">${hit.vector_score}</div></div><div class="score-box"><div class="score-label">关键词分数</div><div class="score-value">${hit.lexical_score}</div></div><div class="score-box"><div class="score-label">命中词</div><div class="score-value" style="font-size:12px">${hit.matched_terms.join(' / ') || '—'}</div></div></div>
+      <div class="schema-head"><div><div class="schema-name">${escapeHtml(hit.label)} · ${escapeHtml(hit.table)}</div></div><span class="badge">融合 ${escapeHtml(hit.score)}</span></div>
+      <p class="schema-desc">${escapeHtml(hit.description)}</p>
+      <div class="score-grid"><div class="score-box"><div class="score-label">语义分数</div><div class="score-value">${escapeHtml(hit.vector_score)}</div></div><div class="score-box"><div class="score-label">关键词分数</div><div class="score-value">${escapeHtml(hit.lexical_score)}</div></div><div class="score-box"><div class="score-label">命中词</div><div class="score-value" style="font-size:12px">${escapeHtml((hit.matched_terms || []).join(' / ') || '—')}</div></div></div>
     </article>`,
       )
       .join('') +

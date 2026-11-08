@@ -587,7 +587,7 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
     executed = False
     model_used = False
     hit = False
-    selected_cases = cases or CASES
+    selected_cases = CASES if cases is None else cases
     setup = next((item for item in selected_cases if item["id"] == case["setup"]), None)
     try:
         context = None
@@ -667,7 +667,7 @@ def run_evaluation(
     """
     if workers not in (1, 2, 3):
         raise ValueError("workers must be 1, 2 or 3")
-    selected_cases = tuple(cases or CASES)
+    selected_cases = tuple(CASES if cases is None else cases)
     if not selected_cases:
         raise ValueError("evaluation cases cannot be empty")
     model = _model_state()

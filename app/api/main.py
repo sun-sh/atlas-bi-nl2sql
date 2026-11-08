@@ -91,6 +91,18 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name, version="1.3.0")
 
 
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+    )
+    return response
+
+
 def _require_admin_token(x_admin_token: str | None = Header(default=None)) -> None:
     """Optional operator gate; local default remains open for development."""
     expected = get_settings().admin_api_token
@@ -552,7 +564,10 @@ def data_assets() -> dict:
 
 
 @app.get("/api/data-platform")
-def data_platform(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+def data_platform(
+    workspace_id: str = DEFAULT_WORKSPACE,
+    _: None = Depends(_require_admin_token),
+) -> dict:
     try:
         return platform_overview(workspace_id)
     except DataPlatformError as exc:
@@ -560,7 +575,7 @@ def data_platform(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
 
 
 @app.get("/api/data-platform/workspaces")
-def data_platform_workspaces() -> dict:
+def data_platform_workspaces(_: None = Depends(_require_admin_token)) -> dict:
     return {"workspaces": list_workspaces()}
 
 
@@ -575,7 +590,10 @@ def create_data_workspace(payload: dict, _: None = Depends(_require_admin_token)
 
 
 @app.get("/api/data-platform/sources")
-def data_platform_sources(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+def data_platform_sources(
+    workspace_id: str = DEFAULT_WORKSPACE,
+    _: None = Depends(_require_admin_token),
+) -> dict:
     return {"sources": list_data_sources(workspace_id)}
 
 
@@ -600,7 +618,10 @@ def sync_platform_source(source_id: str, _: None = Depends(_require_admin_token)
 
 
 @app.get("/api/data-platform/metrics")
-def data_platform_metrics(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+def data_platform_metrics(
+    workspace_id: str = DEFAULT_WORKSPACE,
+    _: None = Depends(_require_admin_token),
+) -> dict:
     return {"metrics": list_metrics(workspace_id)}
 
 
@@ -615,7 +636,10 @@ def add_data_platform_metric(payload: MetricCreateRequest, _: None = Depends(_re
 
 
 @app.get("/api/data-platform/quality-rules")
-def data_platform_quality_rules(workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+def data_platform_quality_rules(
+    workspace_id: str = DEFAULT_WORKSPACE,
+    _: None = Depends(_require_admin_token),
+) -> dict:
     return {"rules": list_quality_rules(workspace_id)}
 
 
@@ -822,7 +846,7 @@ def evaluation_compare(baseline: str, candidate: str) -> dict:
         raise HTTPException(status_code=404, detail=f"评测任务不存在：{exc.args[0]}") from exc
 
 @app.get("/api/model/config")
-def model_config() -> dict:
+def model_config(_: None = Depends(_require_admin_token)) -> dict:
     return get_model_config().public()
 
 

@@ -171,11 +171,11 @@ def test_external_database_source_requires_readonly_dsn_and_never_exposes_it():
     )
     assert source['dsn_configured'] is True
     assert 'secret' not in str({k: v for k, v in source.items() if k != '_dsn'})
-    synced = data_platform.sync_data_source(source['id'])
-    assert synced['tables'] == []
+    with pytest.raises(data_platform.DataPlatformError, match='驱动未安装'):
+        data_platform.sync_data_source(source['id'])
     compatibility = data_platform.inspect_external_schema(source['_dsn'] if '_dsn' in source else '', 'postgresql')
     assert compatibility['compatible'] is False
-    with pytest.raises(data_platform.DataPlatformError, match='驱动未安装'):
+    with pytest.raises(data_platform.DataPlatformError, match='尚未成功同步'):
         data_platform.activate_query_source(source['id'])
 
 
@@ -234,6 +234,38 @@ def test_dbapi_compat_probe_keeps_secret_out_of_returned_source(monkeypatch):
     assert 'secret' not in str(external)
 
 
+def test_broken_external_source_sync_is_never_marked_ready(monkeypatch):
+    source = data_platform.register_data_source(
+        workspace_id='default',
+        name='连接失败库',
+        kind='postgresql',
+        location='',
+        dsn='postgresql://reader:secret@db.internal/atlas',
+    )
+    monkeypatch.setattr(
+        data_platform,
+        'inspect_external_schema',
+        lambda dsn, kind: {'compatible': False, 'missing_tables': [], 'missing_columns': {}, 'error': 'connection refused'},
+    )
+    with pytest.raises(data_platform.DataPlatformError, match='连接失败|connection refused'):
+        data_platform.sync_data_source(source['id'])
+    failed = data_platform.get_data_source(source['id'])
+    assert failed['status'] == 'error'
+    assert 'secret' not in str(failed)
+
+
+def test_external_source_data_service_is_rejected_explicitly():
+    source = data_platform.register_data_source(
+        workspace_id='default',
+        name='外部订单库',
+        kind='postgresql',
+        location='',
+        dsn='postgresql://reader:secret@db.internal/atlas',
+    )
+    with pytest.raises(data_platform.DataPlatformError, match='数据服务尚未实现'):
+        data_platform.data_service_query('default', source['id'], 'orders')
+
+
 def test_external_schema_inspection_accepts_contract_and_reports_missing_columns(monkeypatch):
     import sys
     from types import SimpleNamespace
@@ -280,3 +312,19 @@ def test_external_schema_inspection_accepts_contract_and_reports_missing_columns
     report = data_platform.inspect_external_schema("postgresql://readonly@db/atlas", "postgresql")
     assert report["compatible"] is False
     assert report["missing_columns"]["orders"] == ["paid_amount"]
+
+
+def test_external_schema_inspection_redacts_dsn_on_connect_error(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    dsn = "postgresql://reader:top-secret@db.internal/atlas"
+
+    def fail(*args, **kwargs):
+        raise RuntimeError(f"cannot connect with {dsn}; password=top-secret")
+
+    monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=fail))
+    report = data_platform.inspect_external_schema(dsn, "postgresql")
+    assert report["compatible"] is False
+    assert "top-secret" not in report["error"]
+    assert "[REDACTED]" in report["error"]

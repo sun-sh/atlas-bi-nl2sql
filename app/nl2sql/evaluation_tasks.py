@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -38,6 +39,19 @@ def _connect() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA busy_timeout = 10000")
     return conn
+
+
+@contextmanager
+def _connection():
+    conn = _connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _sanitize(value: Any) -> Any:
@@ -177,7 +191,7 @@ class FeedbackNotFound(ValueError):
 
 
 def init_task_store() -> None:
-    with _connect() as conn:
+    with _connection() as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS evaluation_tasks (
@@ -221,6 +235,7 @@ def init_task_store() -> None:
                 case_count INTEGER NOT NULL,
                 checksum TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'published',
+                case_snapshot_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS evaluation_experiments (
@@ -266,6 +281,7 @@ def init_task_store() -> None:
         conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0") if not _has_column(conn, 'evaluation_tasks', 'cancel_requested') else None
         conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN retry_of TEXT") if not _has_column(conn, 'evaluation_tasks', 'retry_of') else None
         conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN task_kind TEXT NOT NULL DEFAULT 'evaluation'") if not _has_column(conn, 'evaluation_tasks', 'task_kind') else None
+        conn.execute("ALTER TABLE evaluation_datasets ADD COLUMN case_snapshot_json TEXT NOT NULL DEFAULT '[]'") if not _has_column(conn, 'evaluation_datasets', 'case_snapshot_json') else None
         _seed_archived_reports(conn)
         _seed_datasets(conn)
 
@@ -279,20 +295,30 @@ def _seed_datasets(conn: sqlite3.Connection) -> None:
     from app.nl2sql.holdout import HOLDOUT_CASES
     ids = [c['id'] for c in CASES]
     holdout_ids = [c['id'] for c in HOLDOUT_CASES]
+    all_cases = {case['id']: case for case in (*CASES, *HOLDOUT_CASES)}
     payload = {
         'dataset_v3_100': ('strict-model-v3-100', 'published', ids, 'Strict model full regression set'),
         'dataset_v3_initial': ('strict-model-v3-100', 'archived', ids, 'Original 100-case diagnostic run'),
         'dataset_v3_holdout_30': ('strict-model-v3-holdout-30', 'holdout', holdout_ids, 'Independent 30-case holdout set'),
     }
     for dataset_id, (name, status, case_ids, description) in payload.items():
-        checksum = __import__('hashlib').sha256(__import__('json').dumps(case_ids, sort_keys=True).encode()).hexdigest()
-        conn.execute('INSERT OR IGNORE INTO evaluation_datasets(id,name,version,description,case_ids_json,case_count,checksum,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-                     (dataset_id, name, dataset_id.rsplit('_',1)[-1], description, json.dumps(case_ids), len(case_ids), checksum, status, _now_iso()))
+        snapshot = [
+            {
+                'id': case_id,
+                'question': all_cases[case_id].get('question', ''),
+                'intent': all_cases[case_id].get('intent', ''),
+                'reference_sql': all_cases[case_id].get('reference_sql', ''),
+            }
+            for case_id in case_ids
+        ]
+        checksum = __import__('hashlib').sha256(__import__('json').dumps(snapshot, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+        conn.execute('INSERT OR IGNORE INTO evaluation_datasets(id,name,version,description,case_ids_json,case_count,checksum,status,created_at,case_snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                     (dataset_id, name, dataset_id.rsplit('_',1)[-1], description, json.dumps(case_ids), len(case_ids), checksum, status, _now_iso(), json.dumps(snapshot, ensure_ascii=False)))
 
 
 def list_datasets() -> list[dict[str, Any]]:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute('SELECT * FROM evaluation_datasets ORDER BY created_at DESC').fetchall()
     result=[]
     for row in rows:
@@ -313,17 +339,29 @@ def create_dataset(*, name: str, version: str, case_ids: list[str], description:
         if cid not in clean: clean.append(cid)
     if not clean:
         raise ValueError('数据集至少包含一条用例')
+    case_map = {case['id']: case for case in (*CASES, *HOLDOUT_CASES)}
+    manifest = [
+        {
+            'id': case_id,
+            'question': case_map[case_id].get('question', ''),
+            'intent': case_map[case_id].get('intent', ''),
+            'reference_sql': case_map[case_id].get('reference_sql', ''),
+        }
+        for case_id in clean
+    ]
     did='dataset_'+__import__('uuid').uuid4().hex[:10]
-    checksum=__import__('hashlib').sha256(json.dumps(clean,sort_keys=True).encode()).hexdigest()
-    with _connect() as conn:
-        conn.execute('INSERT INTO evaluation_datasets(id,name,version,description,case_ids_json,case_count,checksum,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-                     (did,name.strip()[:80] or '自定义数据集',version.strip()[:40] or 'v1',description.strip()[:240],json.dumps(clean),len(clean),checksum,'published',_now_iso()))
+    checksum=__import__('hashlib').sha256(
+        json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode('utf-8')
+    ).hexdigest()
+    with _connection() as conn:
+        conn.execute('INSERT INTO evaluation_datasets(id,name,version,description,case_ids_json,case_count,checksum,status,created_at,case_snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                     (did,name.strip()[:80] or '自定义数据集',version.strip()[:40] or 'v1',description.strip()[:240],json.dumps(clean),len(clean),checksum,'published',_now_iso(),json.dumps(manifest, ensure_ascii=False)))
     return next(d for d in list_datasets() if d['id']==did)
 
 
 def create_experiment(*, name: str, dataset_id: str, hypothesis: str = '') -> dict[str, Any]:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         if not conn.execute('SELECT 1 FROM evaluation_datasets WHERE id=?',(dataset_id,)).fetchone():
             raise DatasetNotFound('数据集不存在')
         eid='exp_'+__import__('uuid').uuid4().hex[:10]
@@ -333,7 +371,7 @@ def create_experiment(*, name: str, dataset_id: str, hypothesis: str = '') -> di
 
 def get_experiment(eid: str) -> dict[str, Any]:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         row=conn.execute('SELECT * FROM evaluation_experiments WHERE id=?',(eid,)).fetchone()
         tasks=conn.execute('SELECT * FROM evaluation_tasks WHERE experiment_id=? ORDER BY created_at DESC',(eid,)).fetchall()
     if row is None: raise ValueError('实验不存在')
@@ -342,7 +380,7 @@ def get_experiment(eid: str) -> dict[str, Any]:
 
 def list_experiments() -> list[dict[str, Any]]:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         rows=conn.execute('SELECT * FROM evaluation_experiments ORDER BY created_at DESC').fetchall()
     return [get_experiment(row['id']) for row in rows]
 
@@ -394,7 +432,7 @@ def _row_to_task(row: sqlite3.Row, *, include_report: bool = False) -> dict[str,
 
 def list_evaluation_tasks(limit: int = 20) -> dict[str, Any]:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         active = conn.execute(
             "SELECT * FROM evaluation_tasks WHERE status IN ('queued', 'running') "
             "ORDER BY created_at DESC LIMIT 1"
@@ -411,7 +449,7 @@ def list_evaluation_tasks(limit: int = 20) -> dict[str, Any]:
 
 def get_evaluation_task(task_id: str, *, include_report: bool = True) -> dict[str, Any] | None:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute(
             "SELECT * FROM evaluation_tasks WHERE id = ?", (task_id,)
         ).fetchone()
@@ -430,7 +468,7 @@ def create_evaluation_task(*, label: str | None = None, workers: int = 3, datase
     default_label = f"模型评测 · {now[:16].replace('T', ' ')}"
     normalized_label = " ".join((label or default_label).split())[:80] or default_label
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         if not conn.execute("SELECT 1 FROM evaluation_datasets WHERE id=?", (dataset_id,)).fetchone():
             raise DatasetNotFound("数据集不存在")
@@ -453,14 +491,14 @@ def create_evaluation_task(*, label: str | None = None, workers: int = 3, datase
 
 
 def _task_cancelled(task_id: str) -> bool:
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute("SELECT cancel_requested, status FROM evaluation_tasks WHERE id=?", (task_id,)).fetchone()
     return bool(row and (row["cancel_requested"] or row["status"] == "cancelled"))
 
 
 def cancel_evaluation_task(task_id: str) -> dict[str, Any]:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute("SELECT status FROM evaluation_tasks WHERE id=?", (task_id,)).fetchone()
         if row is None:
             raise ValueError("评测任务不存在")
@@ -480,14 +518,14 @@ def retry_evaluation_task(task_id: str, *, label: str | None = None) -> dict[str
     if original["status"] not in TERMINAL_STATUSES:
         raise TaskStateError("只能重试已结束的任务")
     task = create_evaluation_task(label=label or f"{original['label']} · retry", workers=int(original["workers"]), dataset_id=original["dataset_id"], experiment_id=original["experiment_id"], priority=int(original["priority"]))
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute("UPDATE evaluation_tasks SET retry_of=? WHERE id=?", (task_id, task["id"]))
     return get_evaluation_task(task["id"]) or task
 
 
 def claim_next_evaluation_task(*, worker_id: str = "local") -> dict[str, Any] | None:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         running = conn.execute("SELECT 1 FROM evaluation_tasks WHERE status='running' LIMIT 1").fetchone()
         if running:
@@ -502,7 +540,7 @@ def claim_next_evaluation_task(*, worker_id: str = "local") -> dict[str, Any] | 
 def claim_task(task_id: str) -> dict[str, Any]:
     """Atomically claim one named queued task without blocking other queues."""
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM evaluation_tasks WHERE id=?", (task_id,)).fetchone()
         if row is None:
@@ -518,7 +556,7 @@ def claim_task(task_id: str) -> dict[str, Any]:
 
 def cancel_all_pending() -> int:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         cur = conn.execute("UPDATE evaluation_tasks SET status='cancelled', finished_at=? WHERE status='queued'", (_now_iso(),))
     return cur.rowcount
 
@@ -530,7 +568,7 @@ def add_feedback(*, task_id: str, case_id: str, category: str, note: str = "") -
         raise ValueError("评测任务不存在")
     init_task_store()
     now = _now_iso()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute("INSERT INTO evaluation_feedback(id,task_id,case_id,category,note,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(task_id,case_id) DO UPDATE SET category=excluded.category,note=excluded.note,status='open',updated_at=excluded.updated_at", ("fb_"+uuid.uuid4().hex[:10],task_id,case_id,category,note[:500],'open',now,now))
         row=conn.execute("SELECT * FROM evaluation_feedback WHERE task_id=? AND case_id=?",(task_id,case_id)).fetchone()
     return dict(row)
@@ -546,7 +584,7 @@ def _candidate_gold(case_id: str) -> dict[str, Any]:
 
 def list_feedback(status: str | None = None) -> list[dict[str, Any]]:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         if status:
             rows=conn.execute("SELECT * FROM evaluation_feedback WHERE status=? ORDER BY updated_at DESC",(status,)).fetchall()
         else:
@@ -567,7 +605,7 @@ def ingest_failed_cases(task_id: str) -> list[dict[str, Any]]:
     report = task.get("report") or {}
     candidates: list[dict[str, Any]] = []
     now = _now_iso()
-    with _connect() as conn:
+    with _connection() as conn:
         for case in report.get("cases") or []:
             if not isinstance(case, dict) or case.get("hit"):
                 continue
@@ -615,7 +653,7 @@ def ingest_failed_cases(task_id: str) -> list[dict[str, Any]]:
 
 def list_regression_candidates(status: str | None = None) -> list[dict[str, Any]]:
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         if status:
             rows = conn.execute(
                 "SELECT * FROM regression_candidates WHERE status=? ORDER BY created_at DESC",
@@ -648,7 +686,7 @@ def approve_regression_candidates(
     if not ids:
         raise ValueError("至少选择一个失败用例")
     init_task_store()
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             "SELECT * FROM regression_candidates WHERE id IN (%s)" % ",".join("?" for _ in ids),
             tuple(ids),
@@ -679,7 +717,7 @@ def approve_regression_candidates(
         description="从失败评测回流的候选用例，经人工审核后进入回归集。",
     )
     now = _now_iso()
-    with _connect() as conn:
+    with _connection() as conn:
         for candidate_id in ids:
             conn.execute(
                 "UPDATE regression_candidates SET status='approved', dataset_id=?, updated_at=? WHERE id=?",
@@ -692,7 +730,7 @@ def approve_regression_candidates(
 
 def _advance_task(task_id: str) -> None:
     try:
-        with _connect() as conn:
+        with _connection() as conn:
             conn.execute(
                 "UPDATE evaluation_tasks "
                 "SET progress_completed = MIN(progress_total, progress_completed + 1) "
@@ -752,22 +790,39 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
     from app.nl2sql.holdout import HOLDOUT_CASES
 
     task_id = task["id"]
-    with _connect() as conn:
+    with _connection() as conn:
         dataset_row = conn.execute(
             "SELECT * FROM evaluation_datasets WHERE id=?", (task["dataset_id"],)
         ).fetchone()
     if dataset_row is None:
-        with _connect() as conn:
+        with _connection() as conn:
             conn.execute(
                 "UPDATE evaluation_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
                 (_now_iso(), "任务数据集不存在", task_id),
             )
         return get_evaluation_task(task_id) or task
-    selected_ids = set(json.loads(dataset_row["case_ids_json"]))
-    all_cases = (*CASES, *HOLDOUT_CASES)
-    selected_cases = tuple(case for case in all_cases if case["id"] in selected_ids)
+    try:
+        selected_ids = json.loads(dataset_row["case_ids_json"])
+        snapshot = json.loads(dataset_row["case_snapshot_json"] or "[]")
+    except (json.JSONDecodeError, TypeError):
+        selected_ids, snapshot = [], []
+    all_cases = {case["id"]: case for case in (*CASES, *HOLDOUT_CASES)}
+    selected_cases = tuple(
+        all_cases[item["id"]]
+        for item in snapshot
+        if item.get("id") in all_cases
+        and item.get("question") == all_cases[item["id"]].get("question")
+        and item.get("reference_sql") == all_cases[item["id"]].get("reference_sql")
+    )
+    if not selected_cases or len(selected_cases) != len(selected_ids):
+        with _connection() as conn:
+            conn.execute(
+                "UPDATE evaluation_tasks SET status='failed', finished_at=?, error=? WHERE id=?",
+                (_now_iso(), "数据集内容已变更或不可用，拒绝用当前代码静默替换基准", task_id),
+            )
+        return get_evaluation_task(task_id) or task
     started = time.perf_counter()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             "UPDATE evaluation_tasks SET progress_total = ?, progress_completed = 0, error = '' WHERE id = ?",
             (len(selected_cases), task_id),
@@ -802,7 +857,7 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
         report = _redact_report(report, config)
         summary = _summary_from_report(report)
         finished = _now_iso()
-        with _connect() as conn:
+        with _connection() as conn:
             conn.execute(
                 """
                 UPDATE evaluation_tasks SET
@@ -823,7 +878,7 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
         return get_evaluation_task(task_id) or task
     except Exception as exc:
         cancelled = "cancelled" in str(exc).lower() or _task_cancelled(task_id)
-        with _connect() as conn:
+        with _connection() as conn:
             conn.execute(
                 "UPDATE evaluation_tasks SET status = ?, finished_at = ?, error = ? WHERE id = ?",
                 ("cancelled" if cancelled else "failed", _now_iso(), str(exc)[:1000], task_id),
@@ -849,6 +904,17 @@ def compare_evaluation_tasks(baseline_id: str, candidate_id: str) -> dict[str, A
         raise KeyError(missing)
     baseline_cases = _case_map(baseline.get("report"))
     candidate_cases = _case_map(candidate.get("report"))
+    baseline_runtime = (baseline.get("report") or {}).get("runtime") or {}
+    candidate_runtime = (candidate.get("report") or {}).get("runtime") or {}
+    baseline_manifest = (baseline.get("report") or {}).get("case_manifest_sha256") or ""
+    candidate_manifest = (candidate.get("report") or {}).get("case_manifest_sha256") or ""
+    comparability = {
+        "same_dataset": baseline.get("dataset_id") == candidate.get("dataset_id"),
+        "same_case_manifest": bool(baseline_manifest) and baseline_manifest == candidate_manifest,
+        "same_source": bool(baseline_runtime.get("source_sha256")) and baseline_runtime.get("source_sha256") == candidate_runtime.get("source_sha256"),
+        "same_model": baseline.get("model_name") == candidate.get("model_name") and baseline.get("provider") == candidate.get("provider"),
+    }
+    comparable = all(comparability.values())
     shared = sorted(set(baseline_cases) & set(candidate_cases))
     regressed = []
     fixed = []
@@ -882,6 +948,13 @@ def compare_evaluation_tasks(baseline_id: str, candidate_id: str) -> dict[str, A
             "avg_elapsed_ms": round(candidate["avg_elapsed_ms"] - baseline["avg_elapsed_ms"], 1),
         },
         "shared_cases": len(shared),
+        "comparability": comparability,
+        "comparable": comparable,
+        "comparison_note": (
+            "同一数据集、用例清单、代码版本和模型下可直接比较。"
+            if comparable
+            else "任务之间存在数据集、用例清单、代码版本或模型差异；fixed/regressed 只能用于定位，不能作为单一变量因果结论。"
+        ),
         "fixed": fixed,
         "regressed": regressed,
         "unchanged_passed": sum(

@@ -23,7 +23,7 @@ Atlas BI 是一个电商经营分析问答项目，业务数据覆盖订单、�
 | 适合谁 | 电商运营、商业分析、数据支持和业务管理团队 |
 | 分析什么 | 销售额、品类、退款率、ROI、客单价、趋势和渠道结构 |
 | 一次查询会经过 | 可答性判定 → 双路 Schema 召回 → 意图规划 → 模型生成 SQL → AST 门禁 → 只读执行 → 有限修复 → 解读事实校验 |
-| 怎么用 | Web 工作台、FastAPI 查询接口、只读数据服务、OpenAPI 和 OpenAI 兼容模型接口 |
+| 怎么用 | Web 工作台、FastAPI 查询接口、SQLite 快照只读数据服务、OpenAPI 和 OpenAI 兼容模型接口 |
 | 数据侧 | SQLite/CSV 接入、快照、资产目录、质量规则、指标口径、字段血缘和审计；兼容 SQLite 或显式配置的 PostgreSQL/MySQL 可切换为当前分析库 |
 | 评测侧 | SQL 结果等价验收、解读事实校验、范围/自然语言/检索消融、数据集版本、实验、队列、取消重试和失败回流 |
 | 会话 | 最多 20 轮、7 天过期；新问题里的条件优先，缺失的条件按需继承 |
@@ -270,7 +270,7 @@ curl -N -X POST http://127.0.0.1:8000/api/query/stream \
 | `GET/POST /api/data-platform/metrics` | 指标目录 |
 | `GET/POST /api/data-platform/quality-rules` | 质量规则 |
 | `POST /api/data-platform/sources/{id}/quality` | 执行质量巡检 |
-| `GET /api/data-platform/data-service` | 受控只读数据服务 |
+| `GET /api/data-platform/data-service` | 受控只读数据服务（当前仅支持 SQLite 快照） |
 | `POST /api/data-platform/scheduler/run` | 手动执行到期同步 |
 | `GET/POST /api/evaluation/datasets` | 评测数据集版本 |
 | `GET/POST /api/evaluation/experiments` | 评测实验 |
@@ -302,7 +302,7 @@ python -m app.evaluation.run --suite rules --min-hit-rate 100
 node --check app/static/app.js
 ```
 
-`pytest` 会关闭在线模型和 BGE 下载，用本地数据和受控的模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **169 项测试全部通过**。测试包含 4 条 Playwright 浏览器端到端用例。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行测试和确定性质量门禁，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
+`pytest` 会关闭在线模型和 BGE 下载，用本地数据和受控的模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **175 项测试全部通过**。测试包含 4 条 Playwright 浏览器端到端用例。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行测试和确定性质量门禁，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
 
 ## 本地运行
 
@@ -381,7 +381,7 @@ tests/              # 自动化测试
 
 - 当前使用固定电商数据和固定业务口径，换成其他业务需要补 Schema、业务规则和评测用例。
 - 可答性判定以规则为主，覆盖常见澄清、写操作、敏感字段和域外请求；它会减少硬答，但不能替代完整的权限系统和人工复核。
-- 数据中台是单工作区、本地管理员，只有函数级角色检查；`X-Admin-Token` 只是可选的共享部署门禁，没有 SSO、多租户隔离、用户级授权和生产数据集群。
+- 数据中台是单工作区、本地管理员，只有函数级角色检查；`X-Admin-Token` 只是可选的共享部署门禁，没有 SSO、多租户隔离、用户级授权和生产数据集群。外部 PostgreSQL/MySQL 目前只作为 NL2SQL 查询目标，读数据服务仍仅支持 SQLite 快照。
 - CSV 单表入库不能切换成 NL2SQL 分析库；SQLite 和显式配置的 PostgreSQL/MySQL 才能被启用为查询数据源。外部库适配器暂不含连接池、租户行级过滤和自动资产目录同步；DSN 以明文保存在本地元数据中，公开接口不返回，但部署时仍需文件权限和密钥管理。
 - `/api/metrics` 是单进程内存窗口，进程重启即清零，也不包含网关、数据库连接池或模型供应商侧指标；HTTP 压测关闭模型，不能当作 LLM 容量结论。
 - 评测中台使用 SQLite 队列和单执行槽，没有跨组织标注、分布式后台进程或线上流量评测。

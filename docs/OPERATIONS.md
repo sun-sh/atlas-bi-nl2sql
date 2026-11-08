@@ -29,7 +29,7 @@ curl http://127.0.0.1:8000/api/overview
 
 Runtime configuration is stored at `data/model_config.json` (override with `ATLAS_MODEL_CONFIG_PATH`) and excluded from Git. The public configuration API never returns the API key; it does return the saved Base URL and a boolean `api_key_configured`. If a model call fails, the query response includes the failure in `warnings` and falls back to rule SQL when possible. Result narration uses the same model only after SQL execution succeeds; a narration failure falls back to a deterministic digest and never invalidates the query result.
 
-If `ATLAS_ADMIN_API_TOKEN` is set, model configuration/test, model probing, data-source mutations, quality rules, metrics, evaluation datasets/experiments/feedback/tasks and queue claims require `X-Admin-Token`. The browser reads the token from `localStorage` and sends it on mutating API calls. This shared secret protects the operator surface only; it is not user authentication, RBAC or a replacement for an ingress policy.
+If `ATLAS_ADMIN_API_TOKEN` is set, model configuration/test, model probing, the data-platform control plane, quality rules, metrics, evaluation datasets/experiments/feedback/tasks and queue claims require `X-Admin-Token`. The browser reads the token from `localStorage` and sends it on mutating and protected operator-read calls. This shared secret protects the operator surface only; it is not user authentication, RBAC or a replacement for an ingress policy.
 
 ## Session data
 

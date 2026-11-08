@@ -17,7 +17,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 32.0
+      "elapsed_ms": 73.7
     },
     {
       "id": "category-sales",
@@ -32,7 +32,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 9.6
+      "elapsed_ms": 17.0
     },
     {
       "id": "refund-top",
@@ -48,7 +48,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 14.6
+      "elapsed_ms": 18.3
     },
     {
       "id": "roi-channels",
@@ -65,7 +65,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 13.9
+      "elapsed_ms": 16.1
     },
     {
       "id": "daily-sales",
@@ -80,7 +80,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 9.2
+      "elapsed_ms": 14.2
     },
     {
       "id": "channel-aov",
@@ -96,7 +96,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.8
+      "elapsed_ms": 16.9
     },
     {
       "id": "sales-south",
@@ -109,7 +109,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.0
+      "elapsed_ms": 17.3
     },
     {
       "id": "sales-north-web",
@@ -122,7 +122,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.6
+      "elapsed_ms": 18.9
     },
     {
       "id": "sales-last30-channels",
@@ -137,7 +137,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.2
+      "elapsed_ms": 16.8
     },
     {
       "id": "sales-last90-regions",
@@ -152,7 +152,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.7
+      "elapsed_ms": 22.1
     },
     {
       "id": "category-units",
@@ -166,7 +166,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.4
+      "elapsed_ms": 26.8
     },
     {
       "id": "food-units",
@@ -179,7 +179,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.1
+      "elapsed_ms": 19.3
     },
     {
       "id": "refund-month",
@@ -195,7 +195,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.3
+      "elapsed_ms": 14.6
     },
     {
       "id": "refund-reasons",
@@ -210,7 +210,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.2
+      "elapsed_ms": 12.8
     },
     {
       "id": "roi-douyin",
@@ -227,7 +227,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 12.4
+      "elapsed_ms": 16.4
     },
     {
       "id": "followup-region",
@@ -240,7 +240,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.6
+      "elapsed_ms": 25.3
     },
     {
       "id": "followup-month",
@@ -253,7 +253,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.4
+      "elapsed_ms": 19.8
     },
     {
       "id": "followup-channel",
@@ -266,7 +266,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 13.6
+      "elapsed_ms": 25.1
     },
     {
       "id": "matrix-sales-jan-华北",
@@ -279,7 +279,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.8
+      "elapsed_ms": 10.9
     },
     {
       "id": "matrix-sales-jan-西南",
@@ -292,7 +292,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.7
+      "elapsed_ms": 9.9
     },
     {
       "id": "matrix-sales-feb-华东",
@@ -305,7 +305,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.6
+      "elapsed_ms": 10.3
     },
     {
       "id": "matrix-sales-feb-华南",
@@ -318,7 +318,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.1
+      "elapsed_ms": 12.5
     },
     {
       "id": "matrix-sales-feb-华北",
@@ -331,7 +331,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.8
+      "elapsed_ms": 9.5
     },
     {
       "id": "matrix-sales-feb-西南",
@@ -344,7 +344,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.1
+      "elapsed_ms": 14.8
     },
     {
       "id": "matrix-sales-last30-华东",
@@ -357,7 +357,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.5
+      "elapsed_ms": 11.7
     },
     {
       "id": "matrix-sales-last30-华南",
@@ -370,7 +370,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.6
+      "elapsed_ms": 9.4
     },
     {
       "id": "matrix-sales-last30-华北",
@@ -383,7 +383,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.3
+      "elapsed_ms": 8.9
     },
     {
       "id": "matrix-sales-last30-西南",
@@ -396,7 +396,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.4
+      "elapsed_ms": 8.7
     },
     {
       "id": "matrix-sales-last90-华东",
@@ -409,7 +409,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 5.9
+      "elapsed_ms": 9.8
     },
     {
       "id": "matrix-sales-last90-华南",
@@ -422,7 +422,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.1
+      "elapsed_ms": 9.0
     },
     {
       "id": "matrix-sales-last90-华北",
@@ -435,7 +435,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.2
+      "elapsed_ms": 10.8
     },
     {
       "id": "matrix-sales-last90-西南",
@@ -448,7 +448,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.5
+      "elapsed_ms": 12.9
     },
     {
       "id": "matrix-channel-sales-jan-app",
@@ -461,7 +461,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 5.9
+      "elapsed_ms": 12.7
     },
     {
       "id": "matrix-channel-sales-jan-miniprogram",
@@ -474,7 +474,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.6
+      "elapsed_ms": 9.9
     },
     {
       "id": "matrix-channel-sales-jan-web",
@@ -487,7 +487,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.4
+      "elapsed_ms": 12.5
     },
     {
       "id": "matrix-channel-sales-jan-douyin",
@@ -500,7 +500,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.0
+      "elapsed_ms": 11.4
     },
     {
       "id": "matrix-channel-sales-feb-app",
@@ -513,7 +513,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.2
+      "elapsed_ms": 10.4
     },
     {
       "id": "matrix-channel-sales-feb-miniprogram",
@@ -526,7 +526,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.3
+      "elapsed_ms": 9.9
     },
     {
       "id": "matrix-channel-sales-feb-web",
@@ -539,7 +539,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.2
+      "elapsed_ms": 8.9
     },
     {
       "id": "matrix-channel-sales-feb-douyin",
@@ -552,7 +552,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.6
+      "elapsed_ms": 11.6
     },
     {
       "id": "matrix-channel-sales-last30-app",
@@ -565,7 +565,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.9
+      "elapsed_ms": 9.0
     },
     {
       "id": "matrix-channel-sales-last30-miniprogram",
@@ -578,7 +578,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.2
+      "elapsed_ms": 10.0
     },
     {
       "id": "matrix-channel-sales-last30-web",
@@ -591,7 +591,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 5.8
+      "elapsed_ms": 12.8
     },
     {
       "id": "matrix-channel-sales-last30-douyin",
@@ -604,7 +604,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 5.9
+      "elapsed_ms": 9.5
     },
     {
       "id": "matrix-channel-sales-last90-app",
@@ -617,7 +617,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.7
+      "elapsed_ms": 8.9
     },
     {
       "id": "matrix-channel-sales-last90-miniprogram",
@@ -630,7 +630,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.7
+      "elapsed_ms": 8.6
     },
     {
       "id": "matrix-channel-sales-last90-web",
@@ -643,7 +643,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 5.9
+      "elapsed_ms": 9.0
     },
     {
       "id": "matrix-channel-sales-last90-douyin",
@@ -656,7 +656,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.1
+      "elapsed_ms": 11.0
     },
     {
       "id": "matrix-category-sales-jan-运动鞋服",
@@ -669,7 +669,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.8
+      "elapsed_ms": 8.5
     },
     {
       "id": "matrix-category-sales-jan-食品饮料",
@@ -682,7 +682,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.0
+      "elapsed_ms": 9.7
     },
     {
       "id": "matrix-category-sales-jan-数码家电",
@@ -695,7 +695,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.2
+      "elapsed_ms": 11.7
     },
     {
       "id": "matrix-category-sales-jan-美妆个护",
@@ -708,7 +708,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.8
+      "elapsed_ms": 13.1
     },
     {
       "id": "matrix-category-sales-feb-运动鞋服",
@@ -721,7 +721,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.1
+      "elapsed_ms": 13.0
     },
     {
       "id": "matrix-category-sales-feb-食品饮料",
@@ -734,7 +734,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.2
+      "elapsed_ms": 9.1
     },
     {
       "id": "matrix-category-sales-feb-数码家电",
@@ -747,7 +747,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.9
+      "elapsed_ms": 9.8
     },
     {
       "id": "matrix-category-sales-feb-美妆个护",
@@ -760,7 +760,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.5
+      "elapsed_ms": 13.6
     },
     {
       "id": "matrix-category-units-last30-运动鞋服",
@@ -773,7 +773,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.7
+      "elapsed_ms": 10.6
     },
     {
       "id": "matrix-category-units-last30-食品饮料",
@@ -786,7 +786,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.7
+      "elapsed_ms": 11.2
     },
     {
       "id": "matrix-category-units-last30-数码家电",
@@ -799,7 +799,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.9
+      "elapsed_ms": 10.8
     },
     {
       "id": "matrix-category-units-last30-美妆个护",
@@ -812,7 +812,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.0
+      "elapsed_ms": 14.4
     },
     {
       "id": "matrix-category-units-last90-运动鞋服",
@@ -825,7 +825,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 9.3
+      "elapsed_ms": 14.7
     },
     {
       "id": "matrix-category-units-last90-食品饮料",
@@ -838,7 +838,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 9.4
+      "elapsed_ms": 14.6
     },
     {
       "id": "matrix-category-units-last90-数码家电",
@@ -851,7 +851,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.9
+      "elapsed_ms": 13.9
     },
     {
       "id": "matrix-category-units-last90-美妆个护",
@@ -864,7 +864,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.9
+      "elapsed_ms": 17.0
     },
     {
       "id": "matrix-roi-last30-app",
@@ -881,7 +881,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 13.7
+      "elapsed_ms": 18.7
     },
     {
       "id": "matrix-roi-last30-miniprogram",
@@ -898,7 +898,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.0
+      "elapsed_ms": 21.5
     },
     {
       "id": "matrix-roi-last30-web",
@@ -915,7 +915,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.0
+      "elapsed_ms": 17.6
     },
     {
       "id": "matrix-roi-last30-douyin",
@@ -932,7 +932,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.2
+      "elapsed_ms": 17.8
     },
     {
       "id": "matrix-roi-last90-app",
@@ -949,7 +949,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.9
+      "elapsed_ms": 15.1
     },
     {
       "id": "matrix-roi-last90-miniprogram",
@@ -966,7 +966,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.4
+      "elapsed_ms": 27.7
     },
     {
       "id": "matrix-roi-last90-web",
@@ -983,7 +983,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.4
+      "elapsed_ms": 23.4
     },
     {
       "id": "matrix-roi-last90-douyin",
@@ -1000,7 +1000,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 14.6
+      "elapsed_ms": 20.9
     },
     {
       "id": "matrix-refund-rate-jan",
@@ -1016,7 +1016,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.4
+      "elapsed_ms": 13.4
     },
     {
       "id": "matrix-refund-reasons-jan",
@@ -1031,7 +1031,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.7
+      "elapsed_ms": 16.5
     },
     {
       "id": "matrix-aov-jan-channel",
@@ -1047,7 +1047,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 12.3
+      "elapsed_ms": 18.3
     },
     {
       "id": "matrix-aov-jan-region",
@@ -1063,7 +1063,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 9.5
+      "elapsed_ms": 12.5
     },
     {
       "id": "matrix-refund-rate-feb",
@@ -1079,7 +1079,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 13.6
+      "elapsed_ms": 17.4
     },
     {
       "id": "matrix-refund-reasons-feb",
@@ -1094,7 +1094,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.9
+      "elapsed_ms": 17.4
     },
     {
       "id": "matrix-aov-feb-channel",
@@ -1110,7 +1110,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.7
+      "elapsed_ms": 18.0
     },
     {
       "id": "matrix-aov-feb-region",
@@ -1126,7 +1126,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.1
+      "elapsed_ms": 11.8
     },
     {
       "id": "matrix-refund-rate-last30",
@@ -1142,7 +1142,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 10.3
+      "elapsed_ms": 12.4
     },
     {
       "id": "matrix-refund-reasons-last30",
@@ -1157,7 +1157,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 13.1
+      "elapsed_ms": 11.1
     },
     {
       "id": "matrix-aov-last30-channel",
@@ -1173,7 +1173,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 13.8
+      "elapsed_ms": 11.6
     },
     {
       "id": "matrix-aov-last30-region",
@@ -1189,7 +1189,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 13.5
+      "elapsed_ms": 16.8
     },
     {
       "id": "matrix-refund-rate-last90",
@@ -1205,7 +1205,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 56.9
+      "elapsed_ms": 59.6
     },
     {
       "id": "matrix-refund-reasons-last90",
@@ -1220,7 +1220,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.2
+      "elapsed_ms": 17.7
     },
     {
       "id": "matrix-aov-last90-channel",
@@ -1236,7 +1236,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 8.0
+      "elapsed_ms": 21.3
     },
     {
       "id": "matrix-aov-last90-region",
@@ -1252,7 +1252,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.8
+      "elapsed_ms": 20.4
     },
     {
       "id": "followup-south-to-华东",
@@ -1265,7 +1265,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.6
+      "elapsed_ms": 24.7
     },
     {
       "id": "followup-south-to-华北",
@@ -1278,7 +1278,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.5
+      "elapsed_ms": 26.5
     },
     {
       "id": "followup-south-to-西南",
@@ -1291,7 +1291,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.5
+      "elapsed_ms": 25.1
     },
     {
       "id": "followup-app-to-app",
@@ -1304,7 +1304,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 18.6
+      "elapsed_ms": 22.7
     },
     {
       "id": "followup-app-to-douyin",
@@ -1317,7 +1317,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.5
+      "elapsed_ms": 19.4
     },
     {
       "id": "followup-app-to-web",
@@ -1330,7 +1330,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 14.2
+      "elapsed_ms": 15.6
     },
     {
       "id": "followup-period-last30",
@@ -1343,7 +1343,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 14.6
+      "elapsed_ms": 13.6
     },
     {
       "id": "followup-period-last90",
@@ -1356,7 +1356,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 11.4
+      "elapsed_ms": 14.0
     },
     {
       "id": "matrix-daily-east",
@@ -1371,7 +1371,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.3
+      "elapsed_ms": 12.3
     },
     {
       "id": "matrix-daily-south",
@@ -1386,7 +1386,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.8
+      "elapsed_ms": 12.5
     },
     {
       "id": "matrix-refund-amount-reasons",
@@ -1401,7 +1401,7 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 6.1
+      "elapsed_ms": 12.9
     },
     {
       "id": "matrix-refund-amount-category",
@@ -1416,15 +1416,15 @@
       "sql_mode": "rule",
       "hit": true,
       "error": null,
-      "elapsed_ms": 7.8
+      "elapsed_ms": 12.6
     }
   ],
   "limitations": "Rule-path result equivalence on the fixed 100-case benchmark. It does not measure model quality or open-domain generalization.",
-  "evaluated_at": "2026-11-08T05:47:37.280098+00:00",
+  "evaluated_at": "2026-11-08T12:38:50.636922+00:00",
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 1032.1,
-    "source_sha256": "691bf2469aa901d60081b59d0bb015c3c6ea33cc79d0f2066d8c4351ffd44420"
+    "wall_elapsed_ms": 1675.5,
+    "source_sha256": "3d179dddc8037a559dbb71becdff0841ccd3af4f400aa256faeee39ade64ff3c"
   },
   "evaluation_contract": "rule-equivalence-v1",
   "case_manifest_sha256": "a3d0f65deb4e552ccc0e3c948d74cf19f97210c826cff78315e2d056f1c2fec0",
