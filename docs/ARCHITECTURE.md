@@ -187,7 +187,7 @@ The data platform stores source metadata and snapshots separately from the query
 
 ## Operational controls and metrics
 
-All operator mutations on data-platform, evaluation and model-probe routes pass through one optional dependency. When `ATLAS_ADMIN_API_TOKEN` is set, callers must send `X-Admin-Token`; when it is empty, the local demo remains open. Query/session routes stay public because they are the end-user path. This is a single shared operator secret, not user authentication or RBAC.
+All operator mutations on data-platform, evaluation and model-probe routes pass through one optional dependency. When `ATLAS_ADMIN_API_TOKEN` is set, callers must send `X-Admin-Token`; when it is empty, the local demo remains open. Protected operator reads for the data-platform control plane and model configuration use the same gate, while query/session routes stay public because they are the end-user path. This is a single shared operator secret, not user authentication or RBAC.
 
 `app/nl2sql/runtime_metrics.py` keeps a bounded in-process sample window (latest 1000 observations per route). `/api/metrics` exposes count, error count, error rate and P50/P95/max for `query` and `query_stream`. These are process-local diagnostics: restarting the process clears them, and a multi-worker deployment needs external aggregation.
 
