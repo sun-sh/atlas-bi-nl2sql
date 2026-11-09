@@ -338,3 +338,63 @@ def test_rule_equivalence_suite_matches_all_100_gold_results():
     assert report["total"] == 100
     assert report["passed"] == 100
     assert all(case["hit"] for case in report["cases"])
+
+
+def test_colloquial_suite_uses_strict_model_path_and_independent_rows(monkeypatch):
+    from app.nl2sql.holdout import COLLOQUIAL_CASES
+    from app.nl2sql.retrieval import HybridSchemaRetriever
+
+    calls = []
+
+    def fake_query(question, **kwargs):
+        calls.append((question, kwargs))
+        assert kwargs.get("allow_rule_fallback") is False
+        case = next(item for item in COLLOQUIAL_CASES if item["question"] == question)
+        if case.get("expected_outcome") == "clarification":
+            plan = make_plan("", [], context=None)
+            plan.intent = ""
+            plan.tables = []
+            plan.metrics = []
+            plan.time_range = ""
+            return QueryResult(
+                question=question, sql="", rows=[], columns=[], chart_type="table",
+                answer="请补充指标。", plan=plan, retrieval=[], attempts=[],
+                elapsed_ms=1, mode="unsupported", narrative_mode="unavailable",
+                outcome="clarification",
+            )
+        rows = execute_sql(case["reference_sql"])["rows"]
+        plan = make_plan(question, [], reference_date="2026-02-28")
+        plan.intent = case["expected_intent"]
+        plan.metrics = [case["expected_metric"]]
+        plan.tables = sorted(case["expected_tables"])
+        return QueryResult(
+            question=question, sql=case["reference_sql"], rows=rows, columns=list(rows[0]),
+            chart_type="table", answer="依据查询结果生成的模型解读。", plan=plan,
+            retrieval=[], attempts=[{"status": "success"}], elapsed_ms=1,
+            mode="llm", narrative_mode="model", narrative_model="test-model",
+        )
+
+    monkeypatch.setattr(evaluation, "run_query", fake_query)
+    report = evaluation.run_colloquial_evaluation(HybridSchemaRetriever())
+    assert report["mode"] == "model"
+    assert report["total"] == len(COLLOQUIAL_CASES)
+    if report["passed"] != report["total"]:
+        raise AssertionError([case for case in report["cases"] if not case["hit"]])
+    assert report["model_rate"] == report["answerable"] * 100.0 / report["total"]
+    assert all(call[1]["allow_rule_fallback"] is False for call in calls)
+    assert "family_summary" in report
+
+
+def test_case_family_summary_reduces_matrix_to_business_shapes():
+    report = evaluation.case_family_summary(
+        [{**case, "hit": case["id"] != "matrix-roi-last90-web"} for case in evaluation.CASES]
+    )
+    assert 10 < report["family_count"] < len(evaluation.CASES)
+    assert report["fully_passed_families"] == report["family_count"] - 1
+    assert report["family_hit_rate"] < 100
+    roi_family = next(
+        item for item in report["families"]
+        if item["family"] == "marketing_efficiency|ROI|scalar-channel"
+    )
+    assert roi_family["total"] == 8
+    assert roi_family["passed"] == 7

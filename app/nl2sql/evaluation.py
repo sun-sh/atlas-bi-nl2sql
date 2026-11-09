@@ -615,6 +615,8 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
             "setup_question": setup["question"] if setup else None,
             "question": case["question"],
             "intent": case["intent"],
+            "metric": case.get("metric", ""),
+            "dimension": case.get("dimension", ""),
             "expected_metric": case.get("metric", ""),
             "executed": executed,
             "hit": hit,
@@ -648,6 +650,90 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
 def _evaluate_with_config(case, config, cases=None):
     with model_config_snapshot(config):
         return _evaluate_case(case, cases)
+
+
+def _case_family(case: dict[str, Any]) -> str:
+    """Group repeated question shapes for an honest independence unit.
+
+    Matrix cases vary time slices and filter values while exercising the same
+    SQL construction pattern. We group by intent + metric + grain + shape,
+    rather than by a case-id token, so family counts remain stable as cases are
+    added. Scalar sales cases are split into filter-shape (region/channel/
+    category) because those exercise distinct planner branches.
+    """
+    raw = str(case.get("id") or "")
+    intent = str(
+        case.get("intent")
+        or case.get("intent_key")
+        or case.get("expected_intent")
+        or "unknown"
+    )
+    metric = str(
+        case.get("metric") or case.get("expected_metric") or "unknown"
+    )
+    dimension = str(case.get("dimension") or "")
+    if raw.startswith("followup-"):
+        return f"{intent}|{metric}|followup"
+    if raw.startswith("matrix-"):
+        if raw.startswith("matrix-sales-") or raw.startswith("matrix-channel-sales-"):
+            return f"{intent}|{metric}|scalar-filter"
+        if raw.startswith("matrix-category-sales-"):
+            return f"{intent}|{metric}|scalar-category-filter"
+        if raw.startswith("matrix-category-units-"):
+            return f"{intent}|{metric}|scalar-item-category"
+        if raw.startswith("matrix-roi-"):
+            return f"{intent}|{metric}|scalar-channel"
+        if raw.startswith("matrix-refund-rate-"):
+            return f"{intent}|{metric}|grouped-category"
+        if raw.startswith("matrix-refund-reasons-"):
+            return f"{intent}|{metric}|grouped-reason"
+        if raw.startswith("matrix-refund-amount-"):
+            # The base grouped case and its matrix variants share a shape;
+            # keep them together for an honest family denominator.
+            return f"{intent}|{metric}|grouped-{dimension or 'scalar'}"
+        if raw.startswith("matrix-aov-"):
+            return f"{intent}|{metric}|grouped-{dimension or 'scalar'}"
+        if raw.startswith("matrix-daily-"):
+            return f"{intent}|{metric}|daily"
+        return f"{intent}|{metric}|matrix"
+    if raw.startswith("colloquial-"):
+        return f"{intent}|{metric}|{dimension or 'scalar'}|colloquial"
+    if dimension:
+        # Base cases use raw grain names while matrix cases use "grouped-*";
+        # normalize both to the same business shape.
+        if dimension == "order_date":
+            return f"{intent}|{metric}|daily"
+        return f"{intent}|{metric}|grouped-{dimension}"
+    return f"{intent}|{metric}|scalar"
+
+
+def case_family_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize evaluation cases by business shape, not by raw case count."""
+    families: dict[str, dict[str, int]] = {}
+    for case in cases:
+        family = _case_family(case)
+        bucket = families.setdefault(family, {"total": 0, "passed": 0})
+        bucket["total"] += 1
+        bucket["passed"] += int(bool(case.get("hit")))
+    items = [
+        {
+            "family": name,
+            **counts,
+            "hit_rate": round(counts["passed"] * 100 / counts["total"], 1),
+        }
+        for name, counts in sorted(families.items())
+    ]
+    fully_passed = sum(1 for item in items if item["passed"] == item["total"])
+    return {
+        "family_count": len(items),
+        "fully_passed_families": fully_passed,
+        "family_hit_rate": round(fully_passed * 100 / len(items), 1) if items else 0.0,
+        "families": items,
+        "independence_note": (
+            "Matrix cases share question shapes and differ mainly by time/filter values; "
+            "raw case count is not the number of independent semantic samples."
+        ),
+    }
 
 
 def run_evaluation(
@@ -713,6 +799,7 @@ def run_evaluation(
             ],
         }
         report.update(_diagnostics(report["cases"]))
+        report["family_summary"] = case_family_summary(report["cases"])
         return report
 
     config = get_model_config()
@@ -759,6 +846,7 @@ def run_evaluation(
         "avg_elapsed_ms": round(total_elapsed / total, 1),
         "intents": len({case["intent"] for case in selected_cases}),
         "cases": results_by_case,
+        "family_summary": case_family_summary(results_by_case),
     }
 
 
@@ -867,6 +955,9 @@ def run_rule_equivalence_evaluation(on_case: Callable[[dict[str, Any]], None] | 
         item = {
             "id": case["id"],
             "question": case["question"],
+            "intent": case["intent"],
+            "metric": case["metric"],
+            "dimension": case.get("dimension", ""),
             "expected_metric": case["metric"],
             "actual_columns": list(result.columns) if result else [],
             "row_count": len(result.rows) if result else 0,
@@ -888,9 +979,13 @@ def run_rule_equivalence_evaluation(on_case: Callable[[dict[str, Any]], None] | 
         "passed": passed,
         "hit_rate": round(passed * 100 / total, 1) if total else 0.0,
         "cases": results,
+        "raw_case_count": total,
+        "family_summary": case_family_summary(results),
         "limitations": (
             "Rule-path result equivalence on the fixed 100-case benchmark. "
-            "It does not measure model quality or open-domain generalization."
+            "It does not measure model quality or open-domain generalization. "
+            "The matrix expands a small number of SQL shapes across time/filter "
+            "values, so family-level results are the appropriate independence unit."
         ),
     }
 
@@ -969,7 +1064,10 @@ def run_natural_language_evaluation(retriever=None) -> dict[str, Any]:
                 "actual_result_outcome": result.outcome,
                 "expected_intent": case.get("expected_intent", ""),
                 "actual_intent": result.plan.intent,
+                "intent_key": case.get("expected_intent", ""),
                 "expected_metric": case.get("expected_metric", ""),
+                "metric": case.get("expected_metric", ""),
+                "dimension": next(iter(result.plan.dimensions), ""),
                 "actual_metric": actual_metric,
                 "expected_tables": sorted(expected),
                 "retrieved_tables": sorted(tables),
@@ -999,6 +1097,8 @@ def run_natural_language_evaluation(retriever=None) -> dict[str, Any]:
         "hit_rate": round(passed * 100 / total, 1) if total else 0.0,
         "answerable": answerable,
         "clarification": sum(item["expected_outcome"] == "clarification" for item in results),
+        "raw_case_count": total,
+        "family_summary": case_family_summary(results),
         "retrieval_backend": retriever.describe(),
         "table_recall_at_4": round(
             sum(bool(item["table_recall"]) for item in results if item["expected_outcome"] == "answered")
@@ -1039,4 +1139,175 @@ def run_natural_language_scope_evaluation() -> dict[str, Any]:
         "hit_rate": round(passed * 100 / len(cases), 1) if cases else 0.0,
         "cases": cases,
         "limitations": "Deterministic scope regression, not a semantic SQL benchmark.",
+    }
+
+
+
+def _check_clarification_result(decision: Any, result: Any) -> str:
+    if decision.outcome != "clarification":
+        return f"范围守卫结果不符：期望 clarification，实际 {decision.outcome}"
+    if result.outcome != "clarification":
+        return f"查询结果范围不符：期望 clarification，实际 {result.outcome}"
+    if result.sql or result.rows or result.attempts:
+        return "澄清用例不应生成 SQL、执行记录或数据行"
+    if result.plan.intent or result.plan.metrics or result.plan.tables:
+        return "澄清用例不应保留猜测的意图、指标或表"
+    return ""
+
+
+def run_colloquial_evaluation(retriever=None) -> dict[str, Any]:
+    """Run no-definition wording through the strict model path when answerable.
+
+    Answered cases must use model-generated/repaired SQL, execute it, pass an
+    independent reference-SQL row comparison, and pass model narrative
+    grounding. Clarification cases must stop in the scope guard without a
+    guessed plan, SQL, or rows. The report intentionally includes the model
+    attribution fields so it cannot be mistaken for the deterministic suite.
+    """
+    from app.nl2sql.holdout import COLLOQUIAL_CASES
+    from app.nl2sql.intent_guard import assess_question
+    from app.nl2sql.retrieval import HybridSchemaRetriever
+
+    retriever = retriever or HybridSchemaRetriever()
+    cases: list[dict[str, Any]] = []
+    for case in COLLOQUIAL_CASES:
+        started = time.perf_counter()
+        expected_outcome = case.get("expected_outcome", "answered")
+        decision = assess_question(case["question"])
+        result = None
+        error = ""
+        model_used = False
+        executed = False
+        try:
+            result = run_query(
+                case["question"],
+                allow_rule_fallback=False,
+            )
+            if expected_outcome == "clarification":
+                error = _check_clarification_result(decision, result)
+            else:
+                error = decision.message if decision.outcome != "answered" else ""
+                if not error and decision.outcome != result.outcome:
+                    error = f"查询结果范围不符：期望 {expected_outcome}，实际 {result.outcome}"
+                if not error:
+                    comparison_case = {
+                        **case,
+                        "metric": case.get("expected_metric", ""),
+                        "dimension": case.get("dimension", ""),
+                        "order": case.get("order", ""),
+                        "intent": case.get("expected_intent", ""),
+                    }
+                    error = _result_error(result, comparison_case)
+                executed = bool(
+                    result.attempts
+                    and result.attempts[-1].get("status") == "success"
+                )
+                model_used = bool(
+                    result.mode in MODEL_SQL_MODES
+                    and getattr(result, "narrative_mode", "") == "model"
+                )
+        except Exception as exc:
+            error = str(exc)
+
+        expected_tables = set(case.get("expected_tables") or ())
+        retrieved = set()
+        if expected_outcome == "answered" and result is not None:
+            retrieved = {hit.table for hit in retriever.search(case["question"], limit=4)}
+        table_ok = (
+            expected_tables.issubset(retrieved)
+            if expected_outcome == "answered"
+            else True
+        )
+        intent_ok = (
+            result is not None
+            and result.plan.intent == case.get("expected_intent", "")
+            if expected_outcome == "answered"
+            else bool(result is not None and result.plan.intent == "")
+        )
+        metric_ok = (
+            bool(result is not None and result.plan.metrics == [case.get("expected_metric")])
+            if expected_outcome == "answered"
+            else bool(result is not None and result.plan.metrics == [])
+        )
+        metric_column_ok = True
+        if expected_outcome == "answered" and result is not None:
+            metric_column_ok = any(
+                _normalize(column) in {
+                    _normalize(alias)
+                    for alias in (
+                        METRIC_NAME_ALIASES.get(case.get("expected_metric", ""), set())
+                        | METRIC_ALIASES.get(str(case.get("expected_metric", "")).lower(), set())
+                    )
+                }
+                for column in result.columns
+            )
+        rows_ok = (
+            bool(result is not None and result.rows and result.sql)
+            if expected_outcome == "answered"
+            else bool(result is not None and not result.rows and not result.sql)
+        )
+        hit = (
+            not error
+            and table_ok
+            and intent_ok
+            and metric_ok
+            and metric_column_ok
+            and rows_ok
+            and (expected_outcome != "answered" or (executed and model_used))
+        )
+        cases.append({
+            "id": case["id"],
+            "question": case["question"],
+            "expected_outcome": expected_outcome,
+            "actual_outcome": result.outcome if result is not None else "error",
+            "expected_intent": case.get("expected_intent", ""),
+            "actual_intent": result.plan.intent if result is not None else "",
+            "expected_metric": case.get("expected_metric", ""),
+            "actual_metric": next(iter(result.plan.metrics), "") if result is not None else "",
+            "expected_tables": sorted(expected_tables),
+            "retrieved_tables": sorted(retrieved),
+            "outcome_ok": bool(result is not None and result.outcome == expected_outcome),
+            "intent_ok": intent_ok,
+            "metric_ok": metric_ok,
+            "metric_column_ok": metric_column_ok,
+            "table_recall": table_ok,
+            "rows_ok": rows_ok,
+            "executed": executed,
+            "model_used": model_used,
+            "narrative_mode": getattr(result, "narrative_mode", "unavailable") if result is not None else "error",
+            "narrative_validation": getattr(result, "narrative_validation", {}) if result is not None else {},
+            "sql_mode": result.mode if result is not None else "error",
+            "row_count": len(result.rows) if result is not None else 0,
+            "attempts": list(result.attempts) if result is not None else [],
+            "hit": hit,
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+            "error": None if hit else (error or "范围、意图、指标、表召回、执行或解读未通过"),
+        })
+    passed = sum(1 for case in cases if case["hit"])
+    answerable = sum(1 for case in cases if case["expected_outcome"] == "answered")
+    total = len(cases)
+    return {
+        "suite_version": "colloquial-holdout-v2",
+        "mode": MODEL_MODE,
+        "available": True,
+        "total": total,
+        "passed": passed,
+        "hit_rate": round(passed * 100 / total, 1) if total else 0.0,
+        "execution_rate": round(
+            sum(1 for case in cases if case["executed"]) * 100 / total, 1
+        ) if total else 0.0,
+        "model_rate": round(
+            sum(1 for case in cases if case["model_used"]) * 100 / total, 1
+        ) if total else 0.0,
+        "model": _model_state(),
+        "answerable": answerable,
+        "clarification": total - answerable,
+        "cases": cases,
+        "raw_case_count": total,
+        "family_summary": case_family_summary(cases),
+        "limitations": (
+            "Every answered case has a unique business reading and an independent "
+            "reference SQL, but this remains a small project-defined colloquial set, "
+            "not an open-domain semantic-SQL benchmark."
+        ),
     }

@@ -8,7 +8,7 @@ python -m app.nl2sql.seed
 python -m uvicorn app.api.main:app --port 8000
 ```
 
-The application creates a missing deterministic database on demand. The first BGE-backed request may take longer while local embeddings initialize.
+The application creates a missing deterministic database on demand. The first BGE-backed request may take longer while local embeddings initialize. The relative-date anchor is read from `MAX(order_date)` in the active query database; `ATLAS_REFERENCE_DATE` is only a planner fallback for offline calls.
 
 ## Readiness checks
 
@@ -29,7 +29,7 @@ curl http://127.0.0.1:8000/api/overview
 
 Runtime configuration is stored at `data/model_config.json` (override with `ATLAS_MODEL_CONFIG_PATH`) and excluded from Git. The public configuration API never returns the API key; it does return the saved Base URL and a boolean `api_key_configured`. If a model call fails, the query response includes the failure in `warnings` and falls back to rule SQL when possible. Result narration uses the same model only after SQL execution succeeds; a narration failure falls back to a deterministic digest and never invalidates the query result.
 
-If `ATLAS_ADMIN_API_TOKEN` is set, model configuration/test, model probing, the data-platform control plane, quality rules, metrics, evaluation datasets/experiments/feedback/tasks and queue claims require `X-Admin-Token`. The browser reads the token from `localStorage` and sends it on mutating and protected operator-read calls. This shared secret protects the operator surface only; it is not user authentication, RBAC or a replacement for an ingress policy.
+If `ATLAS_ADMIN_API_TOKEN` is set, model configuration/test, model probing, the data-platform control plane, quality rules, metrics, evaluation datasets/experiments/feedback/tasks and queue claims require `X-Admin-Token`. The browser reads the token from `localStorage` and sends it on mutating and protected operator-read calls. This shared secret protects the operator surface only; it is not user authentication, RBAC or a replacement for an ingress policy. The legacy synchronous `GET /api/evaluation` is disabled by default and returns 410 unless `ATLAS_ENABLE_SYNC_EVALUATION=1`.
 
 ## Session data
 
@@ -50,9 +50,11 @@ python -m app.evaluation.run --suite scope --min-hit-rate 100
 python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
+# Strict model snapshot; requires an enabled model and consumes quota.
+python -m app.evaluation.run --suite colloquial --min-hit-rate 0
 ```
 
-A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores. The pytest suite includes four Playwright browser cases against a real local FastAPI process; CI installs Chromium for that gate.
+A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores. The colloquial suite uses the strict model path; a 10/10 result is a small fixed-dataset snapshot, not an open-domain score. The pytest suite includes four Playwright browser cases against a real local FastAPI process; CI installs Chromium for that gate.
 
 `/api/metrics` includes a `model_calls` block with a process-wide concurrency cap, admission timeout, started/succeeded/failed/rejected counts, provider token usage and queue/call latency. These counters are in-memory and per process; aggregate them externally when running multiple workers. The call timeout and SQL token budgets are configurable through `MODEL_CALL_TIMEOUT_SECONDS`, `MODEL_MAX_CONCURRENCY`, `MODEL_ADMISSION_TIMEOUT_SECONDS`, `MODEL_SQL_MAX_TOKENS` and `MODEL_SQL_RETRY_MAX_TOKENS`.
 
@@ -85,7 +87,7 @@ List sources at `GET /api/data-platform/sources`, sync one, then activate it wit
 
 ## External query databases
 
-SQLite remains the default and the only backend covered by the fixed demo overview and offline evaluation fixtures. PostgreSQL and MySQL can be registered with an explicit read-only DSN, are inspected against the five-table schema contract before activation, and execute through the shared SQL AST guard and bounded adapter. The drivers are optional: install `psycopg` for PostgreSQL or `pymysql` for MySQL before using those targets. External databases do not yet have connection pooling, per-tenant row filters, automatic asset-catalog synchronization, or application-enforced server-side statement timeouts; set database/role statement timeouts and connect through a read-only account as deployment requirements.
+SQLite remains the default and the only backend covered by the fixed demo overview and offline evaluation fixtures. PostgreSQL and MySQL can be registered with an explicit read-only DSN, are inspected against the five-table schema contract before activation, and execute through the shared SQL AST guard and bounded adapter. The drivers are optional: install `psycopg` for PostgreSQL or `pymysql` for MySQL before using those targets. External databases do not yet have connection pooling, per-tenant row filters, automatic asset-catalog synchronization, or cross-thread active-query cancellation. The adapter issues PostgreSQL `SET LOCAL statement_timeout` / MySQL `SET SESSION MAX_EXECUTION_TIME` before the statement, but this still needs a live integration test; also set database/role timeouts and connect through a read-only account as deployment requirements.
 
 The DSN is stored as plain text in the local metadata database (`data/data_platform.db` by default) and is not returned by public source/overview APIs. Protect that file, `.env`, backups and logs with filesystem permissions and a secrets manager appropriate for the deployment; the API redaction is not encryption at rest. The read-only guarantee is enforced by the database account and SELECT-only AST policy, not by the local demo's optional admin token.
 

@@ -1,0 +1,575 @@
+{
+  "suite_version": "colloquial-holdout-v2",
+  "mode": "model",
+  "available": true,
+  "total": 10,
+  "passed": 10,
+  "hit_rate": 100.0,
+  "execution_rate": 90.0,
+  "model_rate": 90.0,
+  "model": {
+    "configured": true,
+    "active": true,
+    "model": "deepseek/deepseek-v4.1-flash",
+    "provider": "custom"
+  },
+  "answerable": 9,
+  "clarification": 1,
+  "cases": [
+    {
+      "id": "colloquial-channel-sales",
+      "question": "近90天销售额最高的渠道是哪个？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "sales_overview",
+      "actual_intent": "sales_overview",
+      "expected_metric": "销售额",
+      "actual_metric": "销售额",
+      "expected_tables": [
+        "orders"
+      ],
+      "retrieved_tables": [
+        "marketing_spend",
+        "order_items",
+        "orders",
+        "refunds"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 1,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "SELECT o.channel AS \"渠道\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.status = 'paid' GROUP BY o.channel ORDER BY SUM(o.paid_amount) DESC LIMIT 1",
+          "error": null,
+          "elapsed_ms": 12.49
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 11581.4,
+      "error": null
+    },
+    {
+      "id": "colloquial-region-sales",
+      "question": "近90天销售额最高的地区是哪个？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "sales_overview",
+      "actual_intent": "sales_overview",
+      "expected_metric": "销售额",
+      "actual_metric": "销售额",
+      "expected_tables": [
+        "orders"
+      ],
+      "retrieved_tables": [
+        "marketing_spend",
+        "order_items",
+        "orders",
+        "refunds"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 1,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "SELECT o.region AS 地区, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY o.region ORDER BY 销售额 DESC LIMIT 1",
+          "error": null,
+          "elapsed_ms": 3.45
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 8954.6,
+      "error": null
+    },
+    {
+      "id": "colloquial-category-sales",
+      "question": "近90天销售额最高的品类是哪个？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "category_analysis",
+      "actual_intent": "category_analysis",
+      "expected_metric": "销售额",
+      "actual_metric": "销售额",
+      "expected_tables": [
+        "orders"
+      ],
+      "retrieved_tables": [
+        "marketing_spend",
+        "order_items",
+        "orders",
+        "refunds"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 1,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "SELECT o.category AS 品类, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY o.category ORDER BY SUM(o.paid_amount) DESC LIMIT 1",
+          "error": null,
+          "elapsed_ms": 6.8
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 10476.0,
+      "error": null
+    },
+    {
+      "id": "colloquial-refund-reason",
+      "question": "近90天因为退款损失的钱主要是什么原因？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "refund_analysis",
+      "actual_intent": "refund_analysis",
+      "expected_metric": "退款金额",
+      "actual_metric": "退款金额",
+      "expected_tables": [
+        "orders",
+        "refunds"
+      ],
+      "retrieved_tables": [
+        "marketing_spend",
+        "order_items",
+        "orders",
+        "refunds"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [
+          "未明确复述 退款原因 榜首 质量问题"
+        ],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 5,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "SELECT r.reason AS \"退款原因\", ROUND(SUM(r.refund_amount), 2) AS \"退款金额\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY r.reason ORDER BY SUM(r.refund_amount) DESC",
+          "error": null,
+          "elapsed_ms": 5.26
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 8910.3,
+      "error": null
+    },
+    {
+      "id": "colloquial-roi-channel",
+      "question": "近90天投放回报最高的渠道是哪个？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "marketing_efficiency",
+      "actual_intent": "marketing_efficiency",
+      "expected_metric": "ROI",
+      "actual_metric": "ROI",
+      "expected_tables": [
+        "marketing_spend",
+        "orders"
+      ],
+      "retrieved_tables": [
+        "customers",
+        "marketing_spend",
+        "order_items",
+        "orders"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 1,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "WITH order_agg AS (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel), spend_agg AS (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) SELECT o.channel AS 渠道, ROUND(o.sales * 1.0 / NULLIF(s.spend, 0), 2) AS ROI FROM order_agg AS o JOIN spend_agg AS s ON o.channel = s.channel ORDER BY ROI DESC LIMIT 1",
+          "error": null,
+          "elapsed_ms": 7.77
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 23887.8,
+      "error": null
+    },
+    {
+      "id": "colloquial-aov",
+      "question": "近90天用户每单大概花多少钱？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "sales_overview",
+      "actual_intent": "sales_overview",
+      "expected_metric": "客单价",
+      "actual_metric": "客单价",
+      "expected_tables": [
+        "orders"
+      ],
+      "retrieved_tables": [
+        "customers",
+        "order_items",
+        "orders",
+        "refunds"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 1,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "SELECT ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28'",
+          "error": null,
+          "elapsed_ms": 3.63
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 8062.7,
+      "error": null
+    },
+    {
+      "id": "colloquial-daily",
+      "question": "上个月每天卖得怎么样？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "sales_overview",
+      "actual_intent": "sales_overview",
+      "expected_metric": "销售额",
+      "actual_metric": "销售额",
+      "expected_tables": [
+        "orders"
+      ],
+      "retrieved_tables": [
+        "marketing_spend",
+        "order_items",
+        "orders",
+        "refunds"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 31,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "SELECT o.order_date AS 日期, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2026-01-01' AND '2026-01-31' GROUP BY o.order_date ORDER BY o.order_date",
+          "error": null,
+          "elapsed_ms": 3.39
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 8035.0,
+      "error": null
+    },
+    {
+      "id": "colloquial-refund-count",
+      "question": "上个月各品类退款有多少单？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "refund_analysis",
+      "actual_intent": "refund_analysis",
+      "expected_metric": "退款单数",
+      "actual_metric": "退款单数",
+      "expected_tables": [
+        "orders",
+        "refunds"
+      ],
+      "retrieved_tables": [
+        "marketing_spend",
+        "order_items",
+        "orders",
+        "refunds"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 4,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "SELECT o.category AS 品类, COUNT(r.refund_id) AS 退款单数 FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' GROUP BY o.category ORDER BY 退款单数 DESC",
+          "error": null,
+          "elapsed_ms": 3.9
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 14230.3,
+      "error": null
+    },
+    {
+      "id": "colloquial-units-category",
+      "question": "上个月各品类卖出去多少件？",
+      "expected_outcome": "answered",
+      "actual_outcome": "answered",
+      "expected_intent": "category_analysis",
+      "actual_intent": "category_analysis",
+      "expected_metric": "销量",
+      "actual_metric": "销量",
+      "expected_tables": [
+        "order_items",
+        "orders"
+      ],
+      "retrieved_tables": [
+        "marketing_spend",
+        "order_items",
+        "orders",
+        "refunds"
+      ],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": true,
+      "model_used": true,
+      "narrative_mode": "model",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [
+          "未明确复述 品类 榜首 运动鞋服"
+        ],
+        "contract": "deterministic-digest-grounding-v1"
+      },
+      "sql_mode": "llm",
+      "row_count": 4,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status": "success",
+          "sql": "SELECT oi.category AS 品类, ROUND(SUM(oi.quantity), 2) AS 销量 FROM orders AS o JOIN order_items AS oi ON o.order_id = oi.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.status = 'paid' GROUP BY oi.category ORDER BY 销量 DESC",
+          "error": null,
+          "elapsed_ms": 5.89
+        }
+      ],
+      "hit": true,
+      "elapsed_ms": 18615.2,
+      "error": null
+    },
+    {
+      "id": "colloquial-vague-business",
+      "question": "最近生意怎么样？",
+      "expected_outcome": "clarification",
+      "actual_outcome": "clarification",
+      "expected_intent": "",
+      "actual_intent": "",
+      "expected_metric": "",
+      "actual_metric": "",
+      "expected_tables": [],
+      "retrieved_tables": [],
+      "outcome_ok": true,
+      "intent_ok": true,
+      "metric_ok": true,
+      "metric_column_ok": true,
+      "table_recall": true,
+      "rows_ok": true,
+      "executed": false,
+      "model_used": false,
+      "narrative_mode": "guard",
+      "narrative_validation": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "contract": "intent-guard-v1"
+      },
+      "sql_mode": "clarification",
+      "row_count": 0,
+      "attempts": [],
+      "hit": true,
+      "elapsed_ms": 1.8,
+      "error": null
+    }
+  ],
+  "raw_case_count": 10,
+  "family_summary": {
+    "family_count": 10,
+    "fully_passed_families": 10,
+    "family_hit_rate": 100.0,
+    "families": [
+      {
+        "family": "colloquial-aov",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-category-sales",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-channel-sales",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-daily",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-refund-count",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-refund-reason",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-region-sales",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-roi-channel",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-units-category",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      },
+      {
+        "family": "colloquial-vague-business",
+        "total": 1,
+        "passed": 1,
+        "hit_rate": 100.0
+      }
+    ],
+    "independence_note": "Matrix cases share question shapes and differ mainly by time/filter values; raw case count is not the number of independent semantic samples."
+  },
+  "limitations": "Every answered case has a unique business reading and an independent reference SQL, but this remains a small project-defined colloquial set, not an open-domain semantic-SQL benchmark.",
+  "evaluated_at": "2026-11-09T17:12:58.351054+00:00",
+  "runtime": {
+    "workers": 1,
+    "wall_elapsed_ms": 112767.9,
+    "source_sha256": "aac539db47388f45d339d108d6504c473c2c7b2cb9379f16f9d597d03e3ef3d2"
+  },
+  "evaluation_contract": "colloquial-holdout-v2",
+  "case_manifest_sha256": "7c978db89012e27e9216e258eb34fd2e093756eeb618aeedf6633f4fffe8672e",
+  "quality_gate": {
+    "min_hit_rate": 0.0,
+    "passed": true
+  }
+}

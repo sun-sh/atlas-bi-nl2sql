@@ -20,7 +20,7 @@ Atlas BI 是一个可运行、可评测的电商经营分析作品：从自然�
 | --- | --- |
 | 是不是一个完整项目 | 是。查询、会话、数据中台、评测中台、前端、测试和 CI 都在同一个可运行仓库里。 |
 | 能不能现场演示 | 能。无模型 Key 也能用确定性规则链路跑通；配置 OpenAI 兼容模型后走模型生成和模型解读。 |
-| 有没有真实证据 | 有。175 项自动化测试、规则等价 100/100、自然语言 15/15、检索消融和真实 HTTP 冒烟压测都可复现。 |
+| 有没有真实证据 | 有。187 项自动化测试、规则等价 100/100、自然语言 15/15、口语严格模型 10/10、检索消融和真实 HTTP 冒烟压测都可复现。 |
 | 够不够面试 | 够。它覆盖 Agent 编排、RAG/检索、SQL 安全、结果验收、SSE、评测工程和工程边界，适合准备 AI 应用 / 后端岗位。 |
 | 是不是生产平台 | 不是。真实数据库集成、连接池、SSO、多租户、分布式 worker 和完整安全治理仍是后续工作；见 [AUDIT](docs/AUDIT.md)。 |
 
@@ -125,27 +125,30 @@ flowchart TD
 | 模块 | 实现 |
 | --- | --- |
 | 可答性判定 | 模糊问题先要求补充指标；因果问题只提供可查询的拆解方向；写操作、敏感字段和域外请求在生成 SQL 前拒绝；澄清和拒答不生成伪造查询计划 |
-| Schema 召回 | BGE + Qdrant 语义检索与 Elasticsearch BM25 / 本地 IDF 双路召回，最终得分 `0.56 × semantic + 0.44 × lexical` |
+| Schema 召回 | BGE + Qdrant 语义检索与 Elasticsearch BM25 / 本地 IDF 双路召回，最终得分 `0.56 × semantic + 0.44 × lexical`；业务意图给出必需表，召回补足候选 Schema 并同时进入生成 Prompt |
 | SQL 安全 | sqlglot AST、单条 SELECT、表/函数白名单、跨 Schema 拦截、拒绝 `SELECT *`、敏感字段拦截、只读连接和结果行数限制 |
-| 有限自愈 | 记录原 SQL、错误、Schema 和尝试次数，在预算内让模型修复；修复 SQL 仍走同一门禁；预算耗尽保留失败状态 |
+| 有限自愈 | 记录原 SQL、错误、Schema 和尝试次数，在预算内让模型修复；修复 SQL 仍走同一门禁；预算耗尽保留失败状态，业务语义错仍可能通过执行 |
 | 结果解读 | 先执行可信查询，再生成解释；数字、榜首和趋势必须与确定性摘要一致，失败时回退摘要 |
 | 流式体验 | SSE 先推结果、SQL、检索依据和确定性摘要，再流式生成模型结论；失败时用 `reset` 换成完整摘要 |
 | 会话 | 最多 20 轮、7 天过期；新问题条件优先，缺失条件按需继承，额外条件会进入计划上下文 |
 | 数据中台 | SQLite/CSV 注册、快照、资产目录、质量规则、指标口径、字段血缘、只读服务和审计；PostgreSQL/MySQL 可作为查询目标 |
 | 评测中台 | 数据集版本、模型实验、优先级队列、取消与重试、1–3 个隔离进程、任务对比、失败候选审核后回流 |
 | 运行观测 | `/api/metrics` 进程内请求数、错误率和 P50/P95/Max；模型调用并发、排队和 token 指标；可选运营令牌 |
-| 可测试性 | 175 项 pytest；4 条 Playwright 浏览器用例；规则、自然语言、检索和范围门禁均在 CI 中运行 |
+| 可测试性 | 187 项 pytest；4 条 Playwright 浏览器用例；规则、自然语言、检索和范围门禁均在 CI 中运行 |
 
 ## 评测证据
 
 这里最重要的一条是：**固定数据集上的回归结果不等于开放域生产准确率。**
 
+100 条回归集是 19 个业务题型族在时间、地区、渠道和品类上的矩阵扩展，因此同时报告 raw case 与题型族。规则 100/100 验证的是回归门禁，不是模型能力；口语 10/10 是固定题集上的严格模型快照，需要结合“题量小、单一电商域”一起读。
+
 | 证据 | 结果 | 说明 |
 | --- | --- | --- |
-| 严格模型回归 `strict-model-v3-100` | **99/100** | 当前代码、固定模型和网络条件下的日期快照；唯一失败是 ROI 修复时 token 预算截断 |
-| 独立 holdout `strict-model-v3-holdout-30` | **28/30** | 不参与调参的 30 条问题；销售 17/17、品类 3/3、退款 6/6、ROI 2/4 |
-| 规则链路等价 `rule-equivalence-v1` | **100/100** | 不调用模型；验证离线规划、规则 SQL、只读执行与独立基准等价 |
-| 自然语言变体 `natural-language-holdout-v1` | **15/15** | 8 条应回答、7 条应澄清；检查意图、指标、表召回、时间范围和真实执行 |
+| 严格模型回归 `strict-model-v3-100` | **100/100（19 个题型族）** | 当前代码、固定模型和网络条件下的日期快照；全部通过，但 raw case 不等于独立语义样本 |
+| 独立 holdout `strict-model-v3-holdout-30` | **29/30** | 不参与调参的 30 条问题；销售 17/17、品类 3/3、退款 6/6、ROI 3/4 |
+| 规则链路等价 `rule-equivalence-v1` | **100/100（19 个题型族）** | 不调用模型；raw case 是时间/筛选矩阵，独立单位看题型族 |
+| 自然语言变体 `natural-language-holdout-v1` | **15/15** | 8 条应回答、7 条应澄清；检查意图、指标、表召回、时间范围和真实执行；确定性规则路径 |
+| 口语严格模型 `colloquial-holdout-v2` | **10/10** | 10 条不含公式/粒度说明；9 条由模型生成或修复 SQL 并执行，1 条正确澄清；仍是小规模固定题集 |
 | 检索消融 `retrieval-ablation-v1` | Top-1 **91.7%**、MRR **0.9583**、完整表召回@4 **100%** | 12 条本地标注问法；只有 5 张表，不能证明开放域检索效果 |
 | 范围守卫 `scope-guard-v1` | **7/7** | 模糊、写操作、敏感字段、域外请求必须澄清或拒答，不产生 SQL 和结果行 |
 | HTTP 冒烟压测 | 20 请求、并发 4、20/20 成功、P50 55.7 ms、P95 158.6 ms | 关闭模型、规则 SQL、固定 SQLite；不是 LLM 延迟或生产容量 |
@@ -238,10 +241,10 @@ export LLM_MODEL=gpt-4.1-mini
 | `POST /api/evaluation/tasks/{id}/retry` | 重试已经结束的任务 |
 | `POST /api/evaluation/queue/claim` | 手动领取一个排队任务 |
 | `GET /api/evaluation/compare` | 对比两次运行；返回可比性标记 |
-| `GET /api/evaluation` | 同步跑一次评测，仅保留作兼容入口 |
+| `GET /api/evaluation` | 旧同步评测入口，默认返回 410；仅显式设置 `ATLAS_ENABLE_SYNC_EVALUATION=1` 时启用 |
 | `GET /docs` | OpenAPI 交互文档 |
 
-同步查询返回计划、召回结果、SQL、数据、尝试记录、告警、`trace_id` 和解读。`narrative.mode` 标明解读来自模型还是确定性摘要。带会话的查询还会返回 `session_id` 和更新后的快照，`plan.inherited` 列出继承了哪些条件。评测任务走 `POST /api/evaluation/tasks`；`GET /api/evaluation` 只用于临时调试。
+同步查询返回计划、召回结果、SQL、数据、尝试记录、告警、`trace_id` 和解读。`narrative.mode` 标明解读来自模型还是确定性摘要。带会话的查询还会返回 `session_id` 和更新后的快照，`plan.inherited` 列出继承了哪些条件。评测任务走 `POST /api/evaluation/tasks`；`GET /api/evaluation` 默认关闭，避免公网请求同步跑完整评测并消耗模型额度。
 
 ## SSE 事件
 
@@ -275,10 +278,12 @@ python -m app.evaluation.run --suite scope --min-hit-rate 100
 python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
+# 需要已启用模型并消耗在线配额
+python -m app.evaluation.run --suite colloquial --min-hit-rate 0
 node --check app/static/app.js
 ```
 
-`pytest` 默认关闭在线模型和 BGE 下载，使用本地数据和受控模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **175 项测试全部通过**，包含 4 条 Playwright 浏览器端到端用例。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
+`pytest` 默认关闭在线模型和 BGE 下载，使用本地数据和受控模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **187 项测试全部通过**，包含 4 条 Playwright 浏览器端到端用例。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。`colloquial` 是严格模型快照，需要模型 Key，不设固定 CI 分数。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
 
 ## 目录结构
 
@@ -317,7 +322,9 @@ tests/              # 自动化测试和浏览器端到端测试
 - CSV 单表入库不能切换成 NL2SQL 分析库；SQLite 和显式配置的 PostgreSQL/MySQL 才能被启用为查询数据源。外部库适配器暂不含连接池、租户行级过滤和自动目录同步；DSN 以明文保存在本地元数据中，公开接口不返回，但部署时仍需文件权限和密钥管理。
 - `/api/metrics` 是单进程内存窗口，进程重启即清零，也不包含网关、数据库连接池或模型供应商侧指标；HTTP 压测关闭模型，不能当作 LLM 容量结论。
 - 评测中台使用 SQLite 队列和单执行槽，没有分布式后台进程、跨组织标注或线上流量评测。
-- 严格模型回归 **99/100**、holdout **28/30** 都是当前模型、网络和固定数据条件下的日期快照，不是开放域生产准确率，也不是稳定承诺。
+- 100 条回归集并不是 100 个独立语义样本：它由 19 个业务题型族在时间、地区、渠道和品类上扩展而来。README 同时报告 raw case 与题型族，避免把矩阵规模误读成语义覆盖。
+- 检索不是纯检索式表路由：意图规则给出业务必需表，混合召回补充候选 Schema；两者都进入规划和生成 Prompt。五张表上的 Top-1 指标不能外推到大型 Schema。
+- 严格模型回归 **100/100**、holdout **29/30**、口语 **10/10** 都是当前模型、网络和固定数据条件下的日期快照，不是开放域生产准确率，也不是稳定承诺。
 
 ## 文档
 

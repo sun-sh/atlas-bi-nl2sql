@@ -12,7 +12,7 @@ from app.nl2sql import generator
 from app.nl2sql.harness import create_run_context, is_cancelled
 from app.nl2sql.intent_guard import OUTCOME_ANSWERED, OUTCOME_CLARIFICATION, OUTCOME_UNSUPPORTED, assess_question
 from app.nl2sql.model_config import get_model_config
-from app.nl2sql.generator import generate_llm_repair_sql, generate_llm_sql, generate_rule_sql
+from app.nl2sql.generator import generate_llm_repair_sql_result, generate_llm_sql_result, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
 from app.nl2sql.planner import make_plan
 from app.nl2sql.result_insight import (
@@ -96,6 +96,24 @@ def retrieve_node(state: GraphState) -> GraphState:
     }
 
 
+def _query_reference_date(query_target: QueryTarget | None, db_path: str | None) -> str | None:
+    """Read the relative-date anchor from the active database, not the host clock."""
+    try:
+        target = query_target or QueryTarget(
+            "sqlite", "sqlite", Path(db_path) if db_path else get_settings().db_path
+        )
+        result = execute_sql(
+            "SELECT MAX(order_date) AS reference_date FROM orders",
+            limit=1,
+            target=target,
+        )
+        rows = result.get("rows") or []
+        value = rows[0].get("reference_date") if rows else None
+        return str(value)[:10] if value else None
+    except Exception:
+        return None
+
+
 def plan_node(state: GraphState) -> GraphState:
     decision = assess_question(state["question"], state.get("context"))
     if not decision.answerable:
@@ -116,7 +134,13 @@ def plan_node(state: GraphState) -> GraphState:
         )
         return {"plan": plan, "decision": decision.as_dict()}
     _emit_stage("plan")
-    plan = make_plan(state["question"], state["hits"], state.get("context"))
+    reference_date = _query_reference_date(state.get("query_target"), state.get("db_path"))
+    plan = make_plan(
+        state["question"],
+        state["hits"],
+        state.get("context"),
+        reference_date=reference_date,
+    )
     plan.outcome = decision.outcome
     plan.reason_code = decision.reason_code
     plan.decision = decision.as_dict()
@@ -135,16 +159,16 @@ def generate_node(state: GraphState) -> GraphState:
         return {"sql": sql, "mode": "rule", "warnings": warnings, "generation_retries": 0}
     target = state.get("query_target")
     dialect = target.dialect if target else "sqlite"
-    sql = generate_llm_sql(state["question"], plan, state["hits"], dialect=dialect)
+    sql, llm_error = generate_llm_sql_result(state["question"], plan, state["hits"], dialect=dialect)
     mode = "llm"
     warnings = list(state.get("warnings", []))
     if not sql:
-        reason = generator.LAST_LLM_ERROR or "模型返回空内容"
+        reason = llm_error or "模型返回空内容"
         retry_count = 0
         if get_settings().max_repair_attempts > 0 and (get_model_config().enabled or not state.get("allow_rule_fallback", True)):
             _emit_stage("repair")
             retry_count = 1
-            sql = generate_llm_repair_sql(
+            sql, repair_error = generate_llm_repair_sql_result(
                 state["question"], plan, state["hits"], "",
                 f"首次SQL未产出：{reason}。重新生成完整SELECT，保留原查询口径。",
                 dialect=dialect,
@@ -158,8 +182,8 @@ def generate_node(state: GraphState) -> GraphState:
         if state.get("allow_rule_fallback", True):
             sql = generate_rule_sql(state["question"], plan, state["hits"])
             mode = "rule"
-            if generator.LAST_LLM_ERROR:
-                warnings.append("模型调用失败，已回退规则 SQL：" + generator.LAST_LLM_ERROR)
+            if llm_error:
+                warnings.append("模型调用失败，已回退规则 SQL：" + llm_error)
         else:
             warnings.append("模型未生成 SQL，严格模型评测不回退规则：" + reason)
             return {"sql": "", "mode": "model-failed", "warnings": warnings, "generation_retries": retry_count}
@@ -177,13 +201,15 @@ def execute_node(state: GraphState) -> GraphState:
     warnings = list(state.get("warnings", []))
     try:
         target = state.get("query_target")
-        safe_sql = validate_sql(sql, dialect=target.dialect if target else "sqlite")
+        # execute_sql performs the AST validation for this exact target; do not
+        # parse the same SQL twice in the workflow.
         result = execute_sql(
-            safe_sql,
+            sql,
             cancel_trace_id=state.get("trace_id"),
             db_path=state.get("db_path"),
             target=target,
         )
+        safe_sql = result["sql"]
         if result["rows"] and all(
             value is None
             for row in result["rows"]
@@ -230,7 +256,7 @@ def repair_node(state: GraphState) -> GraphState:
             "warnings": state.get("warnings", [])
             + [f"第 {len(attempts)} 次执行失败：{last_error}", "修复来源：rule-repair"],
         }
-    repaired = generate_llm_repair_sql(
+    repaired, repair_error = generate_llm_repair_sql_result(
         question,
         plan,
         state["hits"],
@@ -247,14 +273,14 @@ def repair_node(state: GraphState) -> GraphState:
         sql = generate_rule_sql(question, plan, state["hits"])
         mode = "rule-repair"
         extra = ["修复来源：" + mode]
-        if generator.LAST_LLM_ERROR:
-            extra.append("模型修复失败：" + generator.LAST_LLM_ERROR)
+        if repair_error:
+            extra.append("模型修复失败：" + repair_error)
     else:
         sql = ""
         mode = "model-repair-failed"
         extra = ["严格模型评测不回退规则"]
-        if generator.LAST_LLM_ERROR:
-            extra.append("模型修复失败：" + generator.LAST_LLM_ERROR)
+        if repair_error:
+            extra.append("模型修复失败：" + repair_error)
     return {
         "sql": sql,
         "mode": mode,
@@ -466,9 +492,14 @@ def query_stream_events(
     )
     state: GraphState = {}
     try:
+        # LangGraph's default recursion limit is 25. A two-turn evaluation with
+        # repair can legitimately exceed that when graph nodes and conditional
+        # transitions are both counted. Keep the project's own bounded repair
+        # budget authoritative while leaving headroom for graph plumbing.
         for mode, chunk in _GRAPH.stream(
                 initial,
                 stream_mode=["custom", "updates"],
+                config={"recursion_limit": 50},
             ):
             if is_cancelled(initial["trace_id"]):
                 yield {"type": "cancelled", "trace_id": initial["trace_id"]}

@@ -1,6 +1,6 @@
 # Atlas BI project audit
 
-Audit date: 2026-11-08
+Audit date: 2026-11-10
 
 Scope: correctness, evaluation integrity, data/security boundaries, operations, and interview claims.
 
@@ -20,23 +20,36 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 | Session concurrency | Two writers for one session could race on the turn cap and latest context. | The append path takes a write lock for the session transaction. | session tests |
 | Frontend safety | API-derived strings were interpolated into `innerHTML` without escaping in several result/evidence paths. | High-risk result, evidence, chart and example strings are escaped; backend responses also set `nosniff`, `DENY` framing and a restrictive referrer policy. | JS syntax check and API security-header test |
 | Operator surface | Data-platform and model-config read endpoints exposed source, lineage, audit and provider metadata without authentication. | When `ATLAS_ADMIN_API_TOKEN` is configured, protected reads also require `X-Admin-Token`; the browser supplies it for those routes. Local demo mode remains open when the token is unset. | API protected-read regression |
+| Retrieval wiring | Recall results were passed to the generator but discarded; fusion only affected `/evidence`, so the retrieval-ablation number did not describe the SQL path. | Retrieval candidates now contribute table structure to the generation and repair prompt; planner-required business tables still take precedence and both sets are visible in the plan. | prompt regression and `/evidence` inspection |
+| Retrieval concurrency | Elasticsearch scores were stored on the shared retriever, so concurrent searches could mix request-local scores. | Scores are returned as a local value for one `search()` call and never written on the shared instance. | retrieval concurrency regression |
+| Retrieval lifecycle | Startup deleted shared Elasticsearch indices and Qdrant collections, which is destructive on a shared cluster. | Existing project-scoped indices are reused and upserted; names default to `atlas_schema_tables` and are configurable. | retrieval startup tests |
+| Relative dates | Runtime planning could silently use a fixed demo date after the dataset date advanced. | The workflow derives the reference date from `MAX(order_date)` of the active database; direct offline planner calls use a documented fixed reference date. | planner/workflow regression |
+| Request-local model errors | `LAST_LLM_ERROR` was process-global; concurrent requests could attribute one model failure to another request. | Generation and repair return request-scoped `(sql, error)` results; the old wrapper remains only for compatibility. | concurrency and strict-evaluation tests |
+| Narrative grounding | Values with absolute magnitude `<= 1` bypassed fact checking, and two-decimal collisions could pass as grounded. | Small ratios/ROI values are checked and display rounding is derived from the candidate precision. | small-fraction hallucination test |
+| Evaluation independence | The 100-case description did not distinguish raw cases from the repeated matrix shapes. | Reports expose raw case count plus `family_summary`; the latest strict model and rule runs both report 100 cases / 19 business-shape families. | family-summary regression |
+| Evaluation integrity | An early colloquial set was rule-only, had several non-unique Top-1/ranking golds, and counted a loose column match as a pass. | `colloquial-holdout-v2` uses strict model SQL, independent reference SQL, row comparison, narrative grounding, and an explicit clarification case; the dated model result is archived separately. | colloquial evaluator and report tests |
+| API cost exposure | `/api/query` had no per-client admission and `/api/evaluation` ran a full suite synchronously. | Query routes have a process-local per-IP token bucket (`QUERY_RATE_LIMIT_PER_MINUTE`); legacy sync evaluation returns 410 unless `ATLAS_ENABLE_SYNC_EVALUATION=1`. | API regression tests |
 
 ## Still open before calling this production-ready
 
-1. **Real database integration evidence.** The DB-API adapters have mock-driver tests, not live PostgreSQL/MySQL instances, migrations, TLS verification, server-side statement timeouts or failure/failover tests.
+1. **Real database integration evidence.** The DB-API adapters have mock-driver tests, not live PostgreSQL/MySQL instances, migrations, TLS verification or failure/failover tests. They now issue dialect-specific server-side timeout commands, but that behavior still needs live integration coverage.
 2. **Connection and transaction model.** There is no connection pool, per-request isolation policy, retry/backoff or circuit breaker for external databases.
 3. **Tenant isolation.** Workspace and role parameters exist in the data-platform functions, but there is no authenticated identity propagation, row-level security or per-tenant database routing.
 4. **Distributed execution.** The evaluation queue is SQLite-backed with one execution slot. Model concurrency and request metrics are process-local; multi-worker deployment needs a shared queue, leases and aggregated observability.
 5. **Credential storage.** Model keys and external DSNs are stored in local files/SQLite metadata. They are masked or omitted from public responses, but not encrypted at rest or managed by a secret service.
 6. **Complete browser hardening.** Escaping has been tightened in the identified paths, but the UI is still a large `innerHTML`-based rendering surface. A templating/DOMPurify pass and a Content-Security-Policy deployment policy remain necessary. Operator-read endpoints now share the optional token guard, but this remains a shared secret rather than SSO/RBAC.
-7. **Open-domain evaluation.** The current 100-case regression, 30-case holdout, 15 natural-language variants and 12 retrieval cases are project-defined and small. They are useful regression evidence, not production accuracy.
+7. **Open-domain evaluation.** The current 100-case regression, 30-case holdout, 15 natural-language variants, 10 colloquial cases and 12 retrieval cases are project-defined and small. The 100-case matrix has 19 business-shape families; raw case count is not independent semantic coverage. These are useful regression evidence, not production accuracy.
 8. **Evaluation provenance.** Source hash in a persisted task currently covers `app/` Python files, not the full repository, prompt/model configuration or database snapshot. Add those dimensions before treating historical task comparisons as reproducible experiments.
-9. **Operational controls.** There is no SSO, full RBAC, rate limiting, audit retention policy, backup/restore drill, dead-letter queue or alert routing.
+9. **Operational controls.** There is no SSO, full RBAC, distributed/ingress rate limiting, audit retention policy, backup/restore drill, dead-letter queue or alert routing. The query token bucket is process-local and only protects a single process.
+10. **External query cancellation/timeouts.** PostgreSQL and MySQL now issue server-side statement-timeout commands, but there is no live integration test and no cross-thread active-query cancellation equivalent to SQLite's progress handler. Treat the external adapters as opt-in, not production-complete.
 
 ## Claims to avoid
 
-- Do not call 99/100 or 28/30 an open-domain production accuracy.
+- Do not call 100/100 or 29/30 an open-domain production accuracy.
 - Do not present the rule-equivalence 100/100 or natural-language 15/15 as model capability.
+- Do not present the colloquial 10/10 as a large or open-domain benchmark; it is a dated 10-case fixed dataset.
+- Do not say retrieval alone routes every table; business intent contributes required tables and retrieval contributes candidate context.
+- Do not say 100 cases are 100 independent semantic samples; the matrix expands about 19 business shapes.
 - Do not say PostgreSQL/MySQL are production database integrations; they are opt-in DB-API adapters with Schema probes.
 - Do not say external-source data service is implemented; it is intentionally rejected.
 - Do not claim full async execution, distributed evaluation or cross-worker metrics.
@@ -44,8 +57,9 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 
 ## Verification snapshot
 
-- Full pytest suite: **175 passed**.
-- Rule equivalence: **100/100**, all cases executed through the forced rule path.
-- Natural-language deterministic end-to-end: **15/15**.
+- Full pytest suite: **187 passed** (sandbox environment required an approved temp-directory run; the code assertions all passed).
+- Rule equivalence: **100/100 raw cases / 19 fully passed business-shape families**, forced rule path.
+- Natural-language deterministic end-to-end: **15/15 raw cases / 8 fully passed families**.
+- Colloquial strict model snapshot: **10/10**, model rate 90%, execution rate 90%; dated `deepseek/deepseek-v4.1-flash` result in [colloquial JSON](evaluations/colloquial-holdout-2026-11-10.json).
 - Retrieval ablation: **Top-1 91.7%, MRR 0.9583, full table recall@4 100%** on the 12-case local set.
-- Strict model snapshots remain **99/100** regression and **28/30** holdout; they are dated model/network/configuration evidence, not a fixed CI guarantee.
+- Strict model snapshots: **100/100** regression (19 families) and **29/30** holdout; dated `deepseek/deepseek-v4.1-flash` results, not a fixed CI guarantee. Holdout's sole miss is a relative-date inheritance error in the ROI follow-up.

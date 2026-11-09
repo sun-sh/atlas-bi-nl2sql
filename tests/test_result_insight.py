@@ -333,3 +333,34 @@ def test_natural_language_date_labels_do_not_count_as_hallucinated_numbers():
         digest,
     )
     assert check["passed"] is True
+
+
+
+def test_small_hallucinated_fraction_is_rejected():
+    from app.nl2sql.result_insight import validate_narrative
+
+    digest = _grounded_digest()
+    digest["metrics"] = [
+        {"name": "ROI", "sum": None, "avg": 0.42, "min": 0.20, "max": 0.80}
+    ]
+    digest["preferred_metric"] = "ROI"
+    check = validate_narrative("分析：平均 ROI 为 0.85。", digest)
+    assert check["passed"] is False
+
+
+def test_tied_top_metrics_may_both_be_called_highest():
+    from app.nl2sql.result_insight import validate_narrative
+
+    digest = _grounded_digest()
+    digest["preferred_metric"] = "退款单数"
+    digest["dimension"] = "退款原因"
+    digest["ranking"] = [
+        {"label": "物流太慢", "value": "9.00", "share_pct": 25.0},
+        {"label": "尺码不合适", "value": "9.00", "share_pct": 25.0},
+        {"label": "质量问题", "value": "8.00", "share_pct": 22.2},
+    ]
+    check = validate_narrative(
+        "结论：物流太慢与尺码不合适并列最高。关键发现：两者各 9 单。",
+        digest,
+    )
+    assert check["passed"] is True

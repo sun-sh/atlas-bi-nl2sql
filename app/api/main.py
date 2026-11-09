@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -101,6 +101,32 @@ async def security_headers(request, call_next):
         "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
     )
     return response
+
+
+_RATE_LOCK = __import__("threading").Lock()
+_RATE_BUCKETS: dict[str, tuple[float, float]] = {}
+_RATE_LIMIT_PER_MINUTE = max(1, int(__import__("os").getenv("QUERY_RATE_LIMIT_PER_MINUTE", "30")))
+_RATE_BUCKET_LIMIT = 4096
+
+
+def _check_query_rate(remote_addr: str | None) -> None:
+    """Bounded per-process query admission; return 429 instead of silent spending."""
+    import time
+
+    key = remote_addr or "unknown"
+    now = time.monotonic()
+    with _RATE_LOCK:
+        if key not in _RATE_BUCKETS and len(_RATE_BUCKETS) >= _RATE_BUCKET_LIMIT:
+            # Bound accidental memory growth from spoofed source addresses.
+            # Evict the least-recently-refilled entry before adding a new one.
+            oldest = min(_RATE_BUCKETS, key=lambda item: _RATE_BUCKETS[item][1])
+            _RATE_BUCKETS.pop(oldest, None)
+        tokens, last = _RATE_BUCKETS.get(key, (float(_RATE_LIMIT_PER_MINUTE), now))
+        tokens = min(_RATE_LIMIT_PER_MINUTE, tokens + (now - last) * (_RATE_LIMIT_PER_MINUTE / 60.0))
+        if tokens < 1:
+            _RATE_BUCKETS[key] = (tokens, now)
+            raise HTTPException(status_code=429, detail="查询请求过于频繁，请稍后再试")
+        _RATE_BUCKETS[key] = (tokens - 1, now)
 
 
 def _require_admin_token(x_admin_token: str | None = Header(default=None)) -> None:
@@ -345,7 +371,8 @@ def remove_session(session_id: str) -> dict:
 
 
 @app.post("/api/query")
-def query(payload: QueryRequest) -> dict:
+def query(payload: QueryRequest, request: Request) -> dict:
+    _check_query_rate(request.client.host if request.client else None)
     started = time.perf_counter()
     error = False
     try:
@@ -525,7 +552,8 @@ def cancel_query(trace_id: str) -> dict:
 
 
 @app.post("/api/query/stream")
-def query_stream(payload: QueryRequest) -> StreamingResponse:
+def query_stream(payload: QueryRequest, request: Request) -> StreamingResponse:
+    _check_query_rate(request.client.host if request.client else None)
     started = time.perf_counter()
     error = False
     try:
@@ -793,7 +821,14 @@ def claim_evaluation_queue(_: None = Depends(_require_admin_token)) -> dict:
 
 @app.get("/api/evaluation")
 def evaluation(_: None = Depends(_require_admin_token)) -> dict:
-    """Compatibility endpoint: synchronously run one strict evaluation."""
+    """Legacy synchronous evaluation; disabled unless explicitly opted in."""
+    import os
+
+    if os.getenv("ATLAS_ENABLE_SYNC_EVALUATION") != "1":
+        raise HTTPException(
+            status_code=410,
+            detail="同步评测兼容入口已停用，请使用 POST /api/evaluation/tasks",
+        )
     from app.nl2sql.evaluation import run_evaluation
 
     if not settings.db_path.exists():

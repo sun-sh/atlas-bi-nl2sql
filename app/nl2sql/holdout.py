@@ -221,3 +221,132 @@ NATURAL_HOLDOUT_CASES = (
     {"id": "natural-low-price", "question": "哪些商品卖得多但单价低？", "expected_tables": {"order_items", "orders"}, "expected_outcome": "clarification"},
     {"id": "natural-new-customer", "question": "新客户和老客户谁贡献更多？", "expected_tables": {"customers", "orders"}, "expected_outcome": "clarification"},
 )
+
+
+# Colloquial suite: everyday wording without formulas, grain instructions,
+# status enums or sort directions. Each answered item has an independent
+# reference SQL and a single reasonable business interpretation. Items whose
+# metric or grain cannot be inferred uniquely are labelled as clarifications.
+COLLOQUIAL_CASES = (
+    {
+        "id": "colloquial-channel-sales",
+        "question": "近90天销售额最高的渠道是哪个？",
+        "expected_tables": {"orders"},
+        "expected_intent": "sales_overview",
+        "expected_metric": "销售额",
+        "expected_outcome": "answered",
+        "dimension": "channel",
+        "order": "desc",
+        "reference_sql": _sales_sql(
+            _period("last90")[0], _period("last90")[1], dimension="channel"
+        ) + " LIMIT 1",
+    },
+    {
+        "id": "colloquial-region-sales",
+        "question": "近90天销售额最高的地区是哪个？",
+        "expected_tables": {"orders"},
+        "expected_intent": "sales_overview",
+        "expected_metric": "销售额",
+        "expected_outcome": "answered",
+        "dimension": "region",
+        "order": "desc",
+        "reference_sql": _sales_sql(
+            _period("last90")[0], _period("last90")[1], dimension="region"
+        ) + " LIMIT 1",
+    },
+    {
+        "id": "colloquial-category-sales",
+        "question": "近90天销售额最高的品类是哪个？",
+        "expected_tables": {"orders"},
+        "expected_intent": "category_analysis",
+        "expected_metric": "销售额",
+        "expected_outcome": "answered",
+        "dimension": "category",
+        "order": "desc",
+        "reference_sql": _sales_sql(
+            _period("last90")[0], _period("last90")[1], dimension="category"
+        ) + " LIMIT 1",
+    },
+    {
+        "id": "colloquial-refund-reason",
+        "question": "近90天因为退款损失的钱主要是什么原因？",
+        "expected_tables": {"orders", "refunds"},
+        "expected_intent": "refund_analysis",
+        "expected_metric": "退款金额",
+        "expected_outcome": "answered",
+        "dimension": "reason",
+        "order": "desc",
+        "reference_sql": _refund_amount_sql(
+            _period("last90")[0], _period("last90")[1]
+        ),
+    },
+    {
+        "id": "colloquial-roi-channel",
+        "question": "近90天投放回报最高的渠道是哪个？",
+        "expected_tables": {"orders", "marketing_spend"},
+        "expected_intent": "marketing_efficiency",
+        "expected_metric": "ROI",
+        "expected_outcome": "answered",
+        "dimension": "channel",
+        "order": "desc",
+        "reference_sql": _roi_sql(
+            _period("last90")[0], _period("last90")[1]
+        ) + " LIMIT 1",
+    },
+    {
+        "id": "colloquial-aov",
+        "question": "近90天用户每单大概花多少钱？",
+        "expected_tables": {"orders"},
+        "expected_intent": "sales_overview",
+        "expected_metric": "客单价",
+        "expected_outcome": "answered",
+        "reference_sql": _aov_sql(
+            _period("last90")[0], _period("last90")[1]
+        ),
+    },
+    {
+        "id": "colloquial-daily",
+        "question": "上个月每天卖得怎么样？",
+        "expected_tables": {"orders"},
+        "expected_intent": "sales_overview",
+        "expected_metric": "销售额",
+        "expected_outcome": "answered",
+        "dimension": "order_date",
+        "order": "date",
+        "reference_sql": _daily_sql(
+            _period("jan")[0], _period("jan")[1]
+        ),
+    },
+    {
+        "id": "colloquial-refund-count",
+        "question": "上个月各品类退款有多少单？",
+        "expected_tables": {"orders", "refunds"},
+        "expected_intent": "refund_analysis",
+        "expected_metric": "退款单数",
+        "expected_outcome": "answered",
+        "dimension": "category",
+        "order": "desc",
+        "reference_sql": _refund_count_sql(
+            _period("jan")[0], _period("jan")[1], "category"
+        ),
+    },
+    {
+        "id": "colloquial-units-category",
+        "question": "上个月各品类卖出去多少件？",
+        "expected_tables": {"orders", "order_items"},
+        "expected_intent": "category_analysis",
+        "expected_metric": "销量",
+        "expected_outcome": "answered",
+        "dimension": "category",
+        "order": "desc",
+        "reference_sql": _units_sql(
+            _period("jan")[0], _period("jan")[1], dimension="category"
+        ),
+    },
+    {
+        "id": "colloquial-vague-business",
+        "question": "最近生意怎么样？",
+        "expected_tables": set(),
+        "expected_outcome": "clarification",
+    },
+)

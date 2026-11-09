@@ -75,15 +75,22 @@ def _context_numbers(digest: dict[str, Any]) -> set[float]:
 
 
 def _number_is_grounded(value: float, allowed: set[float]) -> bool:
+    """Accept only a faithful display of a digest number.
+
+    Do not use a fixed absolute slack: that would let a hallucinated 0.85
+    match a rounded 0.84 or let a small ratio drift unnoticed. A displayed
+    value must equal the digest value at its own display precision, and the
+    digest value must actually round to that display.
+    """
     if value in allowed:
         return True
-    # Narratives commonly round averages/ratios (e.g. 1.6625 -> 1.66). Accept
-    # displays that match a digest value at the precision the model used.
     for candidate in allowed:
-        if abs(value - candidate) <= max(0.0051, abs(value) * 0.0002):
-            return True
-        text_value = f"{candidate:.8f}".rstrip("0").rstrip(".")
-        if text_value.startswith(f"{value:g}") or f"{value:.2f}" == f"{candidate:.2f}":
+        # The model may round a digest value to the precision it displays.
+        # Require the candidate to round to the same displayed value rather
+        # than allowing an arbitrary absolute difference.
+        decimals = max(0, min(8, len(f"{value:.8f}".rstrip("0").rstrip(".").split(".")[-1]) if "." in f"{value:.8f}".rstrip("0").rstrip(".") else 0))
+        displayed = round(value, decimals)
+        if f"{candidate:.{decimals}f}" == f"{displayed:.{decimals}f}":
             return True
     return False
 
@@ -169,7 +176,6 @@ def validate_narrative(
                 continue
             if (
                 not _number_is_grounded(value, allowed)
-                and abs(value) > 1
                 and abs(value) not in context_numbers
             ):
                 change = abs(float((digest.get("trend") or {}).get("change_pct") or 0))
@@ -186,9 +192,29 @@ def validate_narrative(
         if ranking and dimension:
             top = ranking[0]
             top_label = str(top.get("label") or "")
-            others = [str(item.get("label") or "") for item in ranking[1:] if item.get("label")]
+            top_value = _number(top.get("value")) or 0.0
+            top_ties = [
+                str(item.get("label") or "")
+                for item in ranking[1:]
+                if item.get("label")
+                and abs((_number(item.get("value")) or 0.0) - top_value) <= 0.010001
+            ]
+            others = [
+                str(item.get("label") or "")
+                for item in ranking[1:]
+                if item.get("label") and str(item.get("label") or "") not in top_ties
+            ]
             top_pattern = _top_claim_pattern(top_label) if top_label else None
-            if top_pattern and top_pattern.search(answer) is None:
+            top_mentioned = bool(top_pattern and top_pattern.search(answer))
+            if not top_mentioned:
+                top_mentioned = bool(
+                    top_ties
+                    and any(
+                        bool(_top_claim_pattern(label).search(answer))
+                        for label in top_ties
+                    )
+                )
+            if not top_mentioned:
                 warnings.append(f"未明确复述 {dimension} 榜首 {top_label}")
             preferred_metric = str(digest.get("preferred_metric") or "")
             for label in others:

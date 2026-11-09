@@ -30,10 +30,10 @@ def test_qwen_sql_request_disables_thinking(monkeypatch):
 
 def test_roi_prompt_includes_both_grains_enums_and_no_restricted_fields(monkeypatch):
     captured = {}
-    def capture(instructions, prompt):
+    def capture(instructions, prompt, **kwargs):
         captured.update(instructions=instructions, prompt=prompt)
-        return "SELECT COUNT(*) AS n FROM orders"
-    monkeypatch.setattr(generator, "_llm_sql", capture)
+        return "SELECT COUNT(*) AS n FROM orders", ""
+    monkeypatch.setattr(generator, "_llm_sql_result", capture)
     question = "上个月各渠道ROI"
     plan = make_plan(question, [])
     generator.generate_llm_sql(question, plan, [])
@@ -48,7 +48,7 @@ def test_roi_prompt_includes_both_grains_enums_and_no_restricted_fields(monkeypa
 
 def test_followup_prompt_contains_current_plan_and_source_question(monkeypatch):
     captured = {}
-    monkeypatch.setattr(generator, "_llm_sql", lambda instructions, prompt: captured.update(prompt=prompt))
+    monkeypatch.setattr(generator, "_llm_sql_result", lambda instructions, prompt, **kwargs: (captured.update(prompt=prompt) or "SELECT 1", ""))
     original = make_plan("上个月华东已支付销售额", [])
     context = {**original.as_dict(), **original.context, "question": "上个月华东已支付销售额"}
     plan = make_plan("那华南呢", [], context)
@@ -75,9 +75,9 @@ def test_external_dialect_is_explicit_in_generation_and_repair(monkeypatch):
 
     def capture(instructions, prompt, **kwargs):
         captured.append(instructions)
-        return "SELECT SUM(o.paid_amount) AS 销售额 FROM orders o"
+        return "SELECT SUM(o.paid_amount) AS 销售额 FROM orders o", ""
 
-    monkeypatch.setattr(generator, "_llm_sql", capture)
+    monkeypatch.setattr(generator, "_llm_sql_result", capture)
     plan = make_plan("上个月销售额", [])
     generator.generate_llm_sql("上个月销售额", plan, [], dialect="postgres")
     generator.generate_llm_repair_sql(
@@ -86,3 +86,30 @@ def test_external_dialect_is_explicit_in_generation_and_repair(monkeypatch):
     assert "PostgreSQL" in captured[0]
     assert "SQLite 专有" in captured[0]
     assert "MySQL" in captured[1]
+
+
+
+def test_retrieval_hits_are_included_in_generation_prompt(monkeypatch):
+    captured = {}
+
+    def capture(instructions, prompt, **kwargs):
+        captured["prompt"] = prompt
+        return "SELECT SUM(o.paid_amount) AS 销售额 FROM orders o", ""
+
+    monkeypatch.setattr(generator, "_llm_sql_result", capture)
+    from app.nl2sql.models import SchemaHit, ColumnInfo
+    hits = [SchemaHit(table="orders", label="订单", description="订单事实表", score=1.0, vector_score=1.0, lexical_score=1.0, columns=(ColumnInfo("paid_amount", "REAL", "实付金额"),))]
+    plan = make_plan("销售额", [])
+    generator.generate_llm_sql("销售额", plan, hits)
+    assert "检索候选表：orders" in captured["prompt"]
+    assert "paid_amount" in captured["prompt"]
+
+
+def test_roi_prompt_requires_all_channels_unless_single_top_requested():
+    from app.nl2sql.planner import make_plan
+    from app.nl2sql.generator import _sql_prompt, SQL_INSTRUCTIONS
+
+    prompt = _sql_prompt("上个月各渠道ROI", make_plan("上个月各渠道ROI", []), [])
+    assert "必须返回每个有投放花费的渠道" in SQL_INSTRUCTIONS
+    assert "不要加 LIMIT 1" in SQL_INSTRUCTIONS
+    assert "上个月各渠道ROI" in prompt

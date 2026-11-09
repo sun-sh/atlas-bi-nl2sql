@@ -172,9 +172,10 @@ The LangGraph state carries the question, retrieval question, trace ID, timer, s
 
 - Query and schema text are tokenized for Chinese bigrams and identifier terms.
 - Semantic retrieval uses `BAAI/bge-small-zh-v1.5` embeddings.
-- Qdrant stores vectors in memory by default; a remote endpoint can be supplied.
-- Lexical retrieval uses Elasticsearch BM25 when reachable, otherwise local IDF scoring.
+- Qdrant stores vectors in memory by default; a remote endpoint can be supplied. When a remote collection already exists it is reused and upserted, not deleted on process startup. The default collection/index names are prefixed with `atlas_` and can be overridden through `ATLAS_QDRANT_SCHEMA_COLLECTION` and `ATLAS_ES_SCHEMA_INDEX`.
+- Lexical retrieval uses Elasticsearch BM25 when reachable, otherwise local IDF scoring. Elasticsearch scores are scoped to one `search()` call rather than stored on the shared retriever.
 - Final scoring is `0.56 * semantic + 0.44 * lexical`, with evidence preserved in the response.
+- Retrieval is not the only table router. The deterministic planner contributes required business tables; retrieval adds candidate tables and their column/description context. Both appear in the JSON plan and the generation prompt. The ablation therefore measures retrieval quality, not whether retrieval alone chooses every table.
 - The ablation reports Top-1 accuracy, MRR and full recall@4. On the current five-table labelled set, lexical-only also reaches full recall@4, so the evidence supports a reproducible baseline rather than a claim that fusion dominates every alternative.
 
 ## Active query database

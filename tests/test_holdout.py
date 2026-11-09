@@ -47,3 +47,21 @@ def test_holdout_dataset_is_registered(monkeypatch, tmp_path):
     assert holdout["case_count"] == 30
     assert holdout["status"] == "holdout"
     assert holdout["name"] == HOLDOUT_SUITE_VERSION
+
+
+def test_colloquial_suite_has_unique_gold_and_reference_sql():
+    from app.nl2sql.holdout import COLLOQUIAL_CASES
+
+    assert len(COLLOQUIAL_CASES) >= 10
+    assert len({case["id"] for case in COLLOQUIAL_CASES}) == len(COLLOQUIAL_CASES)
+    assert len({case["question"] for case in COLLOQUIAL_CASES}) == len(COLLOQUIAL_CASES)
+    answered = [case for case in COLLOQUIAL_CASES if case.get("expected_outcome") == "answered"]
+    clarified = [case for case in COLLOQUIAL_CASES if case.get("expected_outcome") == "clarification"]
+    assert answered
+    assert clarified
+    for case in answered:
+        assert case["expected_metric"]
+        assert case["reference_sql"]
+        assert execute_sql(case["reference_sql"])["rows"]
+    for case in clarified:
+        assert "reference_sql" not in case

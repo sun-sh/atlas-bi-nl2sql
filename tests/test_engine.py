@@ -170,7 +170,7 @@ def test_repair_node_passes_error_and_original_sql_to_llm(monkeypatch):
         )
         return "SELECT COUNT(*) AS n FROM orders"
 
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", fake_repair)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql_result", lambda *args, **kwargs: (fake_repair(*args, **kwargs), ""))
     state = {
         "question": "销售额是多少",
         "plan": make_plan("各渠道销售额", []),
@@ -217,7 +217,7 @@ def test_every_rule_query_compiles_and_passes_validator():
 
 
 def test_model_failure_is_visible_when_falling_back_to_rules(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql_result", lambda *args, **kwargs: (None, "模拟网络失败"))
     monkeypatch.setattr("app.nl2sql.generator.LAST_LLM_ERROR", "模拟网络失败")
     result = run_query("各渠道销售额")
     assert result.mode == "rule"
@@ -225,7 +225,7 @@ def test_model_failure_is_visible_when_falling_back_to_rules(monkeypatch):
 
 
 def test_strict_model_query_never_calls_rule_fallback(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql_result", lambda *args, **kwargs: (None, "模拟网络失败"))
     monkeypatch.setattr("app.nl2sql.generator.LAST_LLM_ERROR", "模拟空返回")
 
     def forbidden_rule(*args):
@@ -242,10 +242,10 @@ def test_strict_model_query_never_calls_rule_fallback(monkeypatch):
 
 
 def test_empty_model_sql_gets_one_strict_model_retry(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql_result", lambda *args, **kwargs: (None, "模拟网络失败"))
     monkeypatch.setattr(
-        "app.nl2sql.workflow.generate_llm_repair_sql",
-        lambda *args, **kwargs: "SELECT COUNT(*) AS n FROM orders",
+        "app.nl2sql.workflow.generate_llm_repair_sql_result",
+        lambda *args, **kwargs: ("SELECT COUNT(*) AS n FROM orders", ""),
     )
     result = run_query("各渠道销售额", allow_rule_fallback=False)
     assert result.mode == "llm-repair"
@@ -256,11 +256,11 @@ def test_empty_model_sql_gets_one_strict_model_retry(monkeypatch):
 
 def test_model_retry_budget_includes_empty_generation(monkeypatch):
     calls = []
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql_result", lambda *args, **kwargs: (None, "模拟网络失败"))
     def broken(*args, **kwargs):
         calls.append(args)
         return "SELECT missing_column FROM orders"
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", broken)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql_result", lambda *args, **kwargs: (broken(*args, **kwargs), ""))
     result = run_query("上个月销售额", allow_rule_fallback=False)
     assert len(calls) == 2
     assert len(result.attempts) == 2
@@ -269,12 +269,12 @@ def test_model_retry_budget_includes_empty_generation(monkeypatch):
 
 
 def test_all_null_aggregation_reenters_model_repair_without_broadening_filters(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: "SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = '支付'")
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql_result", lambda *args, **kwargs: ("SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = '支付'", ""))
     captured = []
     def repair(question, plan, hits, sql, error, **kwargs):
         captured.append((plan, error))
         return "SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = 'paid' AND order_date BETWEEN '2026-01-01' AND '2026-01-31' AND region = '华东'"
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", repair)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql_result", lambda *args, **kwargs: (repair(*args, **kwargs), ""))
     result = run_query("上个月华东已支付销售额", allow_rule_fallback=False)
     assert result.mode == "llm-repair"
     assert [attempt["status"] for attempt in result.attempts] == ["failed", "success"]
@@ -283,10 +283,10 @@ def test_all_null_aggregation_reenters_model_repair_without_broadening_filters(m
 
 
 def test_zero_value_is_valid_and_does_not_trigger_repair(monkeypatch):
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql", lambda *args, **kwargs: "SELECT COUNT(*) AS 订单数 FROM orders WHERE status = 'absent'")
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql_result", lambda *args, **kwargs: ("SELECT COUNT(*) AS 订单数 FROM orders WHERE status = 'absent'", ""))
     def forbidden(*args):
         raise AssertionError("valid zero counts must not trigger repair")
-    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql", forbidden)
+    monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql_result", forbidden)
     result = run_query("订单数是多少", allow_rule_fallback=False)
     assert result.attempts[-1]["status"] == "success"
     assert result.rows == [{"订单数": 0}]
@@ -424,9 +424,10 @@ def test_mysql_dbapi_adapter_parses_dsn_and_maps_bounded_rows(monkeypatch):
         def __init__(self):
             self.sql = ""
 
-        def execute(self, sql):
+        def execute(self, sql, params=None):
             self.sql = sql
             captured["sql"] = sql
+            captured.setdefault("statements", []).append(sql)
 
         def fetchmany(self, size):
             captured["fetch_size"] = size
@@ -482,8 +483,9 @@ def test_postgres_dbapi_adapter_maps_rows_and_always_closes(monkeypatch):
     class Cursor:
         description = (("category",), ("refund_rate",))
 
-        def execute(self, sql):
+        def execute(self, sql, params=None):
             captured["sql"] = sql
+            captured.setdefault("statements", []).append(sql)
 
         def fetchmany(self, size):
             captured["fetch_size"] = size
@@ -512,6 +514,7 @@ def test_postgres_dbapi_adapter_maps_rows_and_always_closes(monkeypatch):
         target=target,
     )
     assert captured["dsn"] == "postgresql://reader@db/atlas"
+    assert any("statement_timeout" in statement for statement in captured["statements"])
     assert captured["autocommit"] is True
     assert captured["cursor_closed"] is True
     assert captured["connection_closed"] is True
@@ -548,9 +551,62 @@ def test_force_rule_never_calls_a_configured_model(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("force_rule must not invoke the model")
 
-    monkeypatch.setattr(workflow, "generate_llm_sql", forbidden)
-    monkeypatch.setattr(workflow, "generate_llm_repair_sql", forbidden)
+    monkeypatch.setattr(workflow, "generate_llm_sql_result", forbidden)
+    monkeypatch.setattr(workflow, "generate_llm_repair_sql_result", forbidden)
     result = workflow.run_query("各渠道销售额", narrate=False, force_rule=True)
     assert result.mode == "rule"
     assert result.attempts[-1]["status"] == "success"
     assert result.rows
+
+
+
+def test_call_scoped_model_error_does_not_leak_between_requests(monkeypatch):
+    from app.nl2sql import generator
+
+    responses = iter([
+        (None, "request-a network error"),
+        ("SELECT COUNT(*) AS n FROM orders", ""),
+    ])
+
+    def fake(instructions, prompt, **kwargs):
+        return next(responses)
+
+    monkeypatch.setattr(generator, "_llm_sql_result", fake)
+    first_sql, first_error = generator._llm_sql_result("x", "y")
+    second_sql, second_error = generator._llm_sql_result("x", "y")
+    assert first_sql is None
+    assert first_error == "request-a network error"
+    assert second_sql
+    assert second_error == ""
+
+
+
+def test_window_ranking_function_is_allowed():
+    from app.nl2sql.sql_engine import validate_sql
+    sql = (
+        "SELECT o.channel AS channel, "
+        "ROW_NUMBER() OVER (ORDER BY SUM(o.paid_amount) DESC) AS rn "
+        "FROM orders o GROUP BY o.channel"
+    )
+    assert "ROW_NUMBER" in validate_sql(sql).upper()
+
+
+def test_elasticsearch_scores_are_request_local(monkeypatch):
+    from app.nl2sql.retrieval import HybridSchemaRetriever
+    from app.nl2sql.settings import get_settings
+
+    class FakeElastic:
+        def search(self, **kwargs):
+            query = kwargs["query"]["multi_match"]["query"]
+            score = 5.0 if "退款" in query else 1.0
+            return {"hits": {"hits": [{"_id": "orders", "_score": score}]}}
+
+    retriever = HybridSchemaRetriever()
+    retriever.elastic = FakeElastic()
+    # Two calls must not depend on a shared mutable score attached to the
+    # retriever. The second call would reuse the first result if state leaked.
+    first = retriever.search("退款原因", limit=5)
+    second = retriever.search("销售额", limit=5)
+    assert first
+    assert second
+    assert not hasattr(retriever, "elastic_scores")

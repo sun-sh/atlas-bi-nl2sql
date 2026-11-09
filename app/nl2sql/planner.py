@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
-from datetime import date
+from datetime import date, timedelta
 
 from app.nl2sql.models import QueryPlan, SchemaHit
 
 
+DATASET_REFERENCE_DATE = date(2026, 2, 28)
 REGION_TERMS = {"华东": "华东", "华南": "华南", "华北": "华北", "西南": "西南"}
 CHANNEL_TERMS = {"app": "App", "小程序": "MiniProgram", "miniprogram": "MiniProgram", "网页": "Web", "web": "Web", "抖音": "Douyin", "douyin": "Douyin"}
 CATEGORY_TERMS = ("运动鞋服", "食品饮料", "数码家电", "美妆个护")
@@ -19,25 +21,63 @@ INTENT_TERMS = {
 }
 
 
-def _last_month_sql() -> tuple[str, str]:
-    today = date(2026, 2, 28)
+def _reference_date(value: date | str | None = None) -> date:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value.strip():
+        return date.fromisoformat(value.strip()[:10])
+    configured = os.getenv("ATLAS_REFERENCE_DATE", "").strip()
+    if configured:
+        return date.fromisoformat(configured[:10])
+    # Direct planner calls are used by offline evaluation and must stay
+    # reproducible. The runtime workflow always supplies MAX(order_date) from
+    # the active database, so this fixed demo anchor is not a hidden wall-clock
+    # default in the application path.
+    return DATASET_REFERENCE_DATE
+
+
+def _last_month_sql(reference_date: date | str | None = None) -> tuple[str, str]:
+    today = _reference_date(reference_date)
     first = date(today.year, today.month, 1)
-    last = first.replace(day=1) - __import__("datetime").timedelta(days=1)
+    last = first - timedelta(days=1)
     previous = last.replace(day=1)
     return previous.isoformat(), last.isoformat()
 
 
-def _time_filter(question: str) -> tuple[str, str, str]:
+def _time_filter(
+    question: str,
+    reference_date: date | str | None = None,
+) -> tuple[str, str, str]:
     q = question.lower()
+    if not any(
+        term in q
+        for term in (
+            "上个月", "上月", "本月", "这个月",
+            "近30天", "最近30天", "过去30天", "最近一个月", "过去一个月",
+            "近90天", "最近90天", "过去90天", "近三个月", "最近三个月", "过去三个月",
+        )
+    ):
+        return "", "", ""
+    today = _reference_date(reference_date)
+    month_start = date(today.year, today.month, 1)
     if "上个月" in q or "上月" in q:
-        start, end = _last_month_sql()
+        start, end = _last_month_sql(today)
         return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", "上个月"
     if "本月" in q or "这个月" in q:
-        return "o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28'", "2026-02-01 至 2026-02-28", "本月"
+        start = month_start.isoformat()
+        end = today.isoformat()
+        return f"o.order_date >= '{start}' AND o.order_date <= '{end}'", f"{start} 至 {end}", "本月"
     if "近30天" in q or "最近30天" in q:
-        return "o.order_date BETWEEN '2026-01-30' AND '2026-02-28'", "2026-01-30 至 2026-02-28", "近30天"
-    if "近90天" in q or "最近90天" in q:
-        return "o.order_date BETWEEN '2025-12-01' AND '2026-02-28'", "2025-12-01 至 2026-02-28", "近90天"
+        start = (today - timedelta(days=29)).isoformat()
+        end = today.isoformat()
+        return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", "近30天"
+    if any(
+        term in q
+        for term in ("近90天", "最近90天", "过去90天", "近三个月", "最近三个月", "过去三个月")
+    ):
+        start = (today - timedelta(days=89)).isoformat()
+        end = today.isoformat()
+        return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", "近90天"
     return "", "", ""
 
 
@@ -50,9 +90,20 @@ def _pick(question: str, mapping: dict[str, str], column: str, prefix: str) -> s
 
 
 def _detect_intent(q: str) -> str | None:
-    for intent, terms in INTENT_TERMS.items():
-        if any(term in q for term in terms):
-            return intent
+    # Explicit business signals take precedence over generic retail verbs
+    # such as “卖得最多”, which can otherwise be misread as category quantity.
+    if any(term in q for term in INTENT_TERMS["refund_analysis"]):
+        return "refund_analysis"
+    if any(term in q for term in INTENT_TERMS["marketing_efficiency"]):
+        return "marketing_efficiency"
+    if any(term in q for term in ("件数", "多少件", "商品行", "商品明细")):
+        return "category_analysis"
+    if any(term in q for term in ("品类", "类目")) and "渠道" not in q and "地区" not in q:
+        return "category_analysis"
+    if any(term in q for term in INTENT_TERMS["sales_overview"]):
+        return "sales_overview"
+    if any(term in q for term in INTENT_TERMS["category_analysis"]):
+        return "category_analysis"
     return None
 
 
@@ -68,7 +119,13 @@ def _follow_up(question: str, context: dict | None) -> bool:
     return any(term in q for term in FOLLOW_UP_TERMS) or not _detect_intent(q)
 
 
-def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None) -> QueryPlan:
+def make_plan(
+    question: str,
+    hits: list[SchemaHit],
+    context: dict | None = None,
+    *,
+    reference_date: date | str | None = None,
+) -> QueryPlan:
     q = question.lower()
     tables = [h.table for h in hits]
     filters: list[str] = []
@@ -77,21 +134,27 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
     is_follow_up = _follow_up(question, context)
 
     detected_intent = _detect_intent(q)
+    retrieved_tables = [h.table for h in hits]
     if detected_intent == "refund_analysis":
-        tables = ["orders", "refunds"]
-        intent = "refund_analysis"
-        chart = "bar"
+        required_tables = ["orders", "refunds"]
     elif detected_intent == "marketing_efficiency":
-        tables = ["orders", "marketing_spend"]
-        intent = "marketing_efficiency"
-        chart = "bar"
+        required_tables = ["orders", "marketing_spend"]
     elif detected_intent == "category_analysis":
-        tables = ["orders", "order_items"]
-        intent = "category_analysis"
-        chart = "bar"
+        required_tables = ["orders", "order_items"]
     elif detected_intent == "sales_overview":
-        tables = ["orders"]
+        required_tables = ["orders"]
+    else:
+        required_tables = []
+
+    if required_tables:
+        intent = detected_intent
+        # Retrieval expands context but never removes tables required by the
+        # business definition. This keeps the contract explicit and testable.
+        tables = list(dict.fromkeys([*required_tables, *retrieved_tables]))
+        chart = "line" if ("趋势" in q or "每天" in q or "按日" in q) else "bar"
+    elif detected_intent == "sales_overview":
         intent = "sales_overview"
+        tables = ["orders"]
         chart = "line" if ("趋势" in q or "每天" in q or "按日" in q) else "bar"
     elif is_follow_up:
         intent = str(context.get("intent") or "sales_overview")
@@ -103,7 +166,7 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
         intent = "sales_overview"
         chart = "line" if ("趋势" in q or "每天" in q or "按日" in q) else "bar"
 
-    time_filter, time_range, time_label = _time_filter(question)
+    time_filter, time_range, time_label = _time_filter(question, reference_date)
     if time_filter:
         filters.append(time_filter)
     elif is_follow_up:
@@ -140,19 +203,28 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
         inherited.append("品类：" + str(context.get("category_label") or "继承上一轮"))
 
     metrics: list[str] = []
+    refund_metric = False
     if "退款率" in q or ("售后" in q and any(term in q for term in ("占比", "比例", "多大"))):
         metrics.append("退款率")
+        refund_metric = True
     elif "退款金额" in q or "退的钱" in q:
         metrics.append("退款金额")
+        refund_metric = True
     elif "退款" in q and any(term in q for term in ("原因", "分布")):
         metrics.append("退款金额")
-    elif "退款" in q and any(term in q for term in ("单数", "申请数")):
+        refund_metric = True
+    elif "退款" in q and any(term in q for term in ("单数", "申请数", "多少单")):
         metrics.append("退款单数")
-    if "roi" in q or "投产比" in q or ("广告" in q and "值不值" in q):
+        refund_metric = True
+    if (
+        "roi" in q or "投产比" in q
+        or ("广告" in q and "值不值" in q)
+        or (("投放" in q or "回报" in q) and any(term in q for term in ("划算", "回报", "最高", "最好")))
+    ):
         metrics.append("ROI")
-    if "客单价" in q or "每单平均" in q or "平均花" in q:
+    elif "客单价" in q or "每单平均" in q or "平均花" in q or "花多少钱" in q:
         metrics.append("客单价")
-    if "销量" in q or "件数" in q or "卖得最多" in q or "卖得多" in q:
+    elif not refund_metric and ("销量" in q or "件数" in q or "多少件" in q or "卖得最多" in q or "卖得多" in q):
         metrics.append("销量")
     previous_metrics = list(context.get("metrics") or [])
     if is_follow_up:
@@ -172,11 +244,33 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
     channel_label = next((v for k, v in CHANNEL_TERMS.items() if k in q), str(context.get("channel_label") or "") if is_follow_up and not asks_region_dimension and not asks_channel_dimension else "")
     category_label = next((c for c in CATEGORY_TERMS if c in q), str(context.get("category_label") or ""))
 
+    dimensions: list[str] = []
+    if (
+        asks_channel_dimension
+        or (("渠道" in q or "投放" in q) and detected_intent in {"sales_overview", "marketing_efficiency"})
+        or ("哪个渠道" in q)
+        or ("各渠道" in q)
+    ):
+        dimensions.append("channel")
+    if (
+        asks_region_dimension
+        or ("地区" in q and detected_intent == "sales_overview")
+        or ("哪个地区" in q)
+        or ("各地区" in q)
+    ):
+        dimensions.append("region")
+    if detected_intent == "category_analysis" or "品类" in q:
+        dimensions.append("category")
+    if "原因" in q or ("退款" in q and any(term in q for term in ("主要是什么", "损失的钱", "哪些原因"))):
+        dimensions.append("reason")
+    if chart == "line":
+        dimensions.append("order_date")
+    dimensions = list(dict.fromkeys(dimensions))
     return QueryPlan(
         intent=intent,
         tables=tables,
         metrics=metrics,
-        dimensions=[],
+        dimensions=dimensions,
         filters=filters,
         time_range=time_range,
         chart_type=chart,
@@ -184,6 +278,7 @@ def make_plan(question: str, hits: list[SchemaHit], context: dict | None = None)
         inherited=inherited,
         source_question=str(context.get("question") or "") if is_follow_up else "",
         context={
+            "reference_date": _reference_date(reference_date).isoformat(),
             "time_filter": time_filter or _context_filter(context, "time_filter"),
             "time_range": time_range,
             "region_filter": region or _context_filter(context, "region_filter"),

@@ -14,6 +14,7 @@ from app.nl2sql.evaluation import (
     SCOPE_CASES,
     SUITE_VERSION,
     run_evaluation,
+    run_colloquial_evaluation,
     run_natural_language_evaluation,
     run_retrieval_ablation,
     run_rule_equivalence_evaluation,
@@ -32,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-hit-rate", type=float, help="Fail with exit code 2 below this percentage")
     parser.add_argument("--workers", type=int, choices=(1, 2, 3), default=1,
                         help="Isolated model workers; default 1")
-    parser.add_argument("--suite", choices=("regression", "holdout", "scope", "retrieval", "natural", "rules"), default="regression",
+    parser.add_argument("--suite", choices=("regression", "holdout", "scope", "retrieval", "natural", "colloquial", "rules"), default="regression",
                         help="Evaluation suite: regression, holdout, scope guard, retrieval ablation, natural wording or rule equivalence")
     args = parser.parse_args(argv)
     if args.min_hit_rate is not None and not 0 <= args.min_hit_rate <= 100:
@@ -86,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     is_scope = args.suite == "scope"
     is_retrieval = args.suite == "retrieval"
     is_natural = args.suite == "natural"
+    is_colloquial = args.suite == "colloquial"
     is_rules = args.suite == "rules"
     selected_cases = HOLDOUT_CASES if is_holdout else CASES
     if is_scope:
@@ -102,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
         _retrieval_progress(report)
     elif is_natural:
         report = run_natural_language_evaluation()
+        report["available"] = True
+        report["evaluated_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        _natural_progress(report)
+    elif is_colloquial:
+        report = run_colloquial_evaluation()
         report["available"] = True
         report["evaluated_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
         _natural_progress(report)
@@ -123,13 +130,15 @@ def main(argv: list[str] | None = None) -> int:
         if is_scope
         else "natural-language-holdout-v1"
         if is_natural
+        else "colloquial-holdout-v2"
+        if is_colloquial
         else "rule-equivalence-v1"
         if is_rules
         else "retrieval-ablation-v1"
         if is_retrieval
         else "strict-v3-result-equivalence-v1"
     )
-    if is_scope or is_natural:
+    if is_scope or is_natural or is_colloquial:
         # Hash the stable input manifest, not per-run elapsed timing or output
         # fields. Otherwise the same cases produce different "manifest" hashes.
         manifest_cases = (
@@ -138,6 +147,17 @@ def main(argv: list[str] | None = None) -> int:
                 for case in NATURAL_HOLDOUT_CASES
             ]
             if is_natural
+            else [
+                {
+                    "id": case["id"],
+                    "question": case["question"],
+                    "expected_outcome": case.get("expected_outcome", "answered"),
+                    "expected_metric": case.get("expected_metric", ""),
+                    "reference_sql": case.get("reference_sql", ""),
+                }
+                for case in __import__("app.nl2sql.holdout", fromlist=["COLLOQUIAL_CASES"]).COLLOQUIAL_CASES
+            ]
+            if is_colloquial
             else [
                 {"id": case["id"], "question": case["question"], "outcome": case["outcome"]}
                 for case in SCOPE_CASES
@@ -157,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.min_hit_rate is not None:
         expected_total = (
             report["total"]
-            if is_scope or is_retrieval or is_natural or is_rules
+            if is_scope or is_retrieval or is_natural or is_colloquial or is_rules
             else len(selected_cases)
         )
         passed = bool(report["available"] and report["total"] == expected_total and report["hit_rate"] >= args.min_hit_rate)

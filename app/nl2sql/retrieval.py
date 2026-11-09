@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 
 from app.nl2sql.models import SchemaHit, TableInfo
@@ -45,7 +46,6 @@ class HybridSchemaRetriever:
         self.qdrant = None
         self.qdrant_collection = None
         self.elastic = None
-        self.elastic_scores = None
         self._load_elastic()
         self._load_semantic()
 
@@ -58,10 +58,16 @@ class HybridSchemaRetriever:
             client = Elasticsearch(self.settings.elasticsearch_url, request_timeout=2)
             if not client.ping():
                 return
-            index = "schema_tables"
-            if client.indices.exists(index=index):
-                client.indices.delete(index=index)
-            client.indices.create(index=index)
+            index = os.getenv("ATLAS_ES_SCHEMA_INDEX", "atlas_schema_tables")
+            if not client.indices.exists(index=index):
+                try:
+                    client.indices.create(index=index)
+                except Exception:
+                    # Another process may have created the project index
+                    # between exists() and create(). Reuse it rather than
+                    # deleting shared state or failing retrieval entirely.
+                    if not client.indices.exists(index=index):
+                        raise
             for table in self.tables:
                 client.index(
                     index=index,
@@ -97,13 +103,31 @@ class HybridSchemaRetriever:
             if self.settings.qdrant_url
             else QdrantClient(path=":memory:")
         )
-        name = "schema_tables"
+        name = os.getenv("ATLAS_QDRANT_SCHEMA_COLLECTION", "atlas_schema_tables")
         try:
+            existing = None
             if self.settings.qdrant_url:
                 try:
-                    client.delete_collection(collection_name=name)
+                    existing = client.get_collection(collection_name=name)
                 except Exception:
-                    pass
+                    existing = None
+            if existing is not None:
+                # Remote/shared collections are reused, not deleted on startup.
+                client.upsert(
+                    collection_name=name,
+                    points=[
+                        PointStruct(
+                            id=i,
+                            vector=[float(x) for x in vec],
+                            payload={"table": table.name, "label": table.label},
+                        )
+                        for i, (table, vec) in enumerate(zip(self.tables, self.vectors))
+                    ],
+                    wait=True,
+                )
+                self.qdrant = client
+                self.qdrant_collection = name
+                return
             client.create_collection(
                 collection_name=name,
                 vectors_config=VectorParams(size=len(self.vectors[0]), distance=Distance.COSINE),
@@ -138,23 +162,23 @@ class HybridSchemaRetriever:
         score /= math.sqrt(max(1, len(doc)))
         return score, matched
 
-    def _refresh_elastic_scores(self, query: str) -> None:
+    def _refresh_elastic_scores(self, query: str) -> dict[str, float] | None:
+        """Return request-local BM25 scores so concurrent searches cannot mix."""
         if self.elastic is None:
-            self.elastic_scores = None
-            return
+            return None
         try:
             result = self.elastic.search(
-                index="schema_tables",
+                index=os.getenv("ATLAS_ES_SCHEMA_INDEX", "atlas_schema_tables"),
                 query={"multi_match": {"query": query, "fields": ["label^3", "text"]}},
                 size=len(self.tables),
                 filter_path=["hits.hits._id", "hits.hits._score"],
             )
-            self.elastic_scores = {
+            return {
                 hit["_id"]: float(hit["_score"])
                 for hit in result.get("hits", {}).get("hits", [])
             }
         except Exception:
-            self.elastic_scores = None
+            return None
 
     def _semantic(self, query: str) -> list[float]:
         if self.embedder is None or self.vectors is None:
@@ -181,7 +205,7 @@ class HybridSchemaRetriever:
         semantic_weight: float = 0.56,
         lexical_weight: float = 0.44,
     ) -> list[SchemaHit]:
-        self._refresh_elastic_scores(query)
+        elastic_scores = self._refresh_elastic_scores(query)
         lexical = [self._lexical(query, i) for i in range(len(self.tables))]
         semantic = self._semantic(query)
         lex_max = max((x[0] for x in lexical), default=0.0) or 1.0
@@ -192,8 +216,8 @@ class HybridSchemaRetriever:
         for i, table in enumerate(self.tables):
             lex_score, matched = lexical[i]
             sem_score = (semantic[i] - sem_min) / sem_span
-            if self.elastic_scores is not None:
-                keyword_score = min(1.0, self.elastic_scores.get(table.name, 0.0) / 10.0)
+            if elastic_scores is not None:
+                keyword_score = min(1.0, elastic_scores.get(table.name, 0.0) / 10.0)
             else:
                 keyword_score = lex_score / lex_max
             score = semantic_weight * sem_score + lexical_weight * keyword_score

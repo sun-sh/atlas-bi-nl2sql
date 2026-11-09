@@ -24,6 +24,8 @@ SQL_INSTRUCTIONS = (
     "退款率为退款申请数/全部订单数*100，不筛paid、不排除processing退款；金额SUM(refund_amount)。"
     "ROI=已支付订单销售额/投放花费（倍数，不乘100）；orders和marketing_spend分别按渠道聚合，"
     "两表都使用相同日期区间，然后关联，禁止把每日花费在订单连接后重复累计。"
+    "问题出现“各渠道/按渠道/渠道ROI/哪个渠道”时，必须返回每个有投放花费的渠道，"
+    "除非用户明确只要第一名，否则不要加 LIMIT 1 把排名压成单行。"
     "App不变，小程序=MiniProgram，抖音=Douyin，网页=Web。"
     "orders别名可用o，order_items可用oi，marketing_spend可用m；规划中o.order_date对应投放表spend_date。"
     "未要求分组的总量只返回一行；按要求排序，指标保留两位小数。"
@@ -44,11 +46,14 @@ DIALECT_INSTRUCTIONS = {
 }
 
 
-def _sql_prompt(question: str, plan: QueryPlan) -> str:
+def _sql_prompt(question: str, plan: QueryPlan, hits: list[SchemaHit] | None = None) -> str:
+    retrieved_tables = [hit.table for hit in (hits or [])[:4]]
+    selected_tables = list(dict.fromkeys([*retrieved_tables, *plan.tables]))
     return (
         f"当前问题：{question}\n前置问题：{plan.source_question or '无'}\n"
         f"当前完整计划：{json.dumps(plan.as_dict(), ensure_ascii=False)}\n"
-        f"数据库字段、枚举与表粒度：\n{semantic_schema_prompt(plan.tables)}\n只返回 SQL。"
+        f"检索候选表：{', '.join(retrieved_tables) or '无'}\n"
+        f"数据库字段、枚举与表粒度：\n{semantic_schema_prompt(selected_tables)}\n只返回 SQL。"
     )
 
 
@@ -230,14 +235,20 @@ def generate_rule_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> 
 
 
 LAST_LLM_ERROR: str | None = None
+# Compatibility alias for callers that only want the last process-wide error.
+# Request-scoped code must use the returned error from _llm_sql_result.
 
 
-def _llm_sql(instructions: str, prompt: str, *, max_tokens: int | None = None) -> str | None:
-    global LAST_LLM_ERROR
-    LAST_LLM_ERROR = None
+def _llm_sql_result(
+    instructions: str,
+    prompt: str,
+    *,
+    max_tokens: int | None = None,
+) -> tuple[str | None, str]:
+    """Return SQL and the error for this call, so concurrent requests cannot leak state."""
     settings = get_model_config()
     if not settings.enabled:
-        return None
+        return None, "模型未启用"
     configured = get_settings()
     token_budget = max_tokens or configured.model_sql_max_tokens
     try:
@@ -265,16 +276,34 @@ def _llm_sql(instructions: str, prompt: str, *, max_tokens: int | None = None) -
         text = (response.choices[0].message.content or "").strip()
         finish_reason = getattr(response.choices[0], "finish_reason", None)
         if finish_reason == "length":
-            LAST_LLM_ERROR = "模型输出因token预算耗尽被截断（finish_reason=length），未执行残缺SQL"
-            return None
+            return None, "模型输出因token预算耗尽被截断（finish_reason=length），未执行残缺SQL"
         text = re.sub(r"^```(?:sql)?\s*|\s*```$", "", text, flags=re.I).strip()
         if not text:
-            LAST_LLM_ERROR = "模型返回了空内容"
-            return None
-        return text
+            return None, "模型返回了空内容"
+        return text, ""
     except Exception as exc:
-        LAST_LLM_ERROR = model_error_message(exc)
-        return None
+        return None, model_error_message(exc)
+
+
+def _llm_sql(instructions: str, prompt: str, *, max_tokens: int | None = None) -> str | None:
+    """Backward-compatible wrapper; new request-scoped code uses _llm_sql_result."""
+    global LAST_LLM_ERROR
+    result, error = _llm_sql_result(instructions, prompt, max_tokens=max_tokens)
+    LAST_LLM_ERROR = error or None
+    return result
+
+
+def generate_llm_sql_result(
+    question: str,
+    plan: QueryPlan,
+    hits: list[SchemaHit],
+    *,
+    dialect: str = "sqlite",
+) -> tuple[str | None, str]:
+    return _llm_sql_result(
+        SQL_INSTRUCTIONS + DIALECT_INSTRUCTIONS.get(dialect, ""),
+        _sql_prompt(question, plan, hits),
+    )
 
 
 def generate_llm_sql(
@@ -284,10 +313,33 @@ def generate_llm_sql(
     *,
     dialect: str = "sqlite",
 ) -> str | None:
-    del hits
-    return _llm_sql(
-        SQL_INSTRUCTIONS + DIALECT_INSTRUCTIONS.get(dialect, ""),
-        _sql_prompt(question, plan),
+    sql, error = generate_llm_sql_result(question, plan, hits, dialect=dialect)
+    global LAST_LLM_ERROR
+    LAST_LLM_ERROR = error or None
+    return sql
+
+
+def generate_llm_repair_sql_result(
+    question: str,
+    plan: QueryPlan,
+    hits: list[SchemaHit],
+    previous_sql: str,
+    error: str,
+    *,
+    dialect: str = "sqlite",
+) -> tuple[str | None, str]:
+    return _llm_sql_result(
+        SQL_INSTRUCTIONS
+        + DIALECT_INSTRUCTIONS.get(dialect, "")
+        + "根据反馈修复原SQL，保持用户要求的业务口径，不得改变筛选来制造非空结果。",
+        _sql_prompt(question, plan, hits) + "\n"
+        f"失败 SQL：\n{previous_sql}\n错误：\n{error}\n只返回修复后的 SQL。",
+        # A repair may need to restate a multi-branch ROI query; using the
+        # smaller first-pass budget here caused avoidable truncation.
+        max_tokens=max(
+            get_settings().model_sql_max_tokens,
+            get_settings().model_sql_retry_max_tokens,
+        ),
     )
 
 
@@ -300,12 +352,9 @@ def generate_llm_repair_sql(
     *,
     dialect: str = "sqlite",
 ) -> str | None:
-    del hits
-    return _llm_sql(
-        SQL_INSTRUCTIONS
-        + DIALECT_INSTRUCTIONS.get(dialect, "")
-        + "根据反馈修复原SQL，保持用户要求的业务口径，不得改变筛选来制造非空结果。",
-        _sql_prompt(question, plan) + "\n"
-        f"失败 SQL：\n{previous_sql}\n错误：\n{error}\n只返回修复后的 SQL。",
-        max_tokens=get_settings().model_sql_retry_max_tokens,
+    sql, call_error = generate_llm_repair_sql_result(
+        question, plan, hits, previous_sql, error, dialect=dialect
     )
+    global LAST_LLM_ERROR
+    LAST_LLM_ERROR = call_error or None
+    return sql

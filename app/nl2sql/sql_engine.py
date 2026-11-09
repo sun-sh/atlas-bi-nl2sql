@@ -22,6 +22,9 @@ ALLOWED_FUNCTIONS = {
     "sum", "avg", "count", "min", "max", "round", "coalesce", "ifnull",
     "cast", "substr", "strftime", "date", "datetime", "lower", "upper",
     "abs", "nullif",
+    # Window functions are read-only ranking primitives and are useful for
+    # top-N questions; they still pass the same SELECT/AST policy.
+    "row_number", "rank", "dense_rank", "lag", "lead", "ntile",
 }
 
 SQL_DIALECTS = {"sqlite": "sqlite", "postgresql": "postgres", "mysql": "mysql"}
@@ -175,7 +178,8 @@ class DBAPIAdapter:
         timeout_seconds: float,
         cancel_trace_id: str | None = None,
     ) -> dict[str, Any]:
-        del timeout_seconds, cancel_trace_id
+        if cancel_trace_id and is_cancelled(cancel_trace_id):
+            raise QueryCancelled("查询已取消")
         started = time.perf_counter()
         try:
             conn = self._connect()
@@ -192,10 +196,20 @@ class DBAPIAdapter:
                 ) from exc
             try:
                 try:
+                    timeout_ms = max(1, int(timeout_seconds * 1000))
+                    if self.dialect == "postgres":
+                        cursor.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
+                    elif self.dialect == "mysql":
+                        cursor.execute("SET SESSION MAX_EXECUTION_TIME = %s", (timeout_ms,))
                     cursor.execute(sql)
                 except Exception as exc:
+                    message = self._safe_error(exc)
+                    if "timeout" in message.lower() or "canceling statement" in message.lower():
+                        raise TimeoutError(
+                            f"{self.dialect} 查询超过 {timeout_seconds:g} 秒执行上限"
+                        ) from exc
                     raise QueryAdapterError(
-                        f"{self.dialect} 查询执行失败：{self._safe_error(exc)}"
+                        f"{self.dialect} 查询执行失败：{message}"
                     ) from exc
                 columns = [item[0] for item in (cursor.description or ())]
                 rows = cursor.fetchmany(limit + 1)

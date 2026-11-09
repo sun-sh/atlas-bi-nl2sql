@@ -14,7 +14,8 @@ _METRIC_TERMS = (
     "roi", "投产比", "投放花费", "归因订单数", "订单数", "订单量",
     "gmv", "营收", "收入", "最赚钱", "赚钱", "回报", "值不值",
     "卖得最多", "卖得多", "每单平均", "平均花", "卖得怎么样",
-    "售后占比",
+    "卖得最好", "生意最好", "卖货", "花多少钱", "多少单", "多少件",
+    "投放最划算", "售后占比",
 )
 _DIMENSION_TERMS = (
     "渠道", "地区", "区域", "品类", "类目", "商品", "城市", "会员",
@@ -149,8 +150,11 @@ def assess_question(question: str, context: dict[str, Any] | None = None) -> Que
         ("退款" in q and any(term in q for term in ("原因", "分布")))
         or ("退的钱" in q and any(term in q for term in ("原因", "哪些", "花在")))
         or ("广告" in q and "值不值" in q)
+        or ("投放" in q and "划算" in q)
         or ("售后" in q and any(term in q for term in ("占比", "比例", "多大")))
         or ("卖得怎么样" in q and any(term in q for term in ("每天", "按日", "趋势")))
+        or ("退款" in q and "多少单" in q)
+        or (any(term in q for term in ("品类", "类目", "商品")) and "多少件" in q)
     ):
         return QuestionDecision()
 

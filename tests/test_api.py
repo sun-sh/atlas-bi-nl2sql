@@ -59,7 +59,10 @@ def test_secondary_routes_are_directly_accessible():
         assert "Atlas BI" in response.text and "电商经营分析" in response.text
 
 
-def test_evaluation_endpoint_reports_model_only_status():
+def test_evaluation_endpoint_reports_model_only_status(monkeypatch):
+    default = client.get("/api/evaluation")
+    assert default.status_code == 410
+    monkeypatch.setenv("ATLAS_ENABLE_SYNC_EVALUATION", "1")
     response = client.get("/api/evaluation")
     assert response.status_code == 200
     body = response.json()
@@ -511,3 +514,28 @@ def test_runtime_metrics_endpoint_tracks_sync_and_stream_latency(monkeypatch, tm
     assert metrics["model_calls"]["max_concurrency"] == 4
     assert "total_tokens" in metrics["model_calls"]
     assert "success_rate" in metrics["model_calls"]
+
+
+def test_query_rate_limit_returns_429_after_bucket_exhausted(monkeypatch):
+    from app.api import main as api_main
+
+    monkeypatch.setattr(api_main, "_RATE_LIMIT_PER_MINUTE", 1)
+    api_main._RATE_BUCKETS.clear()
+    payload = {"question": "各渠道销售额", "request_id": "rate-check"}
+    first = client.post("/api/query", json=payload)
+    second = client.post("/api/query", json=payload)
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_query_rate_bucket_map_is_bounded(monkeypatch):
+    from app.api import main as api_main
+
+    monkeypatch.setattr(api_main, "_RATE_LIMIT_PER_MINUTE", 10)
+    monkeypatch.setattr(api_main, "_RATE_BUCKET_LIMIT", 2)
+    api_main._RATE_BUCKETS.clear()
+    api_main._check_query_rate("198.51.100.1")
+    api_main._check_query_rate("198.51.100.2")
+    api_main._check_query_rate("198.51.100.3")
+    assert len(api_main._RATE_BUCKETS) == 2
+    assert "198.51.100.1" not in api_main._RATE_BUCKETS
