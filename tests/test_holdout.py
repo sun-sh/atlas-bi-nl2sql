@@ -65,3 +65,19 @@ def test_colloquial_suite_has_unique_gold_and_reference_sql():
         assert execute_sql(case["reference_sql"])["rows"]
     for case in clarified:
         assert "reference_sql" not in case
+
+
+def test_frozen_colloquial_v3_has_unique_executable_gold():
+    from app.nl2sql.colloquial_holdout import COLLOQUIAL_HOLDOUT_CASES
+
+    assert len(COLLOQUIAL_HOLDOUT_CASES) == 13
+    assert len({case["id"] for case in COLLOQUIAL_HOLDOUT_CASES}) == 13
+    assert len({case["question"] for case in COLLOQUIAL_HOLDOUT_CASES}) == 13
+    answered = [case for case in COLLOQUIAL_HOLDOUT_CASES if case["expected_outcome"] == "answered"]
+    assert len(answered) == 10
+    for case in answered:
+        assert case["reference_sql"]
+        assert execute_sql(case["reference_sql"])["rows"]
+    for case in COLLOQUIAL_HOLDOUT_CASES:
+        if case["expected_outcome"] != "answered":
+            assert not case.get("reference_sql")
