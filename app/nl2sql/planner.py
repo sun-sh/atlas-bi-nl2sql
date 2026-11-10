@@ -19,6 +19,37 @@ INTENT_TERMS = {
     "category_analysis": ("品类", "类目", "商品", "销量", "卖得最多", "卖得多", "件数"),
     "sales_overview": ("销售额", "销售", "趋势", "每天", "按日", "订单", "渠道", "地区", "最赚钱", "收入", "每单平均", "客单价"),
 }
+RETRIEVAL_SUPPLEMENT_LIMIT = 1
+
+
+def _retrieval_supplement_limit() -> int:
+    try:
+        configured = int(os.getenv("ATLAS_RETRIEVAL_SUPPLEMENTS", "0"))
+    except ValueError:
+        # Invalid configuration must fail closed to the deterministic route,
+        # not enable an optional retrieval supplement by accident.
+        configured = 0
+    return max(0, min(RETRIEVAL_SUPPLEMENT_LIMIT, configured))
+
+
+def _selected_tables(required_tables: list[str], retrieved_tables: list[str]) -> tuple[list[str], list[str]]:
+    """Select deterministic business tables plus at most one retrieval hit.
+
+    The top retrieval hit is used only when it is not already required. Lower
+    ranked hits remain evidence in the response, but are not expanded into the
+    SQL prompt; otherwise a five-table demo would effectively send nearly the
+    whole schema to the model and make retrieval impossible to ablate.
+    """
+    selected = list(dict.fromkeys(required_tables))
+    supplements: list[str] = []
+    limit = _retrieval_supplement_limit()
+    if retrieved_tables and limit:
+        candidate = retrieved_tables[0]
+        if candidate not in selected:
+            selected.append(candidate)
+            supplements.append(candidate)
+    assert len(supplements) <= limit
+    return selected, supplements
 
 
 def _reference_date(value: date | str | None = None) -> date:
@@ -146,11 +177,12 @@ def make_plan(
     else:
         required_tables = []
 
+    retrieval_supplements: list[str] = []
     if required_tables:
         intent = detected_intent
-        # Retrieval expands context but never removes tables required by the
-        # business definition. This keeps the contract explicit and testable.
-        tables = list(dict.fromkeys([*required_tables, *retrieved_tables]))
+        # Retrieval may add one supporting table, never remove or flood the
+        # business-required schema. Lower-ranked hits remain UI evidence only.
+        tables, retrieval_supplements = _selected_tables(required_tables, retrieved_tables)
         chart = "line" if ("趋势" in q or "每天" in q or "按日" in q) else "bar"
     elif detected_intent == "sales_overview":
         intent = "sales_overview"
@@ -279,6 +311,8 @@ def make_plan(
         source_question=str(context.get("question") or "") if is_follow_up else "",
         context={
             "reference_date": _reference_date(reference_date).isoformat(),
+            "retrieval_candidates": retrieved_tables,
+            "retrieval_supplements": retrieval_supplements,
             "time_filter": time_filter or _context_filter(context, "time_filter"),
             "time_range": time_range,
             "region_filter": region or _context_filter(context, "region_filter"),

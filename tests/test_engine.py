@@ -20,6 +20,45 @@ def test_retrieval_prefers_orders_for_sales_question(retriever: HybridSchemaRetr
     assert hits[0].score > hits[-1].score
 
 
+
+
+def test_planner_adds_at_most_one_retrieval_supplement(monkeypatch):
+    from app.nl2sql.models import SchemaHit
+
+    monkeypatch.setenv("ATLAS_RETRIEVAL_SUPPLEMENTS", "1")
+
+    def hit(table, score):
+        return SchemaHit(
+            table=table, label=table, description=table, score=score,
+            vector_score=score, lexical_score=score,
+        )
+
+    hits = [hit("marketing_spend", 1.0), hit("refunds", 0.8), hit("customers", 0.6), hit("order_items", 0.4)]
+    plan = make_plan("上个月各渠道销售额", hits)
+    assert plan.tables == ["orders", "marketing_spend"]
+    assert plan.context["retrieval_supplements"] == ["marketing_spend"]
+
+    duplicate = [hit("orders", 1.0), hit("marketing_spend", 0.8)]
+    plan = make_plan("上个月各渠道销售额", duplicate)
+    assert plan.tables == ["orders"]
+    assert plan.context["retrieval_supplements"] == []
+
+
+def test_retrieval_supplement_can_be_disabled_for_ablation(monkeypatch):
+    from app.nl2sql.models import SchemaHit
+
+    monkeypatch.setenv("ATLAS_RETRIEVAL_SUPPLEMENTS", "0")
+    hits = [SchemaHit(table="marketing_spend", label="投放", description="投放", score=1.0, vector_score=1.0, lexical_score=1.0)]
+    plan = make_plan("上个月各渠道销售额", hits)
+    assert plan.tables == ["orders"]
+    assert plan.context["retrieval_supplements"] == []
+
+    monkeypatch.setenv("ATLAS_RETRIEVAL_SUPPLEMENTS", "not-a-number")
+    plan = make_plan("上个月各渠道销售额", hits)
+    assert plan.tables == ["orders"]
+    assert plan.context["retrieval_supplements"] == []
+
+
 def test_select_only_validator_rejects_writes():
     with pytest.raises(SQLValidationError):
         validate_sql("DELETE FROM orders")
@@ -139,7 +178,7 @@ def test_marketing_region_filter_is_rejected_clearly(retriever: HybridSchemaRetr
     question = "上个月华东地区各渠道ROI"
     plan = make_plan(question, retriever.search(question))
     with pytest.raises(ValueError, match="不包含地区或品类字段"):
-        generate_rule_sql(question, plan, retriever.search(question))
+        generate_rule_sql(question, plan)
 
 
 def test_rule_roi_aggregates_spend_and_revenue_before_join():
@@ -162,7 +201,7 @@ def test_rule_roi_aggregates_spend_and_revenue_before_join():
 def test_repair_node_passes_error_and_original_sql_to_llm(monkeypatch):
     captured = {}
 
-    def fake_repair(question, plan, hits, previous_sql, error, **kwargs):
+    def fake_repair(question, plan, previous_sql, error, **kwargs):
         captured.update(
             question=question,
             previous_sql=previous_sql,
@@ -211,7 +250,7 @@ def test_every_rule_query_compiles_and_passes_validator():
     retriever = HybridSchemaRetriever()
     for question in questions:
         plan = make_plan(question, retriever.search(question))
-        sql = generate_rule_sql(question, plan, retriever.search(question))
+        sql = generate_rule_sql(question, plan)
         assert validate_sql(sql)
 
 
@@ -271,8 +310,8 @@ def test_model_retry_budget_includes_empty_generation(monkeypatch):
 def test_all_null_aggregation_reenters_model_repair_without_broadening_filters(monkeypatch):
     monkeypatch.setattr("app.nl2sql.workflow.generate_llm_sql_result", lambda *args, **kwargs: ("SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = '支付'", ""))
     captured = []
-    def repair(question, plan, hits, sql, error, **kwargs):
-        captured.append((plan, error))
+    def repair(question, plan, sql, error, **kwargs):
+        captured.append((plan, error, sql))
         return "SELECT SUM(paid_amount) AS 销售额 FROM orders WHERE status = 'paid' AND order_date BETWEEN '2026-01-01' AND '2026-01-31' AND region = '华东'"
     monkeypatch.setattr("app.nl2sql.workflow.generate_llm_repair_sql_result", lambda *args, **kwargs: (repair(*args, **kwargs), ""))
     result = run_query("上个月华东已支付销售额", allow_rule_fallback=False)
@@ -514,7 +553,11 @@ def test_postgres_dbapi_adapter_maps_rows_and_always_closes(monkeypatch):
         target=target,
     )
     assert captured["dsn"] == "postgresql://reader@db/atlas"
-    assert any("statement_timeout" in statement for statement in captured["statements"])
+    timeout_statements = [
+        statement for statement in captured["statements"]
+        if "statement_timeout" in statement
+    ]
+    assert timeout_statements == ["SET statement_timeout = %s"]
     assert captured["autocommit"] is True
     assert captured["cursor_closed"] is True
     assert captured["connection_closed"] is True

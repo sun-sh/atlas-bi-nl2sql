@@ -1155,7 +1155,12 @@ def _check_clarification_result(decision: Any, result: Any) -> str:
     return ""
 
 
-def run_colloquial_evaluation(retriever=None) -> dict[str, Any]:
+def run_colloquial_evaluation(
+    retriever=None,
+    *,
+    selected_cases: tuple[dict[str, Any], ...] | None = None,
+    suite_version: str = "colloquial-holdout-v2",
+) -> dict[str, Any]:
     """Run no-definition wording through the strict model path when answerable.
 
     Answered cases must use model-generated/repaired SQL, execute it, pass an
@@ -1169,8 +1174,9 @@ def run_colloquial_evaluation(retriever=None) -> dict[str, Any]:
     from app.nl2sql.retrieval import HybridSchemaRetriever
 
     retriever = retriever or HybridSchemaRetriever()
+    suite = selected_cases if selected_cases is not None else COLLOQUIAL_CASES
     cases: list[dict[str, Any]] = []
-    for case in COLLOQUIAL_CASES:
+    for case in suite:
         started = time.perf_counter()
         expected_outcome = case.get("expected_outcome", "answered")
         decision = assess_question(case["question"])
@@ -1211,10 +1217,12 @@ def run_colloquial_evaluation(retriever=None) -> dict[str, Any]:
 
         expected_tables = set(case.get("expected_tables") or ())
         retrieved = set()
+        plan_tables = set()
         if expected_outcome == "answered" and result is not None:
             retrieved = {hit.table for hit in retriever.search(case["question"], limit=4)}
+            plan_tables = set(result.plan.tables)
         table_ok = (
-            expected_tables.issubset(retrieved)
+            expected_tables.issubset(plan_tables)
             if expected_outcome == "answered"
             else True
         )
@@ -1266,6 +1274,7 @@ def run_colloquial_evaluation(retriever=None) -> dict[str, Any]:
             "actual_metric": next(iter(result.plan.metrics), "") if result is not None else "",
             "expected_tables": sorted(expected_tables),
             "retrieved_tables": sorted(retrieved),
+            "plan_tables": sorted(plan_tables),
             "outcome_ok": bool(result is not None and result.outcome == expected_outcome),
             "intent_ok": intent_ok,
             "metric_ok": metric_ok,
@@ -1287,7 +1296,7 @@ def run_colloquial_evaluation(retriever=None) -> dict[str, Any]:
     answerable = sum(1 for case in cases if case["expected_outcome"] == "answered")
     total = len(cases)
     return {
-        "suite_version": "colloquial-holdout-v2",
+        "suite_version": suite_version,
         "mode": MODEL_MODE,
         "available": True,
         "total": total,

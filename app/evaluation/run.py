@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import argparse
 import hashlib
+import os
 import sys
 import time
 from pathlib import Path
@@ -22,6 +23,10 @@ from app.nl2sql.evaluation import (
 )
 from app.nl2sql.holdout import NATURAL_HOLDOUT_CASES
 from app.nl2sql.holdout import HOLDOUT_CASES, HOLDOUT_DATASET_RANGE, HOLDOUT_SUITE_VERSION
+from app.nl2sql.colloquial_holdout import (
+    COLLOQUIAL_HOLDOUT_CASES,
+    COLLOQUIAL_HOLDOUT_SUITE_VERSION,
+)
 from app.nl2sql.model_config import get_model_config
 from app.nl2sql.seed import generate_database
 from app.nl2sql.settings import get_settings
@@ -33,8 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-hit-rate", type=float, help="Fail with exit code 2 below this percentage")
     parser.add_argument("--workers", type=int, choices=(1, 2, 3), default=1,
                         help="Isolated model workers; default 1")
-    parser.add_argument("--suite", choices=("regression", "holdout", "scope", "retrieval", "natural", "colloquial", "rules"), default="regression",
-                        help="Evaluation suite: regression, holdout, scope guard, retrieval ablation, natural wording or rule equivalence")
+    parser.add_argument("--suite", choices=("regression", "holdout", "scope", "retrieval", "natural", "colloquial", "colloquial-frozen", "rules"), default="regression",
+                        help="Evaluation suite: regression, holdout, scope guard, retrieval ablation, natural wording, colloquial or frozen colloquial")
     args = parser.parse_args(argv)
     if args.min_hit_rate is not None and not 0 <= args.min_hit_rate <= 100:
         parser.error("--min-hit-rate must be between 0 and 100")
@@ -87,7 +92,9 @@ def main(argv: list[str] | None = None) -> int:
     is_scope = args.suite == "scope"
     is_retrieval = args.suite == "retrieval"
     is_natural = args.suite == "natural"
-    is_colloquial = args.suite == "colloquial"
+    is_dev_colloquial = args.suite == "colloquial"
+    is_frozen_colloquial = args.suite == "colloquial-frozen"
+    is_colloquial = is_dev_colloquial or is_frozen_colloquial
     is_rules = args.suite == "rules"
     selected_cases = HOLDOUT_CASES if is_holdout else CASES
     if is_scope:
@@ -108,7 +115,16 @@ def main(argv: list[str] | None = None) -> int:
         report["evaluated_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
         _natural_progress(report)
     elif is_colloquial:
-        report = run_colloquial_evaluation()
+        colloquial_cases = COLLOQUIAL_HOLDOUT_CASES if is_frozen_colloquial else None
+        colloquial_version = (
+            COLLOQUIAL_HOLDOUT_SUITE_VERSION
+            if is_frozen_colloquial
+            else "colloquial-dev-v2"
+        )
+        report = run_colloquial_evaluation(
+            selected_cases=colloquial_cases,
+            suite_version=colloquial_version,
+        )
         report["available"] = True
         report["evaluated_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
         _natural_progress(report)
@@ -123,15 +139,25 @@ def main(argv: list[str] | None = None) -> int:
             suite_version=HOLDOUT_SUITE_VERSION if is_holdout else SUITE_VERSION,
             dataset_range=HOLDOUT_DATASET_RANGE if is_holdout else DATASET_RANGE,
         )
-    report["runtime"] = {"workers": args.workers, "wall_elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
-                         "source_sha256": source_hash.hexdigest()}
+    try:
+        retrieval_supplements = max(0, min(1, int(os.getenv("ATLAS_RETRIEVAL_SUPPLEMENTS", "0"))))
+    except ValueError:
+        retrieval_supplements = 0
+    report["runtime"] = {
+        "workers": args.workers,
+        "wall_elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+        "source_sha256": source_hash.hexdigest(),
+        "retrieval_supplements": retrieval_supplements,
+    }
     report["evaluation_contract"] = (
         "scope-guard-v1"
         if is_scope
         else "natural-language-holdout-v1"
         if is_natural
-        else "colloquial-holdout-v2"
-        if is_colloquial
+        else COLLOQUIAL_HOLDOUT_SUITE_VERSION
+        if is_frozen_colloquial
+        else "colloquial-dev-v2"
+        if is_dev_colloquial
         else "rule-equivalence-v1"
         if is_rules
         else "retrieval-ablation-v1"
@@ -155,7 +181,11 @@ def main(argv: list[str] | None = None) -> int:
                     "expected_metric": case.get("expected_metric", ""),
                     "reference_sql": case.get("reference_sql", ""),
                 }
-                for case in __import__("app.nl2sql.holdout", fromlist=["COLLOQUIAL_CASES"]).COLLOQUIAL_CASES
+                for case in (
+                    COLLOQUIAL_HOLDOUT_CASES
+                    if is_frozen_colloquial
+                    else __import__("app.nl2sql.holdout", fromlist=["COLLOQUIAL_CASES"]).COLLOQUIAL_CASES
+                )
             ]
             if is_colloquial
             else [

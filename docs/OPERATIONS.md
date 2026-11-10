@@ -17,7 +17,7 @@ curl http://127.0.0.1:8000/api/health
 curl http://127.0.0.1:8000/api/overview
 ```
 
-`/api/health` reports the resolved analysis database, active retrieval backends, model activation and repair limits. A healthy response has `status: ok` and `database: true`; inspect `query_database.source_id` and `query_database.fallback` to confirm which source is live. `/api/metrics` returns process-local request counts, error rates and P50/P95/max latency for the synchronous and streaming query paths, plus model-call admission, failure, token and latency counters.
+`/api/health` reports the resolved analysis database, active retrieval backends, model activation and repair limits. SQL generation uses deterministic business-table routing by default; retrieval is evidence-only unless `ATLAS_RETRIEVAL_SUPPLEMENTS=1` is set explicitly. A healthy response has `status: ok` and `database: true`; inspect `query_database.source_id` and `query_database.fallback` to confirm which source is live. `/api/metrics` returns process-local request counts, error rates and P50/P95/max latency for the synchronous and streaming query paths, plus model-call admission, failure, token and latency counters.
 
 ## Model configuration
 
@@ -51,10 +51,10 @@ python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
 # Strict model snapshot; requires an enabled model and consumes quota.
-python -m app.evaluation.run --suite colloquial --min-hit-rate 0
+python -m app.evaluation.run --suite colloquial-frozen --min-hit-rate 0
 ```
 
-A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores. The colloquial suite uses the strict model path; a 10/10 result is a small fixed-dataset snapshot, not an open-domain score. The pytest suite includes four Playwright browser cases against a real local FastAPI process; CI installs Chromium for that gate.
+A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores. The frozen colloquial suite uses the strict model path; the current 7/13 result is a small fixed-dataset snapshot, not an open-domain score. The pytest suite includes four Playwright browser cases against a real local FastAPI process; CI installs Chromium for that gate.
 
 `/api/metrics` includes a `model_calls` block with a process-wide concurrency cap, admission timeout, started/succeeded/failed/rejected counts, provider token usage and queue/call latency. These counters are in-memory and per process; aggregate them externally when running multiple workers. The call timeout and SQL token budgets are configurable through `MODEL_CALL_TIMEOUT_SECONDS`, `MODEL_MAX_CONCURRENCY`, `MODEL_ADMISSION_TIMEOUT_SECONDS`, `MODEL_SQL_MAX_TOKENS` and `MODEL_SQL_RETRY_MAX_TOKENS`.
 
@@ -87,7 +87,7 @@ List sources at `GET /api/data-platform/sources`, sync one, then activate it wit
 
 ## External query databases
 
-SQLite remains the default and the only backend covered by the fixed demo overview and offline evaluation fixtures. PostgreSQL and MySQL can be registered with an explicit read-only DSN, are inspected against the five-table schema contract before activation, and execute through the shared SQL AST guard and bounded adapter. The drivers are optional: install `psycopg` for PostgreSQL or `pymysql` for MySQL before using those targets. External databases do not yet have connection pooling, per-tenant row filters, automatic asset-catalog synchronization, or cross-thread active-query cancellation. The adapter issues PostgreSQL `SET LOCAL statement_timeout` / MySQL `SET SESSION MAX_EXECUTION_TIME` before the statement, but this still needs a live integration test; also set database/role timeouts and connect through a read-only account as deployment requirements.
+SQLite remains the default and the only backend covered by the fixed demo overview and offline evaluation fixtures. PostgreSQL and MySQL can be registered with an explicit read-only DSN, are inspected against the five-table schema contract before activation, and execute through the shared SQL AST guard and bounded adapter. The drivers are optional: install `psycopg` for PostgreSQL or `pymysql` for MySQL before using those targets. External databases do not yet have connection pooling, per-tenant row filters, automatic asset-catalog synchronization, or cross-thread active-query cancellation. Because the adapter uses one connection per query with `autocommit=True`, PostgreSQL receives session-level `SET statement_timeout = ...`; MySQL receives `SET SESSION MAX_EXECUTION_TIME = ...`. This still needs a live integration test and cross-thread cancellation; also set database/role timeouts and connect through a read-only account as deployment requirements.
 
 The DSN is stored as plain text in the local metadata database (`data/data_platform.db` by default) and is not returned by public source/overview APIs. Protect that file, `.env`, backups and logs with filesystem permissions and a secrets manager appropriate for the deployment; the API redaction is not encryption at rest. The read-only guarantee is enforced by the database account and SELECT-only AST policy, not by the local demo's optional admin token.
 

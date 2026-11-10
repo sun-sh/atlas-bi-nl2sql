@@ -36,7 +36,7 @@ def test_roi_prompt_includes_both_grains_enums_and_no_restricted_fields(monkeypa
     monkeypatch.setattr(generator, "_llm_sql_result", capture)
     question = "上个月各渠道ROI"
     plan = make_plan(question, [])
-    generator.generate_llm_sql(question, plan, [])
+    generator.generate_llm_sql(question, plan)
     assert set(plan.tables) == {"orders", "marketing_spend"}
     assert "paid / refunded / cancelled" in captured["prompt"]
     assert "spend_date" in captured["prompt"]
@@ -52,7 +52,7 @@ def test_followup_prompt_contains_current_plan_and_source_question(monkeypatch):
     original = make_plan("上个月华东已支付销售额", [])
     context = {**original.as_dict(), **original.context, "question": "上个月华东已支付销售额"}
     plan = make_plan("那华南呢", [], context)
-    generator.generate_llm_sql("那华南呢", plan, [])
+    generator.generate_llm_sql("那华南呢", plan)
     assert "前置问题：上个月华东已支付销售额" in captured["prompt"]
     assert "o.region = '华南'" in captured["prompt"]
     assert "2026-01-31" in captured["prompt"]
@@ -79,9 +79,9 @@ def test_external_dialect_is_explicit_in_generation_and_repair(monkeypatch):
 
     monkeypatch.setattr(generator, "_llm_sql_result", capture)
     plan = make_plan("上个月销售额", [])
-    generator.generate_llm_sql("上个月销售额", plan, [], dialect="postgres")
+    generator.generate_llm_sql("上个月销售额", plan, dialect="postgres")
     generator.generate_llm_repair_sql(
-        "上个月销售额", plan, [], "SELECT 1", "syntax error", dialect="mysql"
+        "上个月销售额", plan, "SELECT 1", "syntax error", dialect="mysql"
     )
     assert "PostgreSQL" in captured[0]
     assert "SQLite 专有" in captured[0]
@@ -89,7 +89,7 @@ def test_external_dialect_is_explicit_in_generation_and_repair(monkeypatch):
 
 
 
-def test_retrieval_hits_are_included_in_generation_prompt(monkeypatch):
+def test_generation_prompt_only_includes_selected_plan_tables(monkeypatch):
     captured = {}
 
     def capture(instructions, prompt, **kwargs):
@@ -98,10 +98,14 @@ def test_retrieval_hits_are_included_in_generation_prompt(monkeypatch):
 
     monkeypatch.setattr(generator, "_llm_sql_result", capture)
     from app.nl2sql.models import SchemaHit, ColumnInfo
-    hits = [SchemaHit(table="orders", label="订单", description="订单事实表", score=1.0, vector_score=1.0, lexical_score=1.0, columns=(ColumnInfo("paid_amount", "REAL", "实付金额"),))]
+    hits = [
+        SchemaHit(table="marketing_spend", label="投放", description="投放表", score=1.0, vector_score=1.0, lexical_score=1.0, columns=(ColumnInfo("spend", "REAL", "花费"),)),
+        SchemaHit(table="order_items", label="明细", description="订单明细", score=0.9, vector_score=0.9, lexical_score=0.9),
+    ]
     plan = make_plan("销售额", [])
-    generator.generate_llm_sql("销售额", plan, hits)
-    assert "检索候选表：orders" in captured["prompt"]
+    generator.generate_llm_sql("销售额", plan)
+    assert "marketing_spend" not in captured["prompt"]
+    assert "order_items" not in captured["prompt"]
     assert "paid_amount" in captured["prompt"]
 
 
@@ -109,7 +113,7 @@ def test_roi_prompt_requires_all_channels_unless_single_top_requested():
     from app.nl2sql.planner import make_plan
     from app.nl2sql.generator import _sql_prompt, SQL_INSTRUCTIONS
 
-    prompt = _sql_prompt("上个月各渠道ROI", make_plan("上个月各渠道ROI", []), [])
+    prompt = _sql_prompt("上个月各渠道ROI", make_plan("上个月各渠道ROI", []))
     assert "必须返回每个有投放花费的渠道" in SQL_INSTRUCTIONS
     assert "不要加 LIMIT 1" in SQL_INSTRUCTIONS
     assert "上个月各渠道ROI" in prompt

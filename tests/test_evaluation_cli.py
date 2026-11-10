@@ -201,3 +201,33 @@ def test_manifest_hash_is_stable_across_runs(monkeypatch, tmp_path):
     assert run.main(["--suite", "scope", "--output", str(first)]) == 0
     assert run.main(["--suite", "scope", "--output", str(second)]) == 0
     assert json.loads(first.read_text(encoding="utf-8"))["case_manifest_sha256"] == json.loads(second.read_text(encoding="utf-8"))["case_manifest_sha256"]
+
+
+def test_frozen_colloquial_suite_uses_frozen_cases(monkeypatch, tmp_path):
+    from app.nl2sql.colloquial_holdout import (
+        COLLOQUIAL_HOLDOUT_CASES,
+        COLLOQUIAL_HOLDOUT_SUITE_VERSION,
+    )
+
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="x", base_url="https://example.com"))
+    captured = {}
+
+    def fake_colloquial(**kwargs):
+        captured.update(kwargs)
+        return {
+            "available": True,
+            "total": len(kwargs["selected_cases"]),
+            "passed": 7,
+            "hit_rate": 53.8,
+            "suite_version": kwargs["suite_version"],
+            "cases": [],
+        }
+
+    monkeypatch.setattr(run, "run_colloquial_evaluation", fake_colloquial)
+    output = tmp_path / "frozen.json"
+    assert run.main(["--suite", "colloquial-frozen", "--output", str(output)]) == 0
+    assert captured["selected_cases"] == COLLOQUIAL_HOLDOUT_CASES
+    assert captured["suite_version"] == COLLOQUIAL_HOLDOUT_SUITE_VERSION
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["total"] == 13
+    assert report["evaluation_contract"] == COLLOQUIAL_HOLDOUT_SUITE_VERSION

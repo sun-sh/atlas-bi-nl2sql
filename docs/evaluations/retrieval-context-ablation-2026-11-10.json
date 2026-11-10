@@ -1,0 +1,185 @@
+{
+  "suite_version": "retrieval-context-ablation-v1",
+  "mode": "strict-model",
+  "frozen_suite": "colloquial-frozen-v3",
+  "model": {
+    "configured": true,
+    "active": true,
+    "model": "deepseek/deepseek-v4.1-flash",
+    "provider": "custom"
+  },
+  "case_manifest_sha256": "1b4145399379891b19946600ba9c57f57adc9d61e7f7ba085085e3d7e9c47c76",
+  "source_sha256": "befe48c2b977d3eac38d723cff0cdb4accbf37bb8f5548566e8f830c9277066e",
+  "variants": {
+    "required_only": {
+      "retrieval_supplements": 0,
+      "total": 13,
+      "passed": 7,
+      "hit_rate": 53.8,
+      "execution_rate": 61.5,
+      "model_rate": 61.5,
+      "family_count": 9,
+      "fully_passed_families": 3,
+      "per_case": {
+        "colloquial-v3-channel-revenue": {
+          "hit": true,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-region-revenue": {
+          "hit": true,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-category-revenue": {
+          "hit": false,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-refund-reason": {
+          "hit": true,
+          "plan_tables": [
+            "orders",
+            "refunds"
+          ]
+        },
+        "colloquial-v3-roi-channel": {
+          "hit": true,
+          "plan_tables": [
+            "marketing_spend",
+            "orders"
+          ]
+        },
+        "colloquial-v3-aov": {
+          "hit": false,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-daily-sales": {
+          "hit": true,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-refund-requests": {
+          "hit": false,
+          "plan_tables": [
+            "orders",
+            "refunds"
+          ]
+        },
+        "colloquial-v3-item-units": {
+          "hit": false,
+          "plan_tables": []
+        },
+        "colloquial-v3-refund-rate": {
+          "hit": false,
+          "plan_tables": []
+        },
+        "colloquial-v3-ambiguous-product": {
+          "hit": true,
+          "plan_tables": []
+        },
+        "colloquial-v3-ambiguous-refund": {
+          "hit": false,
+          "plan_tables": []
+        },
+        "colloquial-v3-ambiguous-business": {
+          "hit": true,
+          "plan_tables": []
+        }
+      }
+    },
+    "required_plus_top1": {
+      "retrieval_supplements": 1,
+      "total": 13,
+      "passed": 7,
+      "hit_rate": 53.8,
+      "execution_rate": 61.5,
+      "model_rate": 61.5,
+      "family_count": 9,
+      "fully_passed_families": 3,
+      "per_case": {
+        "colloquial-v3-channel-revenue": {
+          "hit": true,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-region-revenue": {
+          "hit": true,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-category-revenue": {
+          "hit": false,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-refund-reason": {
+          "hit": true,
+          "plan_tables": [
+            "orders",
+            "refunds"
+          ]
+        },
+        "colloquial-v3-roi-channel": {
+          "hit": true,
+          "plan_tables": [
+            "marketing_spend",
+            "orders"
+          ]
+        },
+        "colloquial-v3-aov": {
+          "hit": false,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-daily-sales": {
+          "hit": true,
+          "plan_tables": [
+            "orders"
+          ]
+        },
+        "colloquial-v3-refund-requests": {
+          "hit": false,
+          "plan_tables": [
+            "orders",
+            "refunds"
+          ]
+        },
+        "colloquial-v3-item-units": {
+          "hit": false,
+          "plan_tables": []
+        },
+        "colloquial-v3-refund-rate": {
+          "hit": false,
+          "plan_tables": []
+        },
+        "colloquial-v3-ambiguous-product": {
+          "hit": true,
+          "plan_tables": []
+        },
+        "colloquial-v3-ambiguous-refund": {
+          "hit": false,
+          "plan_tables": []
+        },
+        "colloquial-v3-ambiguous-business": {
+          "hit": true,
+          "plan_tables": []
+        }
+      }
+    }
+  },
+  "identical_case_hits": true,
+  "extra_plan_tables": [],
+  "selected": "required_only",
+  "interpretation": "On the frozen 13-case five-table suite, required tables alone and required tables plus at most one top-1 retrieval supplement both scored 7/13 (53.8%) with identical per-case hits and no extra table entering plan_tables. Retrieval therefore has no measurable generation gain in this domain; it remains evidence and optional discovery support, while deterministic required-table routing is the default."
+}

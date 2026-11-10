@@ -32,8 +32,8 @@
     "other": 1
   },
   "self_healing": {
-    "attempted_cases": 1,
-    "passed_cases": 1
+    "attempted_cases": 3,
+    "passed_cases": 2
   },
   "suite_version": "strict-model-v3-holdout-30",
   "mode": "model",
@@ -45,13 +45,13 @@
   },
   "available": true,
   "dataset_range": "2025-10-01 至 2026-02-28",
-  "evaluated_at": "2026-11-09T18:18:10.574540+00:00",
+  "evaluated_at": "2026-11-10T04:12:28.294550+00:00",
   "total": 30,
   "passed": 29,
   "execution_rate": 100.0,
   "hit_rate": 96.7,
   "model_rate": 100.0,
-  "avg_elapsed_ms": 14401.1,
+  "avg_elapsed_ms": 19813.7,
   "intents": 4,
   "cases": [
     {
@@ -72,7 +72,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 13046.1,
+      "elapsed_ms": 21924.5,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -104,7 +104,7 @@
               "status": "success",
               "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华东' AND o.channel = 'MiniProgram' AND o.status = 'paid'",
               "error": null,
-              "elapsed_ms": 6.15
+              "elapsed_ms": 13.47
             }
           ],
           "generation_retries": 0,
@@ -133,7 +133,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 9701.9,
+      "elapsed_ms": 15579.9,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -165,7 +165,7 @@
               "status": "success",
               "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华南' AND o.channel = 'Web' AND o.status = 'paid'",
               "error": null,
-              "elapsed_ms": 6.1
+              "elapsed_ms": 16.75
             }
           ],
           "generation_retries": 0,
@@ -194,7 +194,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 10942.4,
+      "elapsed_ms": 20182.0,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -226,7 +226,7 @@
               "status": "success",
               "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华北' AND o.channel = 'Douyin' AND o.status = 'paid'",
               "error": null,
-              "elapsed_ms": 6.06
+              "elapsed_ms": 13.21
             }
           ],
           "generation_retries": 0,
@@ -255,7 +255,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 9998.2,
+      "elapsed_ms": 9249.7,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -287,7 +287,7 @@
               "status": "success",
               "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华南' AND o.channel = 'App' AND o.status = 'paid'",
               "error": null,
-              "elapsed_ms": 4.66
+              "elapsed_ms": 3.65
             }
           ],
           "generation_retries": 0,
@@ -316,7 +316,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 8296.9,
+      "elapsed_ms": 11991.3,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -324,7 +324,7 @@
       "steps": [
         {
           "question": "本月华东地区各渠道已支付订单销售额，按销售额降序",
-          "sql": "SELECT o.channel AS 渠道, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.status = 'paid' GROUP BY o.channel ORDER BY SUM(o.paid_amount) DESC",
+          "sql": "SELECT o.channel AS 渠道, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.status = 'paid' GROUP BY o.channel ORDER BY 销售额 DESC",
           "columns": [
             "渠道",
             "销售额"
@@ -360,9 +360,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT o.channel AS 渠道, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.status = 'paid' GROUP BY o.channel ORDER BY SUM(o.paid_amount) DESC",
+              "sql": "SELECT o.channel AS 渠道, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.status = 'paid' GROUP BY o.channel ORDER BY 销售额 DESC",
               "error": null,
-              "elapsed_ms": 2.99
+              "elapsed_ms": 6.27
             }
           ],
           "generation_retries": 0,
@@ -391,7 +391,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 11982.3,
+      "elapsed_ms": 12221.8,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -399,7 +399,7 @@
       "steps": [
         {
           "question": "近30天华南地区各渠道已支付订单销售额，按销售额降序",
-          "sql": "SELECT o.channel AS \"渠道\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华南' AND o.status = 'paid' GROUP BY o.channel ORDER BY SUM(o.paid_amount) DESC",
+          "sql": "SELECT o.channel AS \"渠道\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华南' AND o.status = 'paid' GROUP BY o.channel ORDER BY \"销售额\" DESC",
           "columns": [
             "渠道",
             "销售额"
@@ -435,9 +435,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT o.channel AS \"渠道\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华南' AND o.status = 'paid' GROUP BY o.channel ORDER BY SUM(o.paid_amount) DESC",
+              "sql": "SELECT o.channel AS \"渠道\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华南' AND o.status = 'paid' GROUP BY o.channel ORDER BY \"销售额\" DESC",
               "error": null,
-              "elapsed_ms": 2.94
+              "elapsed_ms": 6.81
             }
           ],
           "generation_retries": 0,
@@ -463,10 +463,12 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [],
+        "warnings": [
+          "未明确复述 渠道 榜首 App"
+        ],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 19816.0,
+      "elapsed_ms": 12848.9,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -474,7 +476,7 @@
       "steps": [
         {
           "question": "近90天华北地区各渠道已支付订单销售额，按销售额降序",
-          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(SUM(o.paid_amount), 0), 2) AS 销售额 FROM (SELECT channel FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN orders AS o ON o.channel = m.channel AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' AND o.status = 'paid' GROUP BY m.channel ORDER BY 销售额 DESC",
+          "sql": "SELECT o.channel AS 渠道, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' AND o.status = 'paid' GROUP BY o.channel ORDER BY 销售额 DESC",
           "columns": [
             "渠道",
             "销售额"
@@ -503,16 +505,18 @@
           "narrative_validation": {
             "passed": true,
             "errors": [],
-            "warnings": [],
+            "warnings": [
+              "未明确复述 渠道 榜首 App"
+            ],
             "contract": "deterministic-digest-grounding-v1"
           },
           "attempts": [
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(SUM(o.paid_amount), 0), 2) AS 销售额 FROM (SELECT channel FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN orders AS o ON o.channel = m.channel AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' AND o.status = 'paid' GROUP BY m.channel ORDER BY 销售额 DESC",
+              "sql": "SELECT o.channel AS 渠道, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' AND o.status = 'paid' GROUP BY o.channel ORDER BY 销售额 DESC",
               "error": null,
-              "elapsed_ms": 6.75
+              "elapsed_ms": 7.24
             }
           ],
           "generation_retries": 0,
@@ -541,7 +545,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 7212.8,
+      "elapsed_ms": 10302.7,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -549,7 +553,7 @@
       "steps": [
         {
           "question": "近90天App渠道各地区已支付订单销售额，按销售额降序",
-          "sql": "SELECT o.region AS \"地区\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.channel = 'App' AND o.status = 'paid' GROUP BY o.region ORDER BY SUM(o.paid_amount) DESC",
+          "sql": "SELECT o.region AS 地区, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.channel = 'App' AND o.status = 'paid' GROUP BY o.region ORDER BY 销售额 DESC",
           "columns": [
             "地区",
             "销售额"
@@ -585,9 +589,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT o.region AS \"地区\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.channel = 'App' AND o.status = 'paid' GROUP BY o.region ORDER BY SUM(o.paid_amount) DESC",
+              "sql": "SELECT o.region AS 地区, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.channel = 'App' AND o.status = 'paid' GROUP BY o.region ORDER BY 销售额 DESC",
               "error": null,
-              "elapsed_ms": 4.89
+              "elapsed_ms": 5.63
             }
           ],
           "generation_retries": 0,
@@ -613,10 +617,12 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [],
+        "warnings": [
+          "未明确复述 地区 榜首 华东"
+        ],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 22222.9,
+      "elapsed_ms": 14904.4,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -624,7 +630,7 @@
       "steps": [
         {
           "question": "本月抖音渠道各地区已支付订单销售额，按销售额降序",
-          "sql": "SELECT o.region AS \"地区\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.channel = 'Douyin' AND o.status = 'paid' GROUP BY o.region ORDER BY SUM(o.paid_amount) DESC",
+          "sql": "SELECT o.region AS 地区, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.channel = 'Douyin' AND o.status = 'paid' GROUP BY o.region ORDER BY 销售额 DESC",
           "columns": [
             "地区",
             "销售额"
@@ -653,16 +659,18 @@
           "narrative_validation": {
             "passed": true,
             "errors": [],
-            "warnings": [],
+            "warnings": [
+              "未明确复述 地区 榜首 华东"
+            ],
             "contract": "deterministic-digest-grounding-v1"
           },
           "attempts": [
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT o.region AS \"地区\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.channel = 'Douyin' AND o.status = 'paid' GROUP BY o.region ORDER BY SUM(o.paid_amount) DESC",
+              "sql": "SELECT o.region AS 地区, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.channel = 'Douyin' AND o.status = 'paid' GROUP BY o.region ORDER BY 销售额 DESC",
               "error": null,
-              "elapsed_ms": 8.87
+              "elapsed_ms": 2.86
             }
           ],
           "generation_retries": 0,
@@ -693,7 +701,7 @@
         ],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 8572.7,
+      "elapsed_ms": 18713.2,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -729,7 +737,7 @@
               "status": "success",
               "sql": "SELECT o.region AS 地区, ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华南' AND o.status = 'paid' GROUP BY o.region",
               "error": null,
-              "elapsed_ms": 5.36
+              "elapsed_ms": 7.09
             }
           ],
           "generation_retries": 0,
@@ -755,12 +763,10 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [
-          "未明确复述 地区 榜首 华东"
-        ],
+        "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 15042.6,
+      "elapsed_ms": 13670.8,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -768,15 +774,13 @@
       "steps": [
         {
           "question": "上个月华东地区已支付订单客单价是多少？",
-          "sql": "SELECT o.region AS 地区, ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华东' AND o.status = 'paid' GROUP BY o.region",
+          "sql": "SELECT ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华东' AND o.status = 'paid'",
           "columns": [
-            "地区",
             "客单价"
           ],
           "row_count": 1,
           "sample_rows": [
             {
-              "地区": "华东",
               "客单价": 373.59
             }
           ],
@@ -785,18 +789,16 @@
           "narrative_validation": {
             "passed": true,
             "errors": [],
-            "warnings": [
-              "未明确复述 地区 榜首 华东"
-            ],
+            "warnings": [],
             "contract": "deterministic-digest-grounding-v1"
           },
           "attempts": [
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT o.region AS 地区, ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华东' AND o.status = 'paid' GROUP BY o.region",
+              "sql": "SELECT ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华东' AND o.status = 'paid'",
               "error": null,
-              "elapsed_ms": 7.37
+              "elapsed_ms": 5.16
             }
           ],
           "generation_retries": 0,
@@ -825,15 +827,15 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 36083.0,
+      "elapsed_ms": 16251.2,
       "attempts": 1,
-      "generation_retries": 1,
+      "generation_retries": 0,
       "narrative_retries": 0,
-      "repair_used": true,
+      "repair_used": false,
       "steps": [
         {
           "question": "本月华东地区各渠道已支付订单客单价，按客单价降序",
-          "sql": "SELECT m.channel AS 渠道, ROUND(o.avg_paid_amount, 2) AS 客单价 FROM (SELECT channel FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, AVG(paid_amount) AS avg_paid_amount FROM orders WHERE order_date >= '2026-02-01' AND order_date <= '2026-02-28' AND region = '华东' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY 客单价 DESC",
+          "sql": "SELECT o.channel AS 渠道, ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.status = 'paid' GROUP BY o.channel ORDER BY 客单价 DESC",
           "columns": [
             "渠道",
             "客单价"
@@ -857,7 +859,7 @@
               "客单价": 368.16
             }
           ],
-          "sql_mode": "llm-repair",
+          "sql_mode": "llm",
           "narrative_mode": "model",
           "narrative_validation": {
             "passed": true,
@@ -869,20 +871,17 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT m.channel AS 渠道, ROUND(o.avg_paid_amount, 2) AS 客单价 FROM (SELECT channel FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, AVG(paid_amount) AS avg_paid_amount FROM orders WHERE order_date >= '2026-02-01' AND order_date <= '2026-02-28' AND region = '华东' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY 客单价 DESC",
+              "sql": "SELECT o.channel AS 渠道, ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.status = 'paid' GROUP BY o.channel ORDER BY 客单价 DESC",
               "error": null,
-              "elapsed_ms": 3.75
+              "elapsed_ms": 7.19
             }
           ],
-          "generation_retries": 1,
+          "generation_retries": 0,
           "narrative_retries": 0
         }
       ],
-      "sql_mode": "llm-repair",
-      "warnings": [
-        "首次 SQL 为空，已触发模型重试",
-        "修复来源：llm-repair"
-      ],
+      "sql_mode": "llm",
+      "warnings": [],
       "error": null
     },
     {
@@ -903,15 +902,15 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 11734.7,
+      "elapsed_ms": 40704.1,
       "attempts": 1,
       "generation_retries": 0,
-      "narrative_retries": 0,
-      "repair_used": false,
+      "narrative_retries": 1,
+      "repair_used": true,
       "steps": [
         {
           "question": "近90天华北地区各渠道已支付订单客单价，按客单价降序",
-          "sql": "SELECT o.channel AS \"渠道\", ROUND(AVG(o.paid_amount), 2) AS \"客单价\" FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' AND o.status = 'paid' GROUP BY o.channel ORDER BY AVG(o.paid_amount) DESC",
+          "sql": "SELECT o.channel AS 渠道, ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' AND o.status = 'paid' GROUP BY o.channel ORDER BY 客单价 DESC",
           "columns": [
             "渠道",
             "客单价"
@@ -947,13 +946,13 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT o.channel AS \"渠道\", ROUND(AVG(o.paid_amount), 2) AS \"客单价\" FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' AND o.status = 'paid' GROUP BY o.channel ORDER BY AVG(o.paid_amount) DESC",
+              "sql": "SELECT o.channel AS 渠道, ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' AND o.status = 'paid' GROUP BY o.channel ORDER BY 客单价 DESC",
               "error": null,
-              "elapsed_ms": 5.93
+              "elapsed_ms": 5.82
             }
           ],
           "generation_retries": 0,
-          "narrative_retries": 0
+          "narrative_retries": 1
         }
       ],
       "sql_mode": "llm",
@@ -975,10 +974,12 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [],
+        "warnings": [
+          "未明确复述 品类 榜首 运动鞋服"
+        ],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 12983.4,
+      "elapsed_ms": 17509.1,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -986,14 +987,16 @@
       "steps": [
         {
           "question": "本月华东地区MiniProgram渠道运动鞋服商品行的已支付商品销量是多少？按商品明细件数统计",
-          "sql": "SELECT SUM(oi.quantity) AS 销量 FROM orders AS o JOIN order_items AS oi ON o.order_id = oi.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.channel = 'MiniProgram' AND o.status = 'paid' AND oi.category = '运动鞋服'",
+          "sql": "SELECT oi.category AS 品类, ROUND(SUM(oi.quantity), 2) AS 销量 FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.channel = 'MiniProgram' AND o.status = 'paid' AND oi.category = '运动鞋服' GROUP BY oi.category",
           "columns": [
+            "品类",
             "销量"
           ],
           "row_count": 1,
           "sample_rows": [
             {
-              "销量": 12
+              "品类": "运动鞋服",
+              "销量": 12.0
             }
           ],
           "sql_mode": "llm",
@@ -1001,16 +1004,18 @@
           "narrative_validation": {
             "passed": true,
             "errors": [],
-            "warnings": [],
+            "warnings": [
+              "未明确复述 品类 榜首 运动鞋服"
+            ],
             "contract": "deterministic-digest-grounding-v1"
           },
           "attempts": [
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT SUM(oi.quantity) AS 销量 FROM orders AS o JOIN order_items AS oi ON o.order_id = oi.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.channel = 'MiniProgram' AND o.status = 'paid' AND oi.category = '运动鞋服'",
+              "sql": "SELECT oi.category AS 品类, ROUND(SUM(oi.quantity), 2) AS 销量 FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' AND o.channel = 'MiniProgram' AND o.status = 'paid' AND oi.category = '运动鞋服' GROUP BY oi.category",
               "error": null,
-              "elapsed_ms": 6.44
+              "elapsed_ms": 6.79
             }
           ],
           "generation_retries": 0,
@@ -1039,7 +1044,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 17037.8,
+      "elapsed_ms": 13162.4,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1047,7 +1052,7 @@
       "steps": [
         {
           "question": "近90天华南地区Web渠道各品类已支付商品销量，按商品行品类汇总件数，销量降序",
-          "sql": "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 FROM orders AS o JOIN order_items AS oi ON o.order_id = oi.order_id WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华南' AND o.channel = 'Web' AND o.status = 'paid' GROUP BY oi.category ORDER BY 销量 DESC",
+          "sql": "SELECT oi.category AS \"品类\", SUM(oi.quantity) AS \"销量\" FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华南' AND o.channel = 'Web' AND o.status = 'paid' GROUP BY oi.category ORDER BY \"销量\" DESC",
           "columns": [
             "品类",
             "销量"
@@ -1083,9 +1088,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 FROM orders AS o JOIN order_items AS oi ON o.order_id = oi.order_id WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华南' AND o.channel = 'Web' AND o.status = 'paid' GROUP BY oi.category ORDER BY 销量 DESC",
+              "sql": "SELECT oi.category AS \"品类\", SUM(oi.quantity) AS \"销量\" FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华南' AND o.channel = 'Web' AND o.status = 'paid' GROUP BY oi.category ORDER BY \"销量\" DESC",
               "error": null,
-              "elapsed_ms": 8.0
+              "elapsed_ms": 4.97
             }
           ],
           "generation_retries": 0,
@@ -1111,10 +1116,12 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [],
+        "warnings": [
+          "未明确复述 品类 榜首 美妆个护"
+        ],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 8215.5,
+      "elapsed_ms": 20784.5,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1122,7 +1129,7 @@
       "steps": [
         {
           "question": "上个月华北地区抖音渠道各品类已支付商品销量，按商品行品类汇总件数，销量降序",
-          "sql": "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 FROM orders AS o JOIN order_items AS oi ON o.order_id = oi.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华北' AND o.channel = 'Douyin' AND o.status = 'paid' GROUP BY oi.category ORDER BY 销量 DESC",
+          "sql": "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华北' AND o.channel = 'Douyin' AND o.status = 'paid' GROUP BY oi.category ORDER BY 销量 DESC",
           "columns": [
             "品类",
             "销量"
@@ -1151,16 +1158,18 @@
           "narrative_validation": {
             "passed": true,
             "errors": [],
-            "warnings": [],
+            "warnings": [
+              "未明确复述 品类 榜首 美妆个护"
+            ],
             "contract": "deterministic-digest-grounding-v1"
           },
           "attempts": [
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 FROM orders AS o JOIN order_items AS oi ON o.order_id = oi.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华北' AND o.channel = 'Douyin' AND o.status = 'paid' GROUP BY oi.category ORDER BY 销量 DESC",
+              "sql": "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华北' AND o.channel = 'Douyin' AND o.status = 'paid' GROUP BY oi.category ORDER BY 销量 DESC",
               "error": null,
-              "elapsed_ms": 4.29
+              "elapsed_ms": 10.67
             }
           ],
           "generation_retries": 0,
@@ -1189,7 +1198,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 15806.4,
+      "elapsed_ms": 17117.8,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1197,7 +1206,7 @@
       "steps": [
         {
           "question": "上个月华南地区各品类退款率，退款申请单数除以全部订单数乘100，退款率降序",
-          "sql": "SELECT o.category AS 品类, ROUND(COUNT(r.refund_id) * 100.0 / COUNT(DISTINCT o.order_id), 2) AS 退款率 FROM orders AS o LEFT JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华南' GROUP BY o.category ORDER BY 退款率 DESC",
+          "sql": "SELECT o.category AS \"品类\", ROUND(COUNT(r.refund_id) * 100.0 / COUNT(DISTINCT o.order_id), 2) AS \"退款率\" FROM orders AS o LEFT JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华南' GROUP BY o.category ORDER BY \"退款率\" DESC",
           "columns": [
             "品类",
             "退款率"
@@ -1233,9 +1242,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT o.category AS 品类, ROUND(COUNT(r.refund_id) * 100.0 / COUNT(DISTINCT o.order_id), 2) AS 退款率 FROM orders AS o LEFT JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华南' GROUP BY o.category ORDER BY 退款率 DESC",
+              "sql": "SELECT o.category AS \"品类\", ROUND(COUNT(r.refund_id) * 100.0 / COUNT(DISTINCT o.order_id), 2) AS \"退款率\" FROM orders AS o LEFT JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华南' GROUP BY o.category ORDER BY \"退款率\" DESC",
               "error": null,
-              "elapsed_ms": 4.33
+              "elapsed_ms": 7.11
             }
           ],
           "generation_retries": 0,
@@ -1264,7 +1273,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 17553.7,
+      "elapsed_ms": 18675.2,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1310,7 +1319,7 @@
               "status": "success",
               "sql": "SELECT o.category AS \"品类\", ROUND(COUNT(DISTINCT r.refund_id) * 100.0 / COUNT(DISTINCT o.order_id), 2) AS \"退款率\" FROM orders AS o LEFT JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' AND o.region = '华北' GROUP BY o.category ORDER BY \"退款率\" DESC",
               "error": null,
-              "elapsed_ms": 7.72
+              "elapsed_ms": 4.02
             }
           ],
           "generation_retries": 0,
@@ -1339,7 +1348,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 8304.4,
+      "elapsed_ms": 12480.9,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1347,7 +1356,7 @@
       "steps": [
         {
           "question": "近30天抖音渠道各退款原因的退款金额，按退款金额降序",
-          "sql": "SELECT r.reason AS \"退款原因\", ROUND(SUM(r.refund_amount), 2) AS \"退款金额\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.channel = 'Douyin' GROUP BY r.reason ORDER BY SUM(r.refund_amount) DESC",
+          "sql": "SELECT r.reason AS \"退款原因\", ROUND(SUM(r.refund_amount), 2) AS \"退款金额\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.channel = 'Douyin' GROUP BY r.reason ORDER BY \"退款金额\" DESC",
           "columns": [
             "退款原因",
             "退款金额"
@@ -1387,9 +1396,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT r.reason AS \"退款原因\", ROUND(SUM(r.refund_amount), 2) AS \"退款金额\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.channel = 'Douyin' GROUP BY r.reason ORDER BY SUM(r.refund_amount) DESC",
+              "sql": "SELECT r.reason AS \"退款原因\", ROUND(SUM(r.refund_amount), 2) AS \"退款金额\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.channel = 'Douyin' GROUP BY r.reason ORDER BY \"退款金额\" DESC",
               "error": null,
-              "elapsed_ms": 7.04
+              "elapsed_ms": 7.71
             }
           ],
           "generation_retries": 0,
@@ -1415,10 +1424,12 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [],
+        "warnings": [
+          "未明确复述 退款原因 榜首 商品与描述不符"
+        ],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 8148.0,
+      "elapsed_ms": 15911.7,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1426,7 +1437,7 @@
       "steps": [
         {
           "question": "本月华东地区各退款原因的退款金额，按退款金额降序",
-          "sql": "SELECT r.reason AS 退款原因, ROUND(SUM(r.refund_amount), 2) AS 退款金额 FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' GROUP BY r.reason ORDER BY 退款金额 DESC",
+          "sql": "SELECT r.reason AS \"退款原因\", ROUND(SUM(r.refund_amount), 2) AS \"退款金额\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' GROUP BY r.reason ORDER BY \"退款金额\" DESC",
           "columns": [
             "退款原因",
             "退款金额"
@@ -1455,16 +1466,18 @@
           "narrative_validation": {
             "passed": true,
             "errors": [],
-            "warnings": [],
+            "warnings": [
+              "未明确复述 退款原因 榜首 商品与描述不符"
+            ],
             "contract": "deterministic-digest-grounding-v1"
           },
           "attempts": [
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT r.reason AS 退款原因, ROUND(SUM(r.refund_amount), 2) AS 退款金额 FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' GROUP BY r.reason ORDER BY 退款金额 DESC",
+              "sql": "SELECT r.reason AS \"退款原因\", ROUND(SUM(r.refund_amount), 2) AS \"退款金额\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华东' GROUP BY r.reason ORDER BY \"退款金额\" DESC",
               "error": null,
-              "elapsed_ms": 4.45
+              "elapsed_ms": 7.33
             }
           ],
           "generation_retries": 0,
@@ -1493,7 +1506,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 11393.5,
+      "elapsed_ms": 21105.6,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1501,7 +1514,7 @@
       "steps": [
         {
           "question": "本月华北地区各品类退款单数，退款申请单数降序",
-          "sql": "SELECT o.category AS 品类, COUNT(r.refund_id) AS 退款单数 FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华北' GROUP BY o.category ORDER BY 退款单数 DESC",
+          "sql": "SELECT o.category AS \"品类\", COUNT(r.refund_id) AS \"退款单数\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华北' GROUP BY o.category ORDER BY COUNT(r.refund_id) DESC",
           "columns": [
             "品类",
             "退款单数"
@@ -1537,9 +1550,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT o.category AS 品类, COUNT(r.refund_id) AS 退款单数 FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华北' GROUP BY o.category ORDER BY 退款单数 DESC",
+              "sql": "SELECT o.category AS \"品类\", COUNT(r.refund_id) AS \"退款单数\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date >= '2026-02-01' AND o.order_date <= '2026-02-28' AND o.region = '华北' GROUP BY o.category ORDER BY COUNT(r.refund_id) DESC",
               "error": null,
-              "elapsed_ms": 5.52
+              "elapsed_ms": 4.34
             }
           ],
           "generation_retries": 0,
@@ -1568,7 +1581,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 16619.2,
+      "elapsed_ms": 17223.4,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1618,7 +1631,7 @@
               "status": "success",
               "sql": "SELECT r.reason AS 退款原因, COUNT(r.refund_id) AS 退款单数 FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.channel = 'Web' GROUP BY r.reason ORDER BY 退款单数 DESC",
               "error": null,
-              "elapsed_ms": 8.04
+              "elapsed_ms": 6.97
             }
           ],
           "generation_retries": 0,
@@ -1644,18 +1657,20 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [],
+        "warnings": [
+          "未明确复述 渠道 榜首 App"
+        ],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 16179.3,
-      "attempts": 1,
+      "elapsed_ms": 27350.6,
+      "attempts": 2,
       "generation_retries": 0,
       "narrative_retries": 0,
-      "repair_used": false,
+      "repair_used": true,
       "steps": [
         {
           "question": "本月各渠道ROI：已支付销售额除以投放花费，两表各自按渠道汇总后计算，按ROI降序",
-          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date >= '2026-02-01' AND order_date <= '2026-02-28' GROUP BY channel) AS o ON m.channel = o.channel ORDER BY ROI DESC",
+          "sql": "SELECT m.channel AS \"渠道\", ROUND(COALESCE(o.sales, 0) / m.spend, 2) AS \"ROI\" FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE order_date >= '2026-02-01' AND order_date <= '2026-02-28' AND status = 'paid' GROUP BY channel) AS o ON m.channel = o.channel WHERE m.spend > 0 ORDER BY \"ROI\" DESC",
           "columns": [
             "渠道",
             "ROI"
@@ -1679,29 +1694,42 @@
               "ROI": 0.49
             }
           ],
-          "sql_mode": "llm",
+          "sql_mode": "llm-repair",
           "narrative_mode": "model",
           "narrative_validation": {
             "passed": true,
             "errors": [],
-            "warnings": [],
+            "warnings": [
+              "未明确复述 渠道 榜首 App"
+            ],
             "contract": "deterministic-digest-grounding-v1"
           },
           "attempts": [
             {
               "attempt": 1,
+              "status": "failed",
+              "sql": "SELECT m.channel AS \"渠道\", ROUND(CASE WHEN m.spend = 0 THEN NULL ELSE COALESCE(o.sales, 0) / m.spend END, 2) AS \"ROI\" FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel) m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE order_date >= '2026-02-01' AND order_date <= '2026-02-28' AND status = 'paid' GROUP BY channel) o ON m.channel = o.channel WHERE m.spend > 0 ORDER BY \"ROI\" DESC",
+              "error": "未授权函数：case",
+              "elapsed_ms": 3.7
+            },
+            {
+              "attempt": 2,
               "status": "success",
-              "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date >= '2026-02-01' AND order_date <= '2026-02-28' GROUP BY channel) AS o ON m.channel = o.channel ORDER BY ROI DESC",
+              "sql": "SELECT m.channel AS \"渠道\", ROUND(COALESCE(o.sales, 0) / m.spend, 2) AS \"ROI\" FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE order_date >= '2026-02-01' AND order_date <= '2026-02-28' AND status = 'paid' GROUP BY channel) AS o ON m.channel = o.channel WHERE m.spend > 0 ORDER BY \"ROI\" DESC",
               "error": null,
-              "elapsed_ms": 5.93
+              "elapsed_ms": 8.6
             }
           ],
           "generation_retries": 0,
           "narrative_retries": 0
         }
       ],
-      "sql_mode": "llm",
-      "warnings": [],
+      "sql_mode": "llm-repair",
+      "warnings": [
+        "未授权函数：case",
+        "第 1 次执行失败：未授权函数：case",
+        "修复来源：llm-repair"
+      ],
       "error": null
     },
     {
@@ -1722,7 +1750,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 18829.7,
+      "elapsed_ms": 20357.9,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1730,7 +1758,7 @@
       "steps": [
         {
           "question": "近30天各渠道ROI：已支付销售额除以投放花费，两表各自按渠道汇总后计算，按ROI降序",
-          "sql": "SELECT m.channel AS \"渠道\", ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS \"ROI\" FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2026-01-30' AND '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date BETWEEN '2026-01-30' AND '2026-02-28' GROUP BY channel) AS o ON m.channel = o.channel ORDER BY \"ROI\" DESC",
+          "sql": "SELECT m.channel AS \"渠道\", ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS \"ROI\" FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2026-01-30' AND '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date BETWEEN '2026-01-30' AND '2026-02-28' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY \"ROI\" DESC",
           "columns": [
             "渠道",
             "ROI"
@@ -1766,9 +1794,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT m.channel AS \"渠道\", ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS \"ROI\" FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2026-01-30' AND '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date BETWEEN '2026-01-30' AND '2026-02-28' GROUP BY channel) AS o ON m.channel = o.channel ORDER BY \"ROI\" DESC",
+              "sql": "SELECT m.channel AS \"渠道\", ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS \"ROI\" FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2026-01-30' AND '2026-02-28' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date BETWEEN '2026-01-30' AND '2026-02-28' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY \"ROI\" DESC",
               "error": null,
-              "elapsed_ms": 5.22
+              "elapsed_ms": 5.14
             }
           ],
           "generation_retries": 0,
@@ -1797,7 +1825,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 12667.6,
+      "elapsed_ms": 25029.9,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1805,7 +1833,7 @@
       "steps": [
         {
           "question": "近90天各渠道ROI：已支付销售额除以投放花费，两表各自按渠道汇总后计算，按ROI降序",
-          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY ROI DESC",
+          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE order_date BETWEEN '2025-12-01' AND '2026-02-28' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY ROI DESC",
           "columns": [
             "渠道",
             "ROI"
@@ -1841,9 +1869,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY ROI DESC",
+              "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE order_date BETWEEN '2025-12-01' AND '2026-02-28' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY ROI DESC",
               "error": null,
-              "elapsed_ms": 7.51
+              "elapsed_ms": 5.59
             }
           ],
           "generation_retries": 0,
@@ -1872,7 +1900,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 8061.6,
+      "elapsed_ms": 19911.6,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -1922,7 +1950,7 @@
               "status": "success",
               "sql": "SELECT o.order_date AS 日期, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华东' AND o.channel = 'Web' AND o.status = 'paid' GROUP BY o.order_date ORDER BY o.order_date ASC",
               "error": null,
-              "elapsed_ms": 5.32
+              "elapsed_ms": 5.17
             }
           ],
           "generation_retries": 0,
@@ -1951,7 +1979,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 7755.1,
+      "elapsed_ms": 16727.4,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -2001,7 +2029,7 @@
               "status": "success",
               "sql": "SELECT o.order_date AS 日期, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华南' AND o.channel = 'App' AND o.status = 'paid' GROUP BY o.order_date ORDER BY o.order_date ASC",
               "error": null,
-              "elapsed_ms": 3.59
+              "elapsed_ms": 8.63
             }
           ],
           "generation_retries": 0,
@@ -2030,7 +2058,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 17845.2,
+      "elapsed_ms": 40826.0,
       "attempts": 2,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -2062,7 +2090,7 @@
               "status": "success",
               "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '华东' AND o.channel = 'MiniProgram' AND o.status = 'paid'",
               "error": null,
-              "elapsed_ms": 5.11
+              "elapsed_ms": 8.62
             }
           ],
           "generation_retries": 0,
@@ -2094,7 +2122,7 @@
               "status": "success",
               "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.region = '西南' AND o.channel = 'MiniProgram' AND o.status = 'paid'",
               "error": null,
-              "elapsed_ms": 3.04
+              "elapsed_ms": 5.06
             }
           ],
           "generation_retries": 0,
@@ -2123,15 +2151,15 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 30772.4,
-      "attempts": 2,
+      "elapsed_ms": 61929.4,
+      "attempts": 3,
       "generation_retries": 0,
       "narrative_retries": 0,
-      "repair_used": false,
+      "repair_used": true,
       "steps": [
         {
           "question": "本月各渠道ROI：已支付销售额除以投放花费，两表各自按渠道汇总后计算，按ROI降序",
-          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / m.spend, 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date >= '2026-02-01' AND order_date <= '2026-02-28' GROUP BY channel) AS o ON m.channel = o.channel WHERE m.spend > 0 ORDER BY ROI DESC",
+          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date >= '2026-02-01' AND order_date <= '2026-02-28' GROUP BY channel) AS o ON o.channel = m.channel WHERE m.spend > 0 ORDER BY ROI DESC",
           "columns": [
             "渠道",
             "ROI"
@@ -2167,9 +2195,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / m.spend, 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date >= '2026-02-01' AND order_date <= '2026-02-28' GROUP BY channel) AS o ON m.channel = o.channel WHERE m.spend > 0 ORDER BY ROI DESC",
+              "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.sales, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date >= '2026-02-01' AND spend_date <= '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS sales FROM orders WHERE status = 'paid' AND order_date >= '2026-02-01' AND order_date <= '2026-02-28' GROUP BY channel) AS o ON o.channel = m.channel WHERE m.spend > 0 ORDER BY ROI DESC",
               "error": null,
-              "elapsed_ms": 6.49
+              "elapsed_ms": 8.73
             }
           ],
           "generation_retries": 0,
@@ -2177,7 +2205,7 @@
         },
         {
           "question": "那上个月呢？",
-          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.paid_amount, 0) / m.spend, 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2025-12-31' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS paid_amount FROM orders WHERE order_date BETWEEN '2025-12-01' AND '2025-12-31' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel WHERE m.spend > 0 ORDER BY ROI DESC",
+          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.paid_sales, 0) * 1.0 / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2025-12-31' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS paid_sales FROM orders WHERE order_date BETWEEN '2025-12-01' AND '2025-12-31' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY ROI DESC",
           "columns": [
             "渠道",
             "ROI"
@@ -2201,7 +2229,7 @@
               "ROI": 0.71
             }
           ],
-          "sql_mode": "llm",
+          "sql_mode": "llm-repair",
           "narrative_mode": "model",
           "narrative_validation": {
             "passed": true,
@@ -2212,18 +2240,29 @@
           "attempts": [
             {
               "attempt": 1,
+              "status": "failed",
+              "sql": "SELECT CASE m.channel WHEN 'MiniProgram' THEN '小程序' WHEN 'Douyin' THEN '抖音' WHEN 'Web' THEN '网页' ELSE 'App' END AS 渠道, ROUND(COALESCE(o.paid_sales, 0) * 1.0 / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2025-12-31' GROUP BY channel HAVING SUM(spend) > 0) m LEFT JOIN (SELECT channel, SUM(paid_amount) AS paid_sales FROM orders WHERE order_date BETWEEN '2025-12-01' AND '2025-12-31' AND status = 'paid' GROUP BY channel) o ON o.channel = m.channel ORDER BY ROI DESC",
+              "error": "未授权函数：case",
+              "elapsed_ms": 1.47
+            },
+            {
+              "attempt": 2,
               "status": "success",
-              "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.paid_amount, 0) / m.spend, 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2025-12-31' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS paid_amount FROM orders WHERE order_date BETWEEN '2025-12-01' AND '2025-12-31' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel WHERE m.spend > 0 ORDER BY ROI DESC",
+              "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.paid_sales, 0) * 1.0 / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2025-12-31' GROUP BY channel HAVING SUM(spend) > 0) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS paid_sales FROM orders WHERE order_date BETWEEN '2025-12-01' AND '2025-12-31' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY ROI DESC",
               "error": null,
-              "elapsed_ms": 7.82
+              "elapsed_ms": 6.27
             }
           ],
           "generation_retries": 0,
           "narrative_retries": 0
         }
       ],
-      "sql_mode": "llm",
-      "warnings": [],
+      "sql_mode": "llm-repair",
+      "warnings": [
+        "未授权函数：case",
+        "第 1 次执行失败：未授权函数：case",
+        "修复来源：llm-repair"
+      ],
       "error": "web 的ROI不符：期望 2.23，实际 2.61"
     },
     {
@@ -2244,7 +2283,7 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "elapsed_ms": 19207.9,
+      "elapsed_ms": 9763.9,
       "attempts": 1,
       "generation_retries": 0,
       "narrative_retries": 0,
@@ -2252,7 +2291,7 @@
       "steps": [
         {
           "question": "近30天华东地区Web渠道已支付订单销售额是多少？",
-          "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华东' AND o.channel = 'Web' AND o.status = 'paid'",
+          "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.status = 'paid' AND o.region = '华东' AND o.channel = 'Web'",
           "columns": [
             "销售额"
           ],
@@ -2274,9 +2313,9 @@
             {
               "attempt": 1,
               "status": "success",
-              "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.region = '华东' AND o.channel = 'Web' AND o.status = 'paid'",
+              "sql": "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.order_date BETWEEN '2026-01-30' AND '2026-02-28' AND o.status = 'paid' AND o.region = '华东' AND o.channel = 'Web'",
               "error": null,
-              "elapsed_ms": 5.54
+              "elapsed_ms": 2.62
             }
           ],
           "generation_retries": 0,
@@ -2376,8 +2415,9 @@
   },
   "runtime": {
     "workers": 3,
-    "wall_elapsed_ms": 155294.7,
-    "source_sha256": "be06467b3a53ff47bca9f9839c7be2faf24056dc175ce47bda3859ccbf760e3b"
+    "wall_elapsed_ms": 230821.9,
+    "source_sha256": "befe48c2b977d3eac38d723cff0cdb4accbf37bb8f5548566e8f830c9277066e",
+    "retrieval_supplements": 0
   },
   "evaluation_contract": "strict-v3-result-equivalence-v1",
   "case_manifest_sha256": "9db79c49421e07589e04a29e21fb0e1cf5167333ab5ecee18dd5cfef6a4e57b1",

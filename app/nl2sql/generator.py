@@ -5,7 +5,7 @@ import json
 
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.model_runtime import model_call_slot, record_usage
-from app.nl2sql.models import QueryPlan, SchemaHit
+from app.nl2sql.models import QueryPlan
 from app.nl2sql.planner import CATEGORY_TERMS
 from app.nl2sql.schema_catalog import semantic_schema_prompt
 from app.nl2sql.settings import get_settings
@@ -46,14 +46,19 @@ DIALECT_INSTRUCTIONS = {
 }
 
 
-def _sql_prompt(question: str, plan: QueryPlan, hits: list[SchemaHit] | None = None) -> str:
-    retrieved_tables = [hit.table for hit in (hits or [])[:4]]
-    selected_tables = list(dict.fromkeys([*retrieved_tables, *plan.tables]))
+def _sql_prompt(question: str, plan: QueryPlan) -> str:
+    # Only the tables selected by the planner enter the prompt. The retriever
+    # can add at most one supplement to that plan; the remaining ranked hits
+    # stay visible as response evidence but must not silently become schema.
+    selected_tables = list(dict.fromkeys(plan.tables))
+    retrieval_note = (
+        f"检索补充表：{', '.join(plan.context.get('retrieval_supplements') or []) or '无'}\n"
+    )
     return (
         f"当前问题：{question}\n前置问题：{plan.source_question or '无'}\n"
         f"当前完整计划：{json.dumps(plan.as_dict(), ensure_ascii=False)}\n"
-        f"检索候选表：{', '.join(retrieved_tables) or '无'}\n"
-        f"数据库字段、枚举与表粒度：\n{semantic_schema_prompt(selected_tables)}\n只返回 SQL。"
+        f"{retrieval_note}"
+        f"进入 SQL 上下文的字段、枚举与表粒度：\n{semantic_schema_prompt(selected_tables)}\n只返回 SQL。"
     )
 
 
@@ -70,7 +75,7 @@ def _marketing_filters(plan: QueryPlan) -> list[str]:
     return filters
 
 
-def generate_rule_sql(question: str, plan: QueryPlan, hits: list[SchemaHit]) -> str:
+def generate_rule_sql(question: str, plan: QueryPlan) -> str:
     q = question.lower()
     filters = list(plan.filters)
     if plan.intent == "marketing_efficiency":
@@ -296,24 +301,22 @@ def _llm_sql(instructions: str, prompt: str, *, max_tokens: int | None = None) -
 def generate_llm_sql_result(
     question: str,
     plan: QueryPlan,
-    hits: list[SchemaHit],
     *,
     dialect: str = "sqlite",
 ) -> tuple[str | None, str]:
     return _llm_sql_result(
         SQL_INSTRUCTIONS + DIALECT_INSTRUCTIONS.get(dialect, ""),
-        _sql_prompt(question, plan, hits),
+        _sql_prompt(question, plan),
     )
 
 
 def generate_llm_sql(
     question: str,
     plan: QueryPlan,
-    hits: list[SchemaHit],
     *,
     dialect: str = "sqlite",
 ) -> str | None:
-    sql, error = generate_llm_sql_result(question, plan, hits, dialect=dialect)
+    sql, error = generate_llm_sql_result(question, plan, dialect=dialect)
     global LAST_LLM_ERROR
     LAST_LLM_ERROR = error or None
     return sql
@@ -322,7 +325,6 @@ def generate_llm_sql(
 def generate_llm_repair_sql_result(
     question: str,
     plan: QueryPlan,
-    hits: list[SchemaHit],
     previous_sql: str,
     error: str,
     *,
@@ -332,7 +334,7 @@ def generate_llm_repair_sql_result(
         SQL_INSTRUCTIONS
         + DIALECT_INSTRUCTIONS.get(dialect, "")
         + "根据反馈修复原SQL，保持用户要求的业务口径，不得改变筛选来制造非空结果。",
-        _sql_prompt(question, plan, hits) + "\n"
+        _sql_prompt(question, plan) + "\n"
         f"失败 SQL：\n{previous_sql}\n错误：\n{error}\n只返回修复后的 SQL。",
         # A repair may need to restate a multi-branch ROI query; using the
         # smaller first-pass budget here caused avoidable truncation.
@@ -346,14 +348,13 @@ def generate_llm_repair_sql_result(
 def generate_llm_repair_sql(
     question: str,
     plan: QueryPlan,
-    hits: list[SchemaHit],
     previous_sql: str,
     error: str,
     *,
     dialect: str = "sqlite",
 ) -> str | None:
     sql, call_error = generate_llm_repair_sql_result(
-        question, plan, hits, previous_sql, error, dialect=dialect
+        question, plan, previous_sql, error, dialect=dialect
     )
     global LAST_LLM_ERROR
     LAST_LLM_ERROR = call_error or None

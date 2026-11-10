@@ -1,0 +1,632 @@
+{
+  "suite_version": "retrieval-ablation-v1",
+  "total": 12,
+  "selected": "hybrid_0.56_0.44",
+  "retrieval_backend": {
+    "tables": 5,
+    "semantic_backend": "local fallback",
+    "lexical_backend": "BM25-style IDF",
+    "elasticsearch_enabled": false,
+    "qdrant_mode": "in-memory",
+    "fusion": "0.56 semantic + 0.44 lexical",
+    "rerank": "orders +0.015 tie-break",
+    "fusion_basis": "normalized IDF",
+    "embedding_model": null,
+    "qdrant_enabled": false
+  },
+  "variants": {
+    "lexical_only": {
+      "total": 12,
+      "top1_hits": 11,
+      "full_recall_cases": 12,
+      "top1_accuracy": 91.7,
+      "mrr": 0.9444,
+      "full_recall_at_4": 100.0,
+      "metric": "top1_accuracy / MRR / all_expected_tables_present_in_top_4",
+      "cases": [
+        {
+          "question": "哪个渠道贡献的收入最多？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "customers",
+            "marketing_spend",
+            "orders",
+            "order_items"
+          ],
+          "top1_hit": false,
+          "full_recall": true,
+          "reciprocal_rank": 0.3333
+        },
+        {
+          "question": "投放的钱花在哪里了，回报怎么样？",
+          "expected_tables": [
+            "marketing_spend",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "marketing_spend",
+            "orders",
+            "order_items",
+            "refunds"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "售后问题主要集中在哪里？",
+          "expected_tables": [
+            "orders",
+            "refunds"
+          ],
+          "retrieved_tables": [
+            "refunds",
+            "orders",
+            "order_items",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "卖得最多的是哪些类目？",
+          "expected_tables": [
+            "order_items",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "order_items",
+            "orders",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "会员和复购情况如何？",
+          "expected_tables": [
+            "customers",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "customers",
+            "orders",
+            "order_items",
+            "refunds"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "网页端和抖音端每单平均花多少钱？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "华东和西南的生意差距大吗？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "这个月每天卖得怎么样？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "退的钱都是因为什么？",
+          "expected_tables": [
+            "orders",
+            "refunds"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "广告被看见和点开的情况如何？",
+          "expected_tables": [
+            "marketing_spend"
+          ],
+          "retrieved_tables": [
+            "marketing_spend",
+            "orders",
+            "order_items",
+            "refunds"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "哪些商品买的人多但单价低？",
+          "expected_tables": [
+            "order_items",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "order_items",
+            "orders",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "不同城市客户的消费能力有什么差异？",
+          "expected_tables": [
+            "customers",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "customers",
+            "orders",
+            "order_items",
+            "refunds"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        }
+      ]
+    },
+    "semantic_only": {
+      "total": 12,
+      "top1_hits": 11,
+      "full_recall_cases": 10,
+      "top1_accuracy": 91.7,
+      "mrr": 0.9375,
+      "full_recall_at_4": 83.3,
+      "metric": "top1_accuracy / MRR / all_expected_tables_present_in_top_4",
+      "cases": [
+        {
+          "question": "哪个渠道贡献的收入最多？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "投放的钱花在哪里了，回报怎么样？",
+          "expected_tables": [
+            "marketing_spend",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "售后问题主要集中在哪里？",
+          "expected_tables": [
+            "orders",
+            "refunds"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "卖得最多的是哪些类目？",
+          "expected_tables": [
+            "order_items",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "会员和复购情况如何？",
+          "expected_tables": [
+            "customers",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": false,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "网页端和抖音端每单平均花多少钱？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "华东和西南的生意差距大吗？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "这个月每天卖得怎么样？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "退的钱都是因为什么？",
+          "expected_tables": [
+            "orders",
+            "refunds"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "广告被看见和点开的情况如何？",
+          "expected_tables": [
+            "marketing_spend"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": false,
+          "full_recall": true,
+          "reciprocal_rank": 0.25
+        },
+        {
+          "question": "哪些商品买的人多但单价低？",
+          "expected_tables": [
+            "order_items",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "不同城市客户的消费能力有什么差异？",
+          "expected_tables": [
+            "customers",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": false,
+          "reciprocal_rank": 1.0
+        }
+      ]
+    },
+    "hybrid_0.56_0.44": {
+      "total": 12,
+      "top1_hits": 11,
+      "full_recall_cases": 12,
+      "top1_accuracy": 91.7,
+      "mrr": 0.9444,
+      "full_recall_at_4": 100.0,
+      "metric": "top1_accuracy / MRR / all_expected_tables_present_in_top_4",
+      "cases": [
+        {
+          "question": "哪个渠道贡献的收入最多？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "customers",
+            "marketing_spend",
+            "orders",
+            "order_items"
+          ],
+          "top1_hit": false,
+          "full_recall": true,
+          "reciprocal_rank": 0.3333
+        },
+        {
+          "question": "投放的钱花在哪里了，回报怎么样？",
+          "expected_tables": [
+            "marketing_spend",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "marketing_spend",
+            "orders",
+            "order_items",
+            "refunds"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "售后问题主要集中在哪里？",
+          "expected_tables": [
+            "orders",
+            "refunds"
+          ],
+          "retrieved_tables": [
+            "refunds",
+            "orders",
+            "order_items",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "卖得最多的是哪些类目？",
+          "expected_tables": [
+            "order_items",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "order_items",
+            "orders",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "会员和复购情况如何？",
+          "expected_tables": [
+            "customers",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "customers",
+            "orders",
+            "order_items",
+            "refunds"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "网页端和抖音端每单平均花多少钱？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "华东和西南的生意差距大吗？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "这个月每天卖得怎么样？",
+          "expected_tables": [
+            "orders"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "退的钱都是因为什么？",
+          "expected_tables": [
+            "orders",
+            "refunds"
+          ],
+          "retrieved_tables": [
+            "orders",
+            "order_items",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "广告被看见和点开的情况如何？",
+          "expected_tables": [
+            "marketing_spend"
+          ],
+          "retrieved_tables": [
+            "marketing_spend",
+            "orders",
+            "order_items",
+            "refunds"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "哪些商品买的人多但单价低？",
+          "expected_tables": [
+            "order_items",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "order_items",
+            "orders",
+            "refunds",
+            "marketing_spend"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        },
+        {
+          "question": "不同城市客户的消费能力有什么差异？",
+          "expected_tables": [
+            "customers",
+            "orders"
+          ],
+          "retrieved_tables": [
+            "customers",
+            "orders",
+            "order_items",
+            "refunds"
+          ],
+          "top1_hit": true,
+          "full_recall": true,
+          "reciprocal_rank": 1.0
+        }
+      ]
+    }
+  },
+  "limitations": "Small labelled set with only five schema tables; top-1, MRR and full table recall do not prove SQL correctness. Check retrieval_backend before comparing variants.",
+  "available": true,
+  "passed": 12,
+  "hit_rate": 100.0,
+  "top1_accuracy": 91.7,
+  "mrr": 0.9444,
+  "evaluated_at": "2026-11-10T04:22:29.496553+00:00",
+  "runtime": {
+    "workers": 1,
+    "wall_elapsed_ms": 46.3,
+    "source_sha256": "befe48c2b977d3eac38d723cff0cdb4accbf37bb8f5548566e8f830c9277066e",
+    "retrieval_supplements": 0
+  },
+  "evaluation_contract": "retrieval-ablation-v1",
+  "case_manifest_sha256": "90a13c5ae113edcef0d6ad266d58290e4f5823773f0bc640e2bf87f402073212",
+  "quality_gate": {
+    "min_hit_rate": 80.0,
+    "passed": true
+  }
+}

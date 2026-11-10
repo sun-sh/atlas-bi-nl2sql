@@ -198,7 +198,10 @@ class DBAPIAdapter:
                 try:
                     timeout_ms = max(1, int(timeout_seconds * 1000))
                     if self.dialect == "postgres":
-                        cursor.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
+                        # autocommit=True means SET LOCAL would only live for
+                        # this statement. The connection is per query, so a
+                        # session-level setting is scoped by connection lifetime.
+                        cursor.execute("SET statement_timeout = %s", (timeout_ms,))
                     elif self.dialect == "mysql":
                         cursor.execute("SET SESSION MAX_EXECUTION_TIME = %s", (timeout_ms,))
                     cursor.execute(sql)

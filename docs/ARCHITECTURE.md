@@ -175,8 +175,9 @@ The LangGraph state carries the question, retrieval question, trace ID, timer, s
 - Qdrant stores vectors in memory by default; a remote endpoint can be supplied. When a remote collection already exists it is reused and upserted, not deleted on process startup. The default collection/index names are prefixed with `atlas_` and can be overridden through `ATLAS_QDRANT_SCHEMA_COLLECTION` and `ATLAS_ES_SCHEMA_INDEX`.
 - Lexical retrieval uses Elasticsearch BM25 when reachable, otherwise local IDF scoring. Elasticsearch scores are scoped to one `search()` call rather than stored on the shared retriever.
 - Final scoring is `0.56 * semantic + 0.44 * lexical`, with evidence preserved in the response.
-- Retrieval is not the only table router. The deterministic planner contributes required business tables; retrieval adds candidate tables and their column/description context. Both appear in the JSON plan and the generation prompt. The ablation therefore measures retrieval quality, not whether retrieval alone chooses every table.
-- The ablation reports Top-1 accuracy, MRR and full recall@4. On the current five-table labelled set, lexical-only also reaches full recall@4, so the evidence supports a reproducible baseline rather than a claim that fusion dominates every alternative.
+- Default SQL generation uses the deterministic business-required tables only. Retrieval is still returned as evidence and can be enabled as a discovery aid, but `ATLAS_RETRIEVAL_SUPPLEMENTS=0` keeps it out of the generation prompt. When set to `1`, at most one top-1 table that is not already required can be added; lower-ranked hits never become schema.
+- A frozen colloquial A/B on the five-table demo scored 7/13 both with required tables alone and with one optional retrieval supplement. The two variants had identical per-case hits and no supplemental table entered any answerable plan, so retrieval is not presented as a default generation gain.
+- The search-only ablation reports Top-1 accuracy, MRR and full recall@4. On the current five-table labelled set, lexical-only also reaches full recall@4, and one sales question still puts the marketing table ahead of orders, so the evidence is a baseline rather than a claim that fusion dominates every alternative.
 
 ## Active query database
 

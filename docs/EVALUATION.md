@@ -48,23 +48,40 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 `natural-language-holdout-v1` 有 15 条独立问法，其中 8 条应回答、7 条应澄清。每个可回答用例同时检查范围判定、意图、指标、预期的 Schema 表和真实执行结果；澄清用例必须没有 SQL、没有数据行，且不保留默认指标。只有范围、意图、指标、指标列、时间范围、表召回和执行行都通过，才记为端到端通过。当前为 **15/15（8 个题型族）**，但它是确定性规则链路加固定 SQLite 的真实执行验证，不是在线模型准确率，也不能替代开放域语义 SQL 测试。报告见 [自然语言评测 JSON](evaluations/natural-language-holdout-2026-11-10.json)。
 
-### 口语严格模型集
+### 口语严格模型集（冻结）
 
-`colloquial-holdout-v2` 有 10 条不带公式、粒度、状态枚举或排序说明的口语问题，其中 9 条可回答、1 条应澄清。可回答用例必须由模型生成或修复 SQL、成功执行、通过独立基准 SQL 的行/维度/数值/排序验收，并通过模型解读事实校验；澄清用例必须在范围守卫处停止，不能产生猜测的计划、SQL 或数据行。2026-11-10 使用 `deepseek/deepseek-v4.1-flash` 的结果为 **10/10（100%）**，模型率 90%（9 条可回答用例均由模型完成，剩余 1 条按设计不调用 SQL 模型），执行率 90%。该题集只有 10 条且仍是固定电商域，必须与回归/holdout 分开报告，不能当作开放域准确率。报告见 [口语评测 JSON](evaluations/colloquial-holdout-2026-11-10.json)。
+早期 `colloquial-holdout-v2` 的 10/10 不能作为留出集证据：题目和“花多少钱 / 多少单 / 多少件 / 投放回报”等关键词是在同一轮修改中一起出现的，等于出题和修规则同步发生。该报告保留为开发调试记录，不再作为 README 的核心成绩。
 
-需要注意：题库最初有几条“哪个最高”实际可理解为完整排名或 Top-1，gold 不唯一；审计后已改成明确的 Top-1 问法并重新运行，未把旧结果覆盖成新成绩。另一个早期版本使用了规则链路和宽松的列匹配，已废弃。
+新的 `colloquial-frozen-v3` 在检索裁剪、语义层修改前单独提交（commit `4a07624`），共 13 条：10 条有独立参考 SQL 的可回答题、3 条应澄清题。之后只在架构/检索/执行层做改动，没有针对该题集新增口语同义词。2026-11-10 使用 `deepseek/deepseek-v4.1-flash`、默认“必需表路由”运行结果为 **7/13、53.8%**，SQL 执行率和模型完成率均为 **61.5%**。失败包括：
 
-### 检索消融
+- 商品大类销售额题的意图仍是 `sales_overview`；
+- “一个订单平均实际付了多少钱”没有映射到客单价；
+- “退款申请分别有多少笔”没有映射到退款单数；
+- “商品售出件数”和“退款申请占全部订单比例”被范围守卫错误拦成澄清；
+- “退款问题严重吗？”被错误放行并调用模型，而不是先澄清指标。
 
-`retrieval-ablation-v1` 在 12 条人工标注表级问法上比较 `lexical_only`、`semantic_only` 和线上默认的 `hybrid_0.56_0.44`。指标包括：
+这些是当前真实的语义层缺口，不能用改题或同 commit 加关键词来掩盖。报告见 [冻结口语 JSON](evaluations/colloquial-frozen-2026-11-10.json)。开发集旧报告见 [开发口语 JSON](evaluations/colloquial-holdout-2026-11-10.json)，只用于回归定位。
+
+### 检索搜索与生成增益
+
+`retrieval-ablation-v1` 在 12 条人工标注表级问法上比较 `lexical_only`、`semantic_only` 和默认的 `hybrid_0.56_0.44`。它衡量的是 **Schema 搜索**：
 
 - **Top-1 accuracy**：返回的第一张表属于期望表集合的比例。
 - **MRR**：期望表首次出现位置倒数的均值。
 - **Full recall@4**：全部期望表都出现在前四位的比例。
 
-2026-11-06 使用真实 BGE 语义检索和本地 IDF 词法检索运行：默认混合方案 **Top-1 91.7%、MRR 0.9583、完整表召回@4 100%**。纯词法方案的完整召回也达到 100%，说明只有五张表的标注集区分度有限，不能据此宣称混合检索在所有场景全面领先。CI 只对默认融合方案设置确定性的表召回底线。报告见 [检索消融 JSON](evaluations/retrieval-ablation-2026-11-06.json)。
+2026-11-10 的当前本地词法降级报告为 Top-1 **91.7%**、MRR **0.9444**、完整表召回@4 **100%**；2026-11-06 的 BGE + 本地 IDF 历史快照为 MRR **0.9583**。但该集合本身已有 top-1 失败：`哪个渠道贡献的收入最多？`返回 `customers, marketing_spend, orders, order_items`，订单表排第三。这个反例说明 91.7% 不能包装成“检索能稳定驱动 SQL 路由”。报告见 [检索消融 JSON](evaluations/retrieval-ablation-2026-11-10.json)。
 
-必须同时说明：检索并不单独决定 `plan.tables`。业务意图先给出必需表（例如退款需要 `orders + refunds`），混合召回补充候选表，生成 Prompt 会带上候选表的字段和粒度。这个设计让五张表下的检索证据有意义，但也意味着检索 ablation 不能当成“只靠检索完成 Schema 路由”的证明。
+为避免 5 张表在 top-4 下几乎全量进入 Prompt，当前默认 `ATLAS_RETRIEVAL_SUPPLEMENTS=0`：SQL 只用意图规划出的必需表。显式设为 `1` 时，只允许 **一张 top-1 且不在必需表中的检索补充表**进入 prompt；其余命中只作为 `/evidence` 证据。
+
+同一份 `colloquial-frozen-v3` 的 A/B：
+
+| 路由 | 通过 | 执行率 | 说明 |
+| --- | ---: | ---: | --- |
+| 必需表 only（默认） | **7/13** | 61.5% | 没有检索补充表进入 SQL Prompt |
+| 必需表 + top-1 补充 | **7/13** | 61.5% | 逐题命中与必需表版本完全一致，未观察到生成增益 |
+
+结论：在这套五表业务上，检索没有可测的生成增益，默认不进生成链路。A/B 汇总见 [检索上下文消融 JSON](evaluations/retrieval-context-ablation-2026-11-10.json)。复现时分别设置 `ATLAS_RETRIEVAL_SUPPLEMENTS=0` 和 `1`。
 
 ### HTTP 冒烟压测
 
@@ -110,7 +127,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 ## 结果记录
 
-2026-11-10 用当前代码、3 个隔离进程和 `deepseek/deepseek-v4.1-flash` 重跑 100 条回归，结果为 **100/100**，SQL 执行率、模型完成率均为 100%；运行时自愈触发 3 条，全部成功。当前报告见 [regression JSON](evaluations/regression-2026-11-10.json)。该回归集的独立单位仍不是 100：矩阵按时间/筛选扩展出 **19 个业务题型族**，题型族全通过率也是 19/19；不能把 raw 100/100 直接描述成 100 个独立语义样本。2026-11-08 的 99/100 报告（唯一失败为 `matrix-roi-last90-web` 的修复 token 截断）保留为历史快照，不删除也不覆盖。
+2026-11-10 用当前代码、3 个隔离进程和 `deepseek/deepseek-v4.1-flash` 重跑 100 条回归，结果为 **100/100**，SQL 执行率、模型完成率均为 100%；本轮运行时自愈触发 2 条，全部成功。当前报告见 [regression JSON](evaluations/regression-2026-11-10.json)。该回归集的独立单位仍不是 100：矩阵按时间/筛选扩展出 **19 个业务题型族**，题型族全通过率也是 19/19；不能把 raw 100/100 直接描述成 100 个独立语义样本。2026-11-08 的 99/100 报告（唯一失败为 `matrix-roi-last90-web` 的修复 token 截断）保留为历史快照，不删除也不覆盖。
 
 2026-10-27 使用 `deepseek/deepseek-v4.1-flash` 对同一 `strict-model-v3-100` 套件完成首轮和复跑：
 
@@ -118,7 +135,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 旧版首轮 | 79/100 | 100% | 88% | 32,545.6 ms | 1/1 |
 | 2026-10-27 最终轮 | 100/100 | 100% | 100% | 31,846.3 ms | 2/2 |
-| 当前代码 · 2026-11-10 | **100/100** | 100% | 100% | 13,101.7 ms（3 worker） | 3/3 |
+| 当前代码 · 2026-11-10 | **100/100** | 100% | 100% | 17,958.0 ms（3 worker） | 2/2 |
 
 首轮 21 条失败中，12 条为模型解读问题，9 条为结果口径问题。修正 SQL 指令、业务口径、空 SQL/全空聚合/解读重试和验收逻辑后，同套件复跑达到 100/100：修复 21 条、回归 0 条。**21 条不能全部归因于运行时自愈**；完整闭环是评测发现问题 → 修正约束和重试逻辑 → 独立验收再评测。最终轮 2 条运行时 SQL 自愈均成功。
 
@@ -171,8 +188,8 @@ python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
 # 需要已启用模型；以下会消耗在线配额，不是 CI 固定门禁
-python -m app.evaluation.run --suite colloquial --min-hit-rate 0
+python -m app.evaluation.run --suite colloquial-frozen --min-hit-rate 0
 node --check app/static/app.js
 ```
 
-真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **187 passed**。
+真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **191 passed**。

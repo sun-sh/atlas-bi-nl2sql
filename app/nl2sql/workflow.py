@@ -153,13 +153,13 @@ def generate_node(state: GraphState) -> GraphState:
     _emit_stage("generate")
     plan = state["plan"]
     if state.get("force_rule", False):
-        sql = generate_rule_sql(state["question"], plan, state["hits"])
+        sql = generate_rule_sql(state["question"], plan)
         warnings = list(state.get("warnings", []))
         warnings.append("评测使用强制规则路径，未调用模型。")
         return {"sql": sql, "mode": "rule", "warnings": warnings, "generation_retries": 0}
     target = state.get("query_target")
     dialect = target.dialect if target else "sqlite"
-    sql, llm_error = generate_llm_sql_result(state["question"], plan, state["hits"], dialect=dialect)
+    sql, llm_error = generate_llm_sql_result(state["question"], plan, dialect=dialect)
     mode = "llm"
     warnings = list(state.get("warnings", []))
     if not sql:
@@ -169,7 +169,7 @@ def generate_node(state: GraphState) -> GraphState:
             _emit_stage("repair")
             retry_count = 1
             sql, repair_error = generate_llm_repair_sql_result(
-                state["question"], plan, state["hits"], "",
+                state["question"], plan, "",
                 f"首次SQL未产出：{reason}。重新生成完整SELECT，保留原查询口径。",
                 dialect=dialect,
             )
@@ -180,7 +180,7 @@ def generate_node(state: GraphState) -> GraphState:
                     "warnings": warnings + ["修复来源：llm-repair"],
                 }
         if state.get("allow_rule_fallback", True):
-            sql = generate_rule_sql(state["question"], plan, state["hits"])
+            sql = generate_rule_sql(state["question"], plan)
             mode = "rule"
             if llm_error:
                 warnings.append("模型调用失败，已回退规则 SQL：" + llm_error)
@@ -251,7 +251,7 @@ def repair_node(state: GraphState) -> GraphState:
     last_error = attempts[-1]["error"] if attempts else ""
     if state.get("force_rule", False):
         return {
-            "sql": generate_rule_sql(question, plan, state["hits"]),
+            "sql": generate_rule_sql(question, plan),
             "mode": "rule-repair",
             "warnings": state.get("warnings", [])
             + [f"第 {len(attempts)} 次执行失败：{last_error}", "修复来源：rule-repair"],
@@ -259,7 +259,6 @@ def repair_node(state: GraphState) -> GraphState:
     repaired, repair_error = generate_llm_repair_sql_result(
         question,
         plan,
-        state["hits"],
         state.get("sql", ""),
         last_error,
         dialect=(state.get("query_target").dialect if state.get("query_target") else "sqlite"),
@@ -270,7 +269,7 @@ def repair_node(state: GraphState) -> GraphState:
         mode = "llm-repair"
         extra = ["修复来源：" + mode]
     elif state.get("allow_rule_fallback", True):
-        sql = generate_rule_sql(question, plan, state["hits"])
+        sql = generate_rule_sql(question, plan)
         mode = "rule-repair"
         extra = ["修复来源：" + mode]
         if repair_error:
