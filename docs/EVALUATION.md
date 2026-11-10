@@ -18,7 +18,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 两套题使用相同的严格模型路径、独立基准 SQL 和禁止规则回退约束，但不能把 holdout 的分数与回归集分数混在一起报告。另有不调用模型的 `scope` 套件，用于验证系统是否会正确澄清或拒答。
 
-2026-11-10 在语义层重构后的 source hash 上，用 `deepseek/deepseek-v4.1-flash` 完成了一轮 30 条 holdout 在线评测：**答案 29/30、计划 28/30、SQL 执行率 100%、模型完成率 100%**。唯一答案失败是把“上个月各品类商品销量”错误筛成了本月；另有两条计划差异是退款率题：答案被独立结果验收接受，但计划指标被记录为“退款单数”。这正说明 answer-first 与 plan-correct 必须分开报告。该结果只代表这次固定数据集、模型和网络条件下的快照，不是开放域准确率。报告见 [holdout JSON](evaluations/holdout-2026-11-10-final.json)。
+2026-11-10 在语义层重构后的 source hash 上，用 `deepseek/deepseek-v4.1-flash` 完成了一轮 30 条 holdout 在线评测：**答案 30/30、计划 28/30、SQL 执行率 100%、模型完成率 100%**。两条计划差异都是退款率题：答案被独立结果验收接受，但计划指标被记录为“退款单数”。这正说明 answer-first 与 plan-correct 必须分开报告。该结果只代表这次固定数据集、模型和网络条件下的快照，不是开放域准确率。报告见 [holdout JSON](evaluations/holdout-2026-11-10-final.json)。
 
 `strict-model-v3-100` 包含 **100 条严格模型回归用例**，覆盖固定种子的电商数据（2025-10-01 至 2026-02-28）。用例由时间窗口、地区、渠道、品类、销售额、商品销量、退款率、退款原因、退款金额、ROI、日趋势、组合筛选组成，并保留 11 条两轮连续追问链。完整执行最多处理 **111 个查询轮次**；每个轮次可能包含 SQL 生成、有限修复和结果解读请求。
 
@@ -119,7 +119,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 ## 结果记录
 
-2026-11-10 在语义层重构后的 source hash 上，用 3 个隔离进程和 `deepseek/deepseek-v4.1-flash` 重跑 100 条回归：**答案 100/100、计划 94/100**，SQL 执行率、模型完成率均为 100%；运行时自愈触发 11 条，全部成功。当前报告见 [regression JSON](evaluations/regression-2026-11-10-final.json)。该回归集的独立单位仍不是 100：矩阵按时间/筛选扩展出 **19 个业务题型族**，题型族全通过率也是 19/19；不能把 raw 100/100 直接描述成 100 个独立语义样本。答案与计划的 6 条差异保留在逐用例报告中，不能用单一口径覆盖。历史报告不删除、不覆盖。
+2026-11-10 在语义层重构后的 source hash 上，用 3 个隔离进程和 `deepseek/deepseek-v4.1-flash` 重跑 100 条回归：**答案 100/100、计划 94/100**，SQL 执行率、模型完成率均为 100%；运行时自愈触发 2 条，全部成功。当前报告见 [regression JSON](evaluations/regression-2026-11-10-final.json)。该回归集的独立单位仍不是 100：矩阵按时间/筛选扩展出 **19 个业务题型族**，题型族全通过率也是 19/19；不能把 raw 100/100 直接描述成 100 个独立语义样本。答案与计划的 6 条差异（94/100 计划口径）保留在逐用例报告中，不能用单一口径覆盖。历史报告不删除、不覆盖。
 
 2026-10-27 使用 `deepseek/deepseek-v4.1-flash` 对同一 `strict-model-v3-100` 套件完成首轮和复跑：
 

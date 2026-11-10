@@ -52,7 +52,7 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 
 ## Claims to avoid
 
-- Do not call 100/100 or 29/30 answer-correct open-domain production accuracy; they are dated, small, fixed-domain snapshots.
+- Do not call 100/100 or 30/30 answer-correct open-domain production accuracy; they are dated, small, fixed-domain snapshots.
 - Do not collapse answer-correct and plan-correct into one score. A correct result can coexist with a wrong plan label, and vice versa.
 - Do not present the rule-equivalence 100/100 or natural-language 15/15 as model capability.
 - Do not present the old 10/10 development set as a holdout result; the current frozen snapshot is 11/13 answer-correct and 9/13 plan-correct.
@@ -65,14 +65,14 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 
 ## Verification snapshot
 
-All current evidence was produced from source hash `cc60f68138ac96fdad97991eb774827623e6b41938b9d9f283ea14f13f234c49` after the semantic single-source refactor.
+All current evidence was produced from source hash `1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178` after the semantic single-source refactor.
 
 - Full pytest suite: **209 passed** in an approved environment (Windows sandbox blocked pytest temp paths, named pipes and local sockets; the same code passed outside it).
 - Rule equivalence: **100/100 raw cases / 19 fully passed business-shape families**, forced rule path.
 - Natural-language deterministic end-to-end: **15/15 raw cases / 8 fully passed families**.
 - Scope guard: **7/7**.
-- Strict model regression: answer **100/100**, plan **94/100**, execution/model rates **100%**; self-healing attempted and passed **11/11**. Report: [regression](evaluations/regression-2026-11-10-final.json).
-- Holdout: answer **29/30**, plan **28/30**, execution/model rates **100%**; self-healing attempted **1**, passed **1**. The answer miss is a category-units query filtered to February instead of January; two separate plan-only misses are refund-rate questions where the answer was accepted but the plan metric was recorded as refund count. Report: [holdout](evaluations/holdout-2026-11-10-final.json).
+- Strict model regression: answer **100/100**, plan **94/100**, execution/model rates **100%**; self-healing attempted and passed **2/2**. Report: [regression](evaluations/regression-2026-11-10-final.json).
+- Holdout: answer **30/30**, plan **28/30**, execution/model rates **100%**; self-healing attempted and passed **3/3**. The two plan-only misses are refund-rate questions where the answer was accepted but the plan metric was recorded as refund count. Report: [holdout](evaluations/holdout-2026-11-10-final.json).
 - Frozen colloquial strict model snapshot: answer **11/13**, plan **9/13**, execution/model rates **69.2%**. Report: [colloquial frozen](evaluations/colloquial-frozen-2026-11-10-final.json).
 - Retrieval search ablation: Top-1 **91.7%**, MRR **0.9444**, full table recall@4 **100%** on the 12-case local-IDF fallback. This is search evidence, not a generation-gain claim. Report: [retrieval ablation](evaluations/retrieval-ablation-2026-11-10-final.json).
 

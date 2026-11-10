@@ -231,6 +231,8 @@ def test_failed_setup_stops_followup_and_cannot_count_as_completed(monkeypatch, 
     assert result["error"].startswith("前置问题未通过")
     assert result["executed"] is False
     assert result["model_used"] is False
+    assert result["plan_correct"] is False
+    assert "前置问题未通过" in (result["plan_error"] or "")
 
 
 def test_exception_does_not_abort_the_remaining_cases(monkeypatch, active_model):

@@ -64,7 +64,7 @@
           "status": "success",
           "sql": "SELECT o.channel AS \"渠道\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY o.channel ORDER BY \"销售额\" DESC LIMIT 1",
           "error": null,
-          "elapsed_ms": 26.89
+          "elapsed_ms": 16.37
         }
       ],
       "hit": true,
@@ -72,7 +72,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 32064.8,
+      "elapsed_ms": 19211.4,
       "error": null
     },
     {
@@ -117,9 +117,9 @@
         {
           "attempt": 1,
           "status": "success",
-          "sql": "SELECT o.region AS 地区, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY o.region ORDER BY 销售额 DESC LIMIT 1",
+          "sql": "SELECT o.region AS \"地区\", ROUND(SUM(o.paid_amount), 2) AS \"销售额\" FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY o.region ORDER BY \"销售额\" DESC LIMIT 1",
           "error": null,
-          "elapsed_ms": 11.35
+          "elapsed_ms": 13.23
         }
       ],
       "hit": true,
@@ -127,7 +127,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 14141.5,
+      "elapsed_ms": 11304.3,
       "error": null
     },
     {
@@ -163,9 +163,7 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [
-          "未明确复述 品类 榜首 运动鞋服"
-        ],
+        "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
       "sql_mode": "llm",
@@ -176,7 +174,7 @@
           "status": "success",
           "sql": "SELECT o.category AS 品类, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY o.category ORDER BY 销售额 DESC",
           "error": null,
-          "elapsed_ms": 6.05
+          "elapsed_ms": 10.57
         }
       ],
       "hit": true,
@@ -184,7 +182,7 @@
       "plan_correct": false,
       "plan_error": "计划意图、指标或表不符合预期",
       "answer_error": null,
-      "elapsed_ms": 11254.7,
+      "elapsed_ms": 12432.3,
       "error": null
     },
     {
@@ -222,9 +220,7 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [
-          "未明确复述 退款原因 榜首 质量问题"
-        ],
+        "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
       "sql_mode": "llm",
@@ -233,9 +229,9 @@
         {
           "attempt": 1,
           "status": "success",
-          "sql": "SELECT r.reason AS \"退款原因\", ROUND(SUM(r.refund_amount), 2) AS \"退款金额\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY r.reason ORDER BY \"退款金额\" DESC",
+          "sql": "SELECT r.reason AS 退款原因, ROUND(SUM(r.refund_amount), 2) AS 退款金额 FROM refunds AS r JOIN orders AS o ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY r.reason ORDER BY 退款金额 DESC",
           "error": null,
-          "elapsed_ms": 7.25
+          "elapsed_ms": 4.53
         }
       ],
       "hit": true,
@@ -243,7 +239,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 15049.7,
+      "elapsed_ms": 10222.8,
       "error": null
     },
     {
@@ -284,15 +280,15 @@
         "warnings": [],
         "contract": "deterministic-digest-grounding-v1"
       },
-      "sql_mode": "llm",
+      "sql_mode": "llm-repair",
       "row_count": 4,
       "attempts": [
         {
           "attempt": 1,
           "status": "success",
-          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.revenue, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS revenue FROM orders WHERE status = 'paid' AND order_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS o ON o.channel = m.channel WHERE m.spend > 0 ORDER BY ROI DESC",
+          "sql": "SELECT m.channel AS 渠道, ROUND(COALESCE(o.revenue, 0) / NULLIF(m.spend, 0), 2) AS ROI FROM (SELECT channel, SUM(spend) AS spend FROM marketing_spend WHERE spend_date BETWEEN '2025-12-01' AND '2026-02-28' GROUP BY channel) AS m LEFT JOIN (SELECT channel, SUM(paid_amount) AS revenue FROM orders WHERE order_date BETWEEN '2025-12-01' AND '2026-02-28' AND status = 'paid' GROUP BY channel) AS o ON o.channel = m.channel ORDER BY ROI DESC",
           "error": null,
-          "elapsed_ms": 13.24
+          "elapsed_ms": 16.77
         }
       ],
       "hit": true,
@@ -300,7 +296,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 30690.8,
+      "elapsed_ms": 51265.0,
       "error": null
     },
     {
@@ -347,7 +343,7 @@
           "status": "success",
           "sql": "SELECT ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-12-01' AND '2026-02-28'",
           "error": null,
-          "elapsed_ms": 5.38
+          "elapsed_ms": 9.46
         }
       ],
       "hit": true,
@@ -355,7 +351,7 @@
       "plan_correct": false,
       "plan_error": "计划意图、指标或表不符合预期",
       "answer_error": null,
-      "elapsed_ms": 10034.2,
+      "elapsed_ms": 8901.0,
       "error": null
     },
     {
@@ -402,7 +398,7 @@
           "status": "success",
           "sql": "SELECT o.order_date AS 日期, ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2026-01-01' AND '2026-01-31' GROUP BY o.order_date ORDER BY o.order_date",
           "error": null,
-          "elapsed_ms": 7.33
+          "elapsed_ms": 5.32
         }
       ],
       "hit": true,
@@ -410,7 +406,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 12548.1,
+      "elapsed_ms": 11861.7,
       "error": null
     },
     {
@@ -448,7 +444,9 @@
       "narrative_validation": {
         "passed": true,
         "errors": [],
-        "warnings": [],
+        "warnings": [
+          "未明确复述 退款原因 榜首 物流太慢"
+        ],
         "contract": "deterministic-digest-grounding-v1"
       },
       "sql_mode": "llm",
@@ -457,9 +455,9 @@
         {
           "attempt": 1,
           "status": "success",
-          "sql": "SELECT r.reason AS 退款原因, ROUND(COUNT(r.refund_id), 2) AS 退款单数 FROM refunds AS r JOIN orders AS o ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' GROUP BY r.reason ORDER BY 退款单数 DESC",
+          "sql": "SELECT r.reason AS \"退款原因\", COUNT(r.refund_id) AS \"退款单数\" FROM orders AS o JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' GROUP BY r.reason ORDER BY COUNT(r.refund_id) DESC",
           "error": null,
-          "elapsed_ms": 4.97
+          "elapsed_ms": 6.54
         }
       ],
       "hit": true,
@@ -467,7 +465,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 17130.9,
+      "elapsed_ms": 12506.1,
       "error": null
     },
     {
@@ -518,7 +516,7 @@
           "status": "success",
           "sql": "SELECT oi.category AS 品类, ROUND(SUM(oi.quantity), 2) AS 销量 FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.order_date BETWEEN '2026-01-01' AND '2026-01-31' AND o.status = 'paid' GROUP BY oi.category ORDER BY 销量 DESC",
           "error": null,
-          "elapsed_ms": 5.28
+          "elapsed_ms": 6.42
         }
       ],
       "hit": true,
@@ -526,7 +524,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 17734.5,
+      "elapsed_ms": 16096.2,
       "error": null
     },
     {
@@ -572,7 +570,7 @@
       "plan_correct": false,
       "plan_error": "计划意图、指标或表不符合预期",
       "answer_error": "这个问题还缺少明确的业务指标。请补充要看的指标，例如销售额、销量、退款率、客单价或 ROI。",
-      "elapsed_ms": 3.7,
+      "elapsed_ms": 4.6,
       "error": "这个问题还缺少明确的业务指标。请补充要看的指标，例如销售额、销量、退款率、客单价或 ROI。"
     },
     {
@@ -610,7 +608,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 5.2,
+      "elapsed_ms": 2.8,
       "error": null
     },
     {
@@ -646,9 +644,9 @@
         {
           "attempt": 1,
           "status": "success",
-          "sql": "SELECT ROUND((SELECT SUM(o2.paid_amount) FROM orders AS o2 WHERE o2.status = 'paid' AND o2.order_date BETWEEN '2025-10-01' AND '2026-02-28'), 2) AS 销售额, ROUND(COUNT(DISTINCT r.refund_id) * 100.0 / NULLIF(COUNT(DISTINCT o.order_id), 0), 2) AS 退款率, ROUND(SUM(r.refund_amount), 2) AS 退款金额, COUNT(r.refund_id) AS 退款单数, COUNT(DISTINCT o.order_id) AS 订单数 FROM orders AS o LEFT JOIN refunds AS r ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2025-10-01' AND '2026-02-28'",
+          "sql": "SELECT (SELECT ROUND(SUM(o.paid_amount), 2) FROM orders AS o WHERE o.status = 'paid' AND o.order_date BETWEEN '2025-10-01' AND '2026-02-28') AS 销售额, ROUND((SELECT COUNT(DISTINCT r.refund_id) FROM refunds AS r JOIN orders AS o ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2025-10-01' AND '2026-02-28') * 100.0 / NULLIF((SELECT COUNT(DISTINCT o.order_id) FROM orders AS o WHERE o.order_date BETWEEN '2025-10-01' AND '2026-02-28'), 0), 2) AS 退款率, (SELECT ROUND(SUM(r.refund_amount), 2) FROM refunds AS r JOIN orders AS o ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2025-10-01' AND '2026-02-28') AS 退款金额, (SELECT COUNT(r.refund_id) FROM refunds AS r JOIN orders AS o ON r.order_id = o.order_id WHERE o.order_date BETWEEN '2025-10-01' AND '2026-02-28') AS 退款单数, (SELECT COUNT(*) FROM orders AS o WHERE o.order_date BETWEEN '2025-10-01' AND '2026-02-28') AS 订单数",
           "error": null,
-          "elapsed_ms": 15.6
+          "elapsed_ms": 11.31
         }
       ],
       "hit": false,
@@ -656,7 +654,7 @@
       "plan_correct": false,
       "plan_error": "计划意图、指标或表不符合预期",
       "answer_error": "范围守卫结果不符：期望 clarification，实际 answered",
-      "elapsed_ms": 51968.2,
+      "elapsed_ms": 44511.3,
       "error": "范围守卫结果不符：期望 clarification，实际 answered"
     },
     {
@@ -694,7 +692,7 @@
       "plan_correct": true,
       "plan_error": null,
       "answer_error": null,
-      "elapsed_ms": 4.0,
+      "elapsed_ms": 1.8,
       "error": null
     }
   ],
@@ -762,11 +760,11 @@
     "independence_note": "Matrix cases share question shapes and differ mainly by time/filter values; raw case count is not the number of independent semantic samples."
   },
   "limitations": "Every answered case has a unique business reading and an independent reference SQL, but this remains a small project-defined colloquial set, not an open-domain semantic-SQL benchmark.",
-  "evaluated_at": "2026-11-10T10:05:36.658865+00:00",
+  "evaluated_at": "2026-11-10T10:49:42.692676+00:00",
   "runtime": {
     "workers": 3,
-    "wall_elapsed_ms": 212679.0,
-    "source_sha256": "cc60f68138ac96fdad97991eb774827623e6b41938b9d9f283ea14f13f234c49",
+    "wall_elapsed_ms": 198366.1,
+    "source_sha256": "1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178",
     "retrieval_supplements": 0
   },
   "evaluation_contract": "colloquial-frozen-v3",

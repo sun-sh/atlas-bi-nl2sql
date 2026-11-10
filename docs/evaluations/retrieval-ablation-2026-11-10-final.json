@@ -616,11 +616,11 @@
   "hit_rate": 100.0,
   "top1_accuracy": 91.7,
   "mrr": 0.9444,
-  "evaluated_at": "2026-11-10T10:01:24.098453+00:00",
+  "evaluated_at": "2026-11-10T10:45:46.524647+00:00",
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 51.4,
-    "source_sha256": "cc60f68138ac96fdad97991eb774827623e6b41938b9d9f283ea14f13f234c49",
+    "wall_elapsed_ms": 43.9,
+    "source_sha256": "1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178",
     "retrieval_supplements": 0
   },
   "answer_correct": 12,

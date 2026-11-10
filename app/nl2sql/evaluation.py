@@ -625,7 +625,10 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
     hit = False
     selected_cases = CASES if cases is None else cases
     setup = next((item for item in selected_cases if item["id"] == case["setup"]), None)
-    plan_error = ""
+    # A follow-up whose setup never completed has no valid plan observation.
+    # Initialize to an explicit failure instead of letting the empty string
+    # accidentally count as plan-correct.
+    plan_error = "前置问题未通过，无法评分追问计划"
     answer_error = ""
     try:
         context = None
@@ -640,6 +643,8 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
             # model answer fails, retain whether its plan metadata was correct.
             if step is case:
                 plan_error = _plan_error(result, step)
+            elif result is not None:
+                plan_error = "前置问题未通过，无法评分追问计划"
             error = answer_error
             if error:
                 if step is setup:

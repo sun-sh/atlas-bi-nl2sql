@@ -111,7 +111,7 @@
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 157.4
+      "elapsed_ms": 142.4
     },
     {
       "id": "natural-ad-return",
@@ -148,7 +148,7 @@
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 33.4
+      "elapsed_ms": 35.3
     },
     {
       "id": "natural-refund-cause",
@@ -185,7 +185,7 @@
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 24.5
+      "elapsed_ms": 25.5
     },
     {
       "id": "natural-category-volume",
@@ -222,7 +222,7 @@
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 38.5
+      "elapsed_ms": 28.1
     },
     {
       "id": "natural-membership",
@@ -254,7 +254,7 @@
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 5.1
+      "elapsed_ms": 6.1
     },
     {
       "id": "natural-aov",
@@ -290,7 +290,7 @@
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 24.3
+      "elapsed_ms": 27.7
     },
     {
       "id": "natural-region-gap",
@@ -321,7 +321,7 @@
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 6.8
+      "elapsed_ms": 5.2
     },
     {
       "id": "natural-daily",
@@ -357,7 +357,7 @@
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 30.8
+      "elapsed_ms": 25.8
     },
     {
       "id": "natural-refund-money",
@@ -394,7 +394,7 @@
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 28.3
+      "elapsed_ms": 22.2
     },
     {
       "id": "natural-ads",
@@ -425,7 +425,7 @@
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 7.5
+      "elapsed_ms": 5.3
     },
     {
       "id": "natural-conversion",
@@ -457,7 +457,7 @@
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 7.3
+      "elapsed_ms": 10.5
     },
     {
       "id": "natural-city",
@@ -488,7 +488,7 @@
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 4.2
+      "elapsed_ms": 7.5
     },
     {
       "id": "natural-refund-ratio",
@@ -525,7 +525,7 @@
       "sql_mode": "rule",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 36.8
+      "elapsed_ms": 49.7
     },
     {
       "id": "natural-low-price",
@@ -557,7 +557,7 @@
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 8.3
+      "elapsed_ms": 7.3
     },
     {
       "id": "natural-new-customer",
@@ -589,16 +589,16 @@
       "sql_mode": "clarification",
       "end_to_end_pass": true,
       "hit": true,
-      "elapsed_ms": 5.0
+      "elapsed_ms": 6.4
     }
   ],
   "limitations": "Independent wording and end-to-end deterministic path, but this is not an online model-accuracy benchmark or an open-domain semantic-SQL dataset.",
   "available": true,
-  "evaluated_at": "2026-11-10T10:01:21.452627+00:00",
+  "evaluated_at": "2026-11-10T10:45:47.192267+00:00",
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 645.3,
-    "source_sha256": "cc60f68138ac96fdad97991eb774827623e6b41938b9d9f283ea14f13f234c49",
+    "wall_elapsed_ms": 442.2,
+    "source_sha256": "1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178",
     "retrieval_supplements": 0
   },
   "answer_correct": 15,

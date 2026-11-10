@@ -16,7 +16,7 @@
       "sql": "",
       "rows": 0,
       "mode": "clarification",
-      "elapsed_ms": 76.5,
+      "elapsed_ms": 60.3,
       "hit": true
     },
     {
@@ -29,7 +29,7 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 7.3,
+      "elapsed_ms": 8.0,
       "hit": true
     },
     {
@@ -42,7 +42,7 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 7.4,
+      "elapsed_ms": 6.4,
       "hit": true
     },
     {
@@ -55,7 +55,7 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 8.3,
+      "elapsed_ms": 5.0,
       "hit": true
     },
     {
@@ -68,7 +68,7 @@
       "sql": "",
       "rows": 0,
       "mode": "clarification",
-      "elapsed_ms": 6.6,
+      "elapsed_ms": 6.9,
       "hit": true
     },
     {
@@ -81,7 +81,7 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 5.2,
+      "elapsed_ms": 5.1,
       "hit": true
     },
     {
@@ -94,14 +94,14 @@
       "sql": "",
       "rows": 0,
       "mode": "unsupported",
-      "elapsed_ms": 7.1,
+      "elapsed_ms": 7.9,
       "hit": true
     }
   ],
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 210.4,
-    "source_sha256": "cc60f68138ac96fdad97991eb774827623e6b41938b9d9f283ea14f13f234c49",
+    "wall_elapsed_ms": 147.7,
+    "source_sha256": "1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178",
     "retrieval_supplements": 0
   },
   "answer_correct": 7,
