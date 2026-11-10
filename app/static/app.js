@@ -101,7 +101,7 @@ async function loadOverview() {
       ),
     ].join('');
     renderTrend(data.trend);
-    renderChannels(data.channel);
+    renderChannels(data.channel, data.channel_metric);
   } catch (error) {
     toast(error.message);
   }
@@ -117,15 +117,16 @@ function renderTrend(rows) {
     .join('');
 }
 
-function renderChannels(rows) {
-  const max = Math.max(...(rows || []).map((r) => Number(r.revenue)), 1);
+function renderChannels(rows, metric = '销售额') {
+  const key = metric === '订单数' ? 'orders' : 'revenue';
+  const max = Math.max(...(rows || []).map((r) => Number(r[key])), 1);
   $('#channel-list').innerHTML = (rows || [])
     .map(
       (row) => `
     <div class="channel-row">
       <span>${escapeHtml(row.channel)}</span>
-      <span class="channel-track"><span class="channel-fill" style="width:${(Number(row.revenue) / max) * 100}%"></span></span>
-      <span class="channel-value">${fmtMoney(row.revenue)}</span>
+      <span class="channel-track"><span class="channel-fill" style="width:${(Number(row[key]) / max) * 100}%"></span></span>
+      <span class="channel-value">${key === 'orders' ? fmtNum(row[key]) : fmtMoney(row[key])}</span>
     </div>`,
     )
     .join('');
@@ -1208,7 +1209,8 @@ function renderEvaluationTaskSummary(task) {
     const report = task.report || {};
     const model = report.model || {};
     $('#eval-summary').innerHTML = [
-      metricCard('模型通过率', `${task.hit_rate ?? 0}%`, `${task.passed}/${task.total} 条模型结果通过`, true),
+      metricCard('答案正确率', `${task.answer_correct_rate ?? task.hit_rate ?? 0}%`, `${task.answer_correct ?? task.passed ?? 0}/${task.total} 条通过独立结果验收`, true),
+      metricCard('计划正确率', `${task.plan_correct_rate ?? 0}%`, `${task.plan_correct ?? 0}/${task.total} 条意图、指标与表路由符合预期`),
       metricCard('SQL 执行率', `${task.execution_rate ?? 0}%`, '模型 SQL 实际执行比例'),
       metricCard('平均响应时间', `${task.avg_elapsed_ms ?? 0} 毫秒`, '检索、SQL、修复与解读'),
       metricCard('覆盖意图', `${report.intents ?? 0} 类`, `${escapeHtml(model.model || task.model_name || '模型')} · ${escapeHtml(report.suite_version || task.suite_version || '')}`),
@@ -1261,19 +1263,19 @@ function renderEvaluationReport(task) {
     $('#eval-table').innerHTML = `<p class="muted">${task ? escapeHtml(EVAL_STATUS_LABELS[task.status] || task.status) + '，完成后在这里查看逐条结果。' : '选择一份评测任务后查看。'}</p>`;
     return;
   }
-  $('#eval-count').textContent = report.available ? `${report.passed}/${report.total} 通过` : '模型未就绪';
+  $('#eval-count').textContent = report.available ? `答案 ${report.answer_correct ?? report.passed}/${report.total} · 计划 ${report.plan_correct ?? 0}/${report.total}` : '模型未就绪';
   const rows = report.cases.map((item) => {
     const modelBadge = item.model_used ? '<span class="badge">模型完成</span>' : '<span class="badge fail">模型未完成</span>';
     return `<tr>
       <td>${item.setup_question ? `<div class="muted">前置：${escapeHtml(item.setup_question)}</div>` : ''}${escapeHtml(item.question)}</td>
       <td>${escapeHtml(EVAL_LABELS[item.intent] || item.intent)}</td>
       <td>${modelBadge}<div class="muted">${escapeHtml(evalModeLabel(item))}</div></td>
-      <td><span class="badge ${item.hit ? '' : 'fail'}">${item.hit ? '通过' : '未通过'}</span></td>
+      <td><span class="badge ${item.answer_correct ?? item.hit ? '' : 'fail'}">答案 ${(item.answer_correct ?? item.hit) ? '通过' : '未通过'}</span><div class="muted">计划 ${(item.plan_correct ?? false) ? '通过' : '未通过'}</div></td>
       <td>${escapeHtml(item.attempts)} 次 / ${escapeHtml(item.elapsed_ms)} 毫秒</td>
       <td class="eval-result-cell">${item.error ? `<span class="eval-error">${escapeHtml(item.error)}</span>` : '<span class="eval-pass">模型结果符合验收值</span>'}</td>
     </tr>`;
   }).join('');
-  $('#eval-table').innerHTML = `<table class="eval-table"><thead><tr><th>黄金问题</th><th>意图</th><th>SQL 来源</th><th>模型验收</th><th>执行 / 耗时</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('#eval-table').innerHTML = `<table class="eval-table"><thead><tr><th>黄金问题</th><th>意图</th><th>SQL 来源</th><th>答案 / 计划</th><th>执行 / 耗时</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 async function selectEvaluationTask(taskId, options = {}) {
@@ -1438,7 +1440,7 @@ function renderEvaluationPlatform(data) {
   $('#dataset-table').innerHTML = datasets.length ? `<table class="eval-table"><thead><tr><th>数据集</th><th>版本</th><th>用例数</th><th>状态</th></tr></thead><tbody>${datasets.map((item) => `<tr><td>${escapeHtml(item.name)}<div class="muted">${escapeHtml(item.description || '')}</div></td><td><code>${escapeHtml(item.version)}</code></td><td>${item.case_count}</td><td>${statusBadge(item.status === 'published' ? 'ready' : item.status === 'holdout' ? 'holdout' : 'cancelled')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无数据集版本。</p>';
   $('#experiment-dataset').innerHTML = datasets.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(item.version)}</option>`).join('');
   $('#experiment-count').textContent = `${experiments.length} 个实验`;
-  $('#experiment-list').innerHTML = experiments.length ? experiments.map((exp) => `<div class="experiment-card"><strong>${escapeHtml(exp.name)}</strong><p>${escapeHtml(exp.hypothesis || '暂无实验假设')}</p><small>${escapeHtml(exp.dataset_id)} · ${escapeHtml(formatEvaluatedAt(exp.created_at))}</small><div class="experiment-runs">${(exp.tasks || []).map((task) => `<span>${escapeHtml(task.model_name || '待运行')} · ${task.hit_rate}%</span>`).join('') || '<span>尚未关联评测任务</span>'}</div></div>`).join('') : '<p class="muted">暂无实验记录。</p>';
+  $('#experiment-list').innerHTML = experiments.length ? experiments.map((exp) => `<div class="experiment-card"><strong>${escapeHtml(exp.name)}</strong><p>${escapeHtml(exp.hypothesis || '暂无实验假设')}</p><small>${escapeHtml(exp.dataset_id)} · ${escapeHtml(formatEvaluatedAt(exp.created_at))}</small><div class="experiment-runs">${(exp.tasks || []).map((task) => `<span>${escapeHtml(task.model_name || '待运行')} · A ${task.answer_correct_rate ?? task.hit_rate ?? 0}% / P ${task.plan_correct_rate ?? 0}%</span>`).join('') || '<span>尚未关联评测任务</span>'}</div></div>`).join('') : '<p class="muted">暂无实验记录。</p>';
   $('#feedback-count').textContent = `${feedback.length} 条`;
   $('#feedback-table').innerHTML = feedback.length ? `<table class="eval-table"><thead><tr><th>用例</th><th>任务</th><th>分类</th><th>状态</th></tr></thead><tbody>${feedback.map((item) => `<tr><td>${escapeHtml(item.case_id)}<div class="muted">${escapeHtml(item.note || '')}</div></td><td><code>${escapeHtml(item.task_id)}</code></td><td>${escapeHtml(FEEDBACK_CATEGORY_LABELS[item.category] || item.category)}</td><td>${statusBadge(item.status === 'open' ? 'queued' : 'ready')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">暂无失败反馈。</p>';
   const candidates = state.regressionCandidates || [];
@@ -1469,7 +1471,7 @@ async function compareEvaluationTasks() {
     if (data.fixed?.length) results.push(`<div class="eval-diff-group fixed"><strong>新增修复 ${data.fixed.length}</strong>${data.fixed.map((item) => `<span>${escapeHtml(item.question)}</span>`).join('')}</div>`);
     if (data.regressed?.length) results.push(`<div class="eval-diff-group regressed"><strong>新增回归 ${data.regressed.length}</strong>${data.regressed.map((item) => `<span>${escapeHtml(item.question)}</span>`).join('')}</div>`);
     if (!results.length) results.push('<p class="muted">两份任务的逐用例通过状态没有变化。</p>');
-    $('#eval-compare-result').innerHTML = `<div class="eval-compare-metrics"><span>通过数 <strong>${data.delta.passed >= 0 ? '+' : ''}${data.delta.passed}</strong></span><span>通过率 <strong>${data.delta.hit_rate >= 0 ? '+' : ''}${data.delta.hit_rate}%</strong></span><span>执行率 <strong>${data.delta.execution_rate >= 0 ? '+' : ''}${data.delta.execution_rate}%</strong></span><span>平均耗时 <strong>${data.delta.avg_elapsed_ms >= 0 ? '+' : ''}${data.delta.avg_elapsed_ms} 毫秒</strong></span></div>${results.join('')}`;
+    $('#eval-compare-result').innerHTML = `<div class="eval-compare-metrics"><span>答案正确数 <strong>${data.delta.answer_correct >= 0 ? '+' : ''}${data.delta.answer_correct}</strong></span><span>答案正确率 <strong>${data.delta.answer_correct_rate >= 0 ? '+' : ''}${data.delta.answer_correct_rate}%</strong></span><span>计划正确率 <strong>${data.delta.plan_correct_rate >= 0 ? '+' : ''}${data.delta.plan_correct_rate}%</strong></span><span>执行率 <strong>${data.delta.execution_rate >= 0 ? '+' : ''}${data.delta.execution_rate}%</strong></span><span>平均耗时 <strong>${data.delta.avg_elapsed_ms >= 0 ? '+' : ''}${data.delta.avg_elapsed_ms} 毫秒</strong></span></div>${results.join('')}`;
   } catch (error) {
     toast(error.message);
   }

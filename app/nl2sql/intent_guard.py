@@ -4,18 +4,25 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.nl2sql.semantic import METRIC_ALIASES
+
 
 OUTCOME_ANSWERED = "answered"
 OUTCOME_CLARIFICATION = "clarification"
 OUTCOME_UNSUPPORTED = "unsupported"
 
-_METRIC_TERMS = (
-    "销售额", "销量", "客单价", "退款率", "退款金额", "退款单数",
-    "roi", "投产比", "投放花费", "归因订单数", "订单数", "订单量",
-    "gmv", "营收", "收入", "最赚钱", "赚钱", "回报", "值不值",
-    "卖得最多", "卖得多", "每单平均", "平均花", "卖得怎么样",
-    "卖得最好", "生意最好", "卖货", "花多少钱", "多少单", "多少件",
-    "投放最划算", "售后占比",
+_METRIC_TERMS = tuple(
+    dict.fromkeys(
+        [
+            *(
+                term
+                for name, aliases in METRIC_ALIASES.items()
+                for term in (name, *aliases)
+            ),
+            "订单数", "订单量", "最赚钱", "赚钱", "卖得怎么样",
+            "卖得最好", "生意最好", "卖货", "售后占比",
+        ]
+    )
 )
 _DIMENSION_TERMS = (
     "渠道", "地区", "区域", "品类", "类目", "商品", "城市", "会员",

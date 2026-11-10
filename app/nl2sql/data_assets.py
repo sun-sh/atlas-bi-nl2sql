@@ -4,35 +4,17 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from app.nl2sql.schema_catalog import SCHEMA
 from app.nl2sql.seed import generate_database
 from app.nl2sql.settings import get_settings
 
 
-DATASET_START = "2025-10-01"
-DATASET_END = "2026-02-28"
-
-TABLE_PROFILES: dict[str, dict[str, Any]] = {
-    "orders": {"key": ["order_id"], "date_column": "order_date"},
-    "order_items": {"key": ["order_id", "line_no"], "date_column": None, "date_parent": ("orders", "order_id")},
-    "refunds": {"key": ["refund_id"], "date_column": "request_date"},
-    "marketing_spend": {"key": ["spend_date", "channel"], "date_column": "spend_date"},
-    "customers": {"key": ["customer_id"], "date_column": "register_date"},
-}
-
-RELATIONSHIPS = (
-    {"source": "order_items", "source_column": "order_id", "target": "orders", "target_column": "order_id", "description": "商品行必须归属有效订单"},
-    {"source": "refunds", "source_column": "order_id", "target": "orders", "target_column": "order_id", "description": "退款申请必须关联有效订单"},
-    {"source": "orders", "source_column": "customer_id", "target": "customers", "target_column": "customer_id", "description": "订单必须关联有效客户"},
-)
-
-METRICS = (
-    {"name": "销售额", "grain": "订单", "definition": "SUM(orders.paid_amount)，仅统计 paid 订单"},
-    {"name": "客单价", "grain": "订单", "definition": "AVG(orders.paid_amount)，仅统计 paid 订单"},
-    {"name": "退款率", "grain": "订单 / 品类", "definition": "退款申请数 / 全部订单数 × 100%"},
-    {"name": "退款金额", "grain": "退款申请", "definition": "SUM(refunds.refund_amount)"},
-    {"name": "ROI", "grain": "渠道", "definition": "已支付销售额 / 投放花费，两表分别聚合后计算"},
-    {"name": "商品销量", "grain": "商品行", "definition": "SUM(order_items.quantity)，仅统计 paid 订单"},
+from app.nl2sql.semantic import (
+    DATASET_END,
+    DATASET_START,
+    METRICS,
+    RELATIONSHIPS,
+    SCHEMA,
+    TABLE_PROFILES,
 )
 
 
@@ -170,7 +152,7 @@ def data_assets_overview() -> dict[str, Any]:
             "tables": tables,
             "relations": relations,
             "quality": {"status": status, "checks": checks, "failed": failed},
-            "semantic_layer": {"source": "app/nl2sql/schema_catalog.py", "metrics": list(METRICS)},
+            "semantic_layer": {"source": "app/semantic.yaml", "metrics": list(METRICS)},
             "boundary": {
                 "level": "project-level-data-asset-layer",
                 "description": "独立资产巡检入口；多源接入、快照与审计由 data_platform 控制面管理。仍不包含租户隔离或企业级调度。",

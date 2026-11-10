@@ -10,6 +10,7 @@ from app.nl2sql.harness import is_cancelled
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.model_runtime import model_call_slot, record_usage
 from app.nl2sql.models import QueryPlan
+from app.nl2sql.semantic import METRIC_ALIASES, metric_definition
 from app.nl2sql.settings import get_settings
 
 _NUMBER_RE = re.compile(r"(?<![A-Za-z_])[-+]?\d+(?:,\d{3})*(?:\.\d+)?")
@@ -299,42 +300,31 @@ def _pct(part: float, total: float) -> float | None:
     return round(part * 100 / total, 2) if total else None
 
 
-METRIC_ALIASES = {
-    "销售额": {"sales", "sales_amount", "revenue", "gmv", "total_sales"},
-    "客单价": {"avg_order_value", "average_order_value", "aov"},
-    "roi": {"roi", "投产比"},
-    "退款率": {"refund_rate", "return_rate"},
-    "销量": {"销量", "件数", "quantity", "units_sold", "sales_volume"},
-    "退款金额": {"退款金额", "refund_amount"},
-    "投放花费": {"投放花费", "花费", "spend", "ad_spend"},
-    "归因销售额": {"归因销售额", "attributed_sales", "attributed_revenue"},
-    "归因订单数": {"归因订单数", "attributed_orders"},
-    "订单数": {"订单数", "order_count", "orders"},
-}
-
-
 def _metric_key(value: str) -> str:
     raw = str(value).strip().lower()
     compact = re.sub(r"[\s_\-]+", "", raw)
-    if raw in METRIC_ALIASES:
-        return raw
+    canonical_names = {
+        str(name).lower(): str(name).lower() for name in METRIC_ALIASES
+    }
+    if raw in canonical_names:
+        return canonical_names[raw]
     for canonical, aliases in METRIC_ALIASES.items():
         normalized_aliases = {
-            re.sub(r"[\s_\-]+", "", alias.strip().lower()) for alias in aliases
+            re.sub(r"[\s_\-]+", "", str(alias).strip().lower())
+            for alias in {str(canonical), *aliases}
         }
         if compact in normalized_aliases:
-            return canonical.lower()
+            return str(canonical).lower()
     return compact
 
 
 def _is_rate_metric(name: str, values: list[float]) -> bool:
+    definition = metric_definition(name)
+    if definition is not None:
+        return bool(definition.get("ratio"))
+    # Unknown output aliases from a model still need conservative handling.
     key = _metric_key(name)
-    return (
-        "率" in str(name)
-        or key == "退款率"
-        or key.endswith("rate")
-        or key == "roi"
-    )
+    return "率" in str(name) or key.endswith("rate") or key == "roi"
 
 
 def build_result_digest(

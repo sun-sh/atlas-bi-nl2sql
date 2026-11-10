@@ -1,0 +1,4 @@
+-r requirements.txt
+qdrant-client>=1.12,<2
+elasticsearch>=8.15,<10
+fastembed>=0.5,<1

@@ -23,7 +23,7 @@ class Settings:
     root: Path = ROOT
     data_dir: Path = ROOT / "data"
     db_path: Path = ROOT / "data" / "commerce.db"
-    use_bge: bool = _as_bool(os.getenv("USE_BGE"), True)
+    use_bge: bool = _as_bool(os.getenv("USE_BGE"), False)
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
     llm_enabled: bool = _as_bool(os.getenv("LLM_ENABLED"), False)
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4.1-mini")

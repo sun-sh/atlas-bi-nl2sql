@@ -17,3 +17,7 @@ docs/RESUME.md
 docs/INTERVIEW.md
 ui_audit.js
 benchmark_latency.py
+
+# Local regression scratch directories
+.pytest-tmp/
+.tmp/

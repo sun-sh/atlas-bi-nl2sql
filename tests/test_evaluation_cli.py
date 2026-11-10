@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -231,3 +232,55 @@ def test_frozen_colloquial_suite_uses_frozen_cases(monkeypatch, tmp_path):
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["total"] == 13
     assert report["evaluation_contract"] == COLLOQUIAL_HOLDOUT_SUITE_VERSION
+
+
+
+def test_report_exposes_answer_and_plan_denominators(monkeypatch, tmp_path):
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
+    def fake_eval(**kwargs):
+        return {
+            "available": True,
+            "total": 2,
+            "passed": 1,
+            "hit_rate": 50.0,
+            "answer_correct": 1,
+            "answer_correct_rate": 50.0,
+            "plan_correct": 2,
+            "plan_correct_rate": 100.0,
+            "cases": [],
+        }
+    monkeypatch.setattr(run, "run_evaluation", fake_eval)
+    output = tmp_path / "dual.json"
+    assert run.main(["--output", str(output)]) == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["answer_correct"] == 1
+    assert report["answer_correct_rate"] == 50.0
+    assert report["plan_correct"] == 2
+    assert report["plan_correct_rate"] == 100.0
+
+
+def test_scope_report_gets_answer_first_aliases(monkeypatch, tmp_path):
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
+    output = tmp_path / "scope.json"
+    assert run.main(["--suite", "scope", "--output", str(output)]) == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["answer_correct"] == report["passed"]
+    assert report["answer_correct_rate"] == report["hit_rate"]
+    assert report["plan_correct"] == report["passed"]
+
+
+
+def test_source_hash_covers_semantic_yaml(monkeypatch, tmp_path):
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
+    output = tmp_path / "hash.json"
+    assert run.main(["--suite", "scope", "--output", str(output)]) == 0
+    before = json.loads(output.read_text(encoding="utf-8"))["runtime"]["source_sha256"]
+    semantic_path = Path(run.__file__).resolve().parents[1] / "semantic.yaml"
+    original = semantic_path.read_bytes()
+    try:
+        semantic_path.write_bytes(original + b"\n# provenance-test\n")
+        assert run.main(["--suite", "scope", "--output", str(output)]) == 0
+        after = json.loads(output.read_text(encoding="utf-8"))["runtime"]["source_sha256"]
+    finally:
+        semantic_path.write_bytes(original)
+    assert before != after

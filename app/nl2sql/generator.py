@@ -7,6 +7,17 @@ from app.nl2sql.model_config import get_model_config, make_client, model_error_m
 from app.nl2sql.model_runtime import model_call_slot, record_usage
 from app.nl2sql.models import QueryPlan
 from app.nl2sql.planner import CATEGORY_TERMS
+from app.nl2sql.semantic import (
+    DATASET_RANGE,
+    DATASET_START,
+    DATASET_END,
+    REFERENCE_DATE,
+    enum_prompt,
+    metric_filters,
+    metric_prompt,
+    metric_sql,
+    output_metric_names,
+)
 from app.nl2sql.schema_catalog import semantic_schema_prompt
 from app.nl2sql.settings import get_settings
 
@@ -14,22 +25,21 @@ from app.nl2sql.settings import get_settings
 SQL_INSTRUCTIONS = (
     "你是 SQLite 电商分析专家。输出一条完整 SELECT SQL，支持 SELECT 内的子查询；不要解释或代码块。"
     "只能查询提供的公开字段；禁止 customer_id、cost_price、SELECT *，必须聚合。"
-    "数据范围2025-10-01至2026-02-28，相对日期基准固定为2026-02-28；不得使用系统当前日期。"
+    f"数据范围{DATASET_START}至{DATASET_END}，相对日期基准固定为{REFERENCE_DATE.isoformat()}；不得使用系统当前日期。"
     "严格遵守已解析时间区间和当前筛选，不要因无数据擅自扩大范围。"
-    "订单状态必须用真实英文枚举：已支付为paid，已退款为refunded，取消为cancelled。"
-    "销售额SUM(orders.paid_amount)、客单价AVG(orders.paid_amount)、销量均默认仅统计paid订单。"
+    f"订单状态必须用真实英文枚举：{enum_prompt('orders.status')}。"
+    "业务指标必须使用语义层给出的 expr 和 filters，不得自行更换口径。"
+    f"指标定义：\n{metric_prompt()}\n"
     "订单主表品类用orders.category；商品行品类及件数用order_items.category和quantity，"
     "按商品行品类筛选时不要同时筛选orders.category，也不要累加重复关联的订单金额。"
-    "退款统计默认按orders.order_date筛选，关联refunds.order_id=orders.order_id；"
-    "退款率为退款申请数/全部订单数*100，不筛paid、不排除processing退款；金额SUM(refund_amount)。"
-    "ROI=已支付订单销售额/投放花费（倍数，不乘100）；orders和marketing_spend分别按渠道聚合，"
-    "两表都使用相同日期区间，然后关联，禁止把每日花费在订单连接后重复累计。"
+    "退款统计默认按orders.order_date筛选，关联refunds.order_id=orders.order_id。"
+    "ROI 的 orders 和 marketing_spend 分别按渠道聚合后关联，禁止把每日花费在订单连接后重复累计。"
     "问题出现“各渠道/按渠道/渠道ROI/哪个渠道”时，必须返回每个有投放花费的渠道，"
     "除非用户明确只要第一名，否则不要加 LIMIT 1 把排名压成单行。"
-    "App不变，小程序=MiniProgram，抖音=Douyin，网页=Web。"
+    f"渠道映射：{enum_prompt('orders.channel')}；按语义层别名解析。"
     "orders别名可用o，order_items可用oi，marketing_spend可用m；规划中o.order_date对应投放表spend_date。"
     "未要求分组的总量只返回一行；按要求排序，指标保留两位小数。"
-    "输出列使用明确业务名：销售额、销量、客单价、退款率、退款单数、退款金额、ROI；"
+    f"输出列使用明确业务名：{'、'.join(output_metric_names())}；"
     "维度用地区、渠道、品类、日期、退款原因。"
     "追问必须以当前计划的指标、时间与筛选为准，并结合前置问题理解继承项。"
 )
@@ -66,6 +76,16 @@ def _where(filters: list[str]) -> str:
     return " WHERE " + " AND ".join(filters) if filters else ""
 
 
+def _with_metric_filters(filters: list[str], *metric_names: str) -> list[str]:
+    """Append a metric's declared predicate unless the planner supplied it."""
+    result = list(filters)
+    for metric_name in metric_names:
+        for predicate in metric_filters(metric_name):
+            if predicate not in result:
+                result.append(predicate)
+    return result
+
+
 def _marketing_filters(plan: QueryPlan) -> list[str]:
     filters: list[str] = []
     for item in plan.filters:
@@ -95,27 +115,29 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
                 order_filters.append(item.replace("m.channel", "o.channel"))
         # ROI revenue is paid revenue. Keep this invariant in the rule path even
         # when the planner did not add a status filter.
-        if not any("o.status" in item for item in order_filters):
-            order_filters.append("o.status = 'paid'")
+        order_filters = _with_metric_filters(order_filters, "归因销售额")
         order_where = _where(order_filters)
         return (
-            "SELECT m.channel AS 渠道, ROUND(m.spend, 2) AS 投放花费, "
-            "ROUND(m.attributed_orders, 0) AS 归因订单数, "
-            "ROUND(o.revenue, 2) AS 归因销售额, "
-            "ROUND(o.revenue / NULLIF(m.spend, 0), 2) AS ROI "
+            f"SELECT m.channel AS 渠道, {metric_sql('投放花费')} AS 投放花费, "
+            f"{metric_sql('归因订单数')} AS 归因订单数, "
+            f"{metric_sql('归因销售额')} AS 归因销售额, "
+            f"{metric_sql('ROI')} AS ROI "
             "FROM (SELECT channel, SUM(spend) AS spend, SUM(attributed_orders) AS attributed_orders "
             "FROM marketing_spend m " + spend_where + " GROUP BY channel) m "
             "LEFT JOIN (SELECT channel, SUM(paid_amount) AS revenue FROM orders o "
             + order_where + " GROUP BY channel) o ON o.channel = m.channel "
-            "ORDER BY ROI DESC"
+            "GROUP BY m.channel ORDER BY ROI DESC"
         )
     if plan.intent == "refund_analysis":
+        refund_reason_filters = _with_metric_filters(
+            filters, "退款单数", "退款金额"
+        )
         if "原因" in q:
             reason_metric = "退款金额" if "退款金额" in q else "退款单数"
             return (
-                "SELECT r.reason AS 退款原因, COUNT(*) AS 退款单数, "
-                "ROUND(SUM(r.refund_amount), 2) AS 退款金额 FROM refunds r "
-                "JOIN orders o ON o.order_id = r.order_id " + _where(filters)
+                f"SELECT r.reason AS 退款原因, {metric_sql('退款单数')} AS 退款单数, "
+                f"{metric_sql('退款金额')} AS 退款金额 FROM refunds r "
+                "JOIN orders o ON o.order_id = r.order_id " + _where(refund_reason_filters)
                 + " GROUP BY r.reason ORDER BY " + reason_metric + " DESC"
             )
         if "退款金额" in q:
@@ -129,9 +151,9 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
                 else "JOIN orders o ON o.order_id = r.order_id"
             )
             return (
-                f"SELECT {category_expr} AS 品类, COUNT(*) AS 退款单数, "
-                "ROUND(SUM(r.refund_amount), 2) AS 退款金额 FROM refunds r "
-                + join + _where(filters)
+                f"SELECT {category_expr} AS 品类, {metric_sql('退款单数')} AS 退款单数, "
+                f"{metric_sql('退款金额')} AS 退款金额 FROM refunds r "
+                + join + _where(_with_metric_filters(filters, "退款单数", "退款金额"))
                 + " GROUP BY " + category_expr + " ORDER BY 退款金额 DESC"
             )
         top_only = (
@@ -139,10 +161,11 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             or any(term in q for term in ("哪一个", "哪个品类", "哪个类目"))
         )
         return (
-            "SELECT o.category AS 品类, COUNT(DISTINCT o.order_id) AS 订单数, "
-            "COUNT(DISTINCT r.refund_id) AS 退款单数, "
-            "ROUND(COUNT(DISTINCT r.refund_id) * 100.0 / COUNT(DISTINCT o.order_id), 2) AS 退款率 "
-            "FROM orders o LEFT JOIN refunds r ON r.order_id = o.order_id " + _where(filters)
+            f"SELECT o.category AS 品类, {metric_sql('订单数')} AS 订单数, "
+            f"{metric_sql('退款单数')} AS 退款单数, "
+            f"{metric_sql('退款率')} AS 退款率 "
+            "FROM orders o LEFT JOIN refunds r ON r.order_id = o.order_id "
+            + _where(_with_metric_filters(filters, "订单数", "退款单数", "退款率"))
             + " GROUP BY o.category ORDER BY 退款率 DESC"
             + (" LIMIT 1" if top_only else "")
         )
@@ -153,48 +176,50 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             for term in ("各品类", "按品类", "分品类", "品类排名", "类目排名", "哪些品类", "哪些类目")
         ) and any(term in q for term in CATEGORY_TERMS)
         if "销量" in q or "件数" in q or "卖得最多" in q or "卖得多" in q:
+            sales_filters = _with_metric_filters(filters, "销量")
             if aggregate_only:
                 return (
-                    "SELECT SUM(oi.quantity) AS 销量 FROM order_items oi "
+                    f"SELECT {metric_sql('销量')} AS 销量 FROM order_items oi "
                     "JOIN orders o ON o.order_id = oi.order_id "
-                    + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+                    + _where(sales_filters)
                 )
             return (
-                "SELECT oi.category AS 品类, SUM(oi.quantity) AS 销量 "
+                f"SELECT oi.category AS 品类, {metric_sql('销量')} AS 销量 "
                 "FROM order_items oi JOIN orders o ON o.order_id = oi.order_id "
-                + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+                + _where(sales_filters)
                 + " GROUP BY oi.category ORDER BY 销量 DESC"
             )
         if item_grain:
             # Amounts live on orders. For item-grain grouping, aggregate order
             # amounts first, otherwise a two-line order repeats its paid amount.
             return (
-                "SELECT oi.category AS 品类, ROUND(SUM(order_amount), 2) AS 销售额 "
+                f"SELECT oi.category AS 品类, "
+                f"{metric_sql('归因销售额', aliases={'o': 'o'})} AS 销售额 "
                 "FROM order_items oi JOIN (SELECT order_id, "
-                "ROUND(SUM(paid_amount), 2) AS order_amount FROM orders o "
-                + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+                f"{metric_sql('销售额')} AS revenue FROM orders o "
+                + _where(_with_metric_filters(filters, "销售额"))
                 + " GROUP BY order_id) o ON o.order_id = oi.order_id "
                 "GROUP BY oi.category ORDER BY 销售额 DESC"
             )
         if aggregate_only:
             return (
-                "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
-                + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+                f"SELECT {metric_sql('销售额')} AS 销售额 FROM orders o "
+                + _where(_with_metric_filters(filters, "销售额"))
             )
         # The semantic layer defines category sales on the order grain unless
         # the question explicitly asks for item-line grain.
         return (
-            "SELECT o.category AS 品类, COUNT(*) AS 订单数, "
-            "ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
-            + _where(filters + ["o.status = 'paid'"] if not any("o.status" in item for item in filters) else filters)
+            f"SELECT o.category AS 品类, {metric_sql('订单数')} AS 订单数, "
+            f"{metric_sql('销售额')} AS 销售额 FROM orders o "
+            + _where(_with_metric_filters(filters, "销售额"))
             + " GROUP BY o.category ORDER BY 销售额 DESC"
         )
-    where = _where(filters)
-    paid_where = where + " AND o.status = 'paid'" if where else " WHERE o.status = 'paid'"
+    paid_filters = _with_metric_filters(filters, "销售额")
+    paid_where = _where(paid_filters)
     if plan.chart_type == "line":
         return (
-            "SELECT o.order_date AS 日期, ROUND(SUM(o.paid_amount), 2) AS 销售额, "
-            "COUNT(*) AS 订单数 FROM orders o " + paid_where
+            f"SELECT o.order_date AS 日期, {metric_sql('销售额')} AS 销售额, "
+            f"{metric_sql('订单数')} AS 订单数 FROM orders o " + paid_where
             + " GROUP BY o.order_date ORDER BY o.order_date"
         )
     asks_region_dimension = any(
@@ -205,8 +230,8 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             ("o.region", "地区") if asks_region_dimension else ("o.channel", "渠道")
         )
         return (
-            f"SELECT {group} AS {label}, COUNT(*) AS 订单数, ROUND(SUM(o.paid_amount), 2) AS 销售额, "
-            "ROUND(AVG(o.paid_amount), 2) AS 客单价 FROM orders o " + paid_where
+            f"SELECT {group} AS {label}, {metric_sql('订单数')} AS 订单数, {metric_sql('销售额')} AS 销售额, "
+            f"{metric_sql('客单价')} AS 客单价 FROM orders o " + paid_where
             + f" GROUP BY {group} ORDER BY 客单价 DESC"
         )
     region_filter = next(
@@ -225,7 +250,7 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
         # A single-region/single-channel question without an explicit grouping
         # dimension is a scalar total, not a breakdown by the other dimension.
         return (
-            "SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o " + paid_where
+            f"SELECT {metric_sql('销售额')} AS 销售额 FROM orders o " + paid_where
         )
     if asks_region_group:
         group, label = "o.region", "地区"
@@ -234,7 +259,7 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
     else:
         group, label = "o.region", "地区"
     return (
-        f"SELECT {group} AS {label}, COUNT(*) AS 订单数, ROUND(SUM(o.paid_amount), 2) AS 销售额 "
+        f"SELECT {group} AS {label}, {metric_sql('订单数')} AS 订单数, {metric_sql('销售额')} AS 销售额 "
         "FROM orders o " + paid_where + f" GROUP BY {group} ORDER BY 销售额 DESC"
     )
 

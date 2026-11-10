@@ -13,6 +13,7 @@ from typing import Any
 
 from app.nl2sql.data_assets import TABLE_PROFILES
 from app.nl2sql.schema_catalog import SCHEMA
+from app.nl2sql.semantic import METRICS
 from app.nl2sql.settings import get_settings
 from app.nl2sql.sql_engine import QueryTarget
 
@@ -252,12 +253,15 @@ def _seed_default_sources(conn: sqlite3.Connection) -> None:
         "INSERT INTO data_sources(id, workspace_id, name, kind, location, sync_mode, sensitivity, schedule_minutes, status, active_for_query, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         ("ds_commerce", DEFAULT_WORKSPACE, "电商业务库", "sqlite", str(warehouse), "snapshot", "internal", 60, "registered", 1, now, now),
     )
-    metric_rows = (
-        ("销售额", "订单", "SUM(orders.paid_amount)，仅统计 paid 订单", "数据团队", "published"),
-        ("客单价", "订单", "AVG(orders.paid_amount)，仅统计 paid 订单", "数据团队", "published"),
-        ("退款率", "订单 / 品类", "退款申请数 / 全部订单数 × 100%", "数据团队", "published"),
-        ("ROI", "渠道", "已支付销售额 / 投放花费，先分别聚合再计算", "增长团队", "published"),
-        ("商品销量", "商品行", "SUM(order_items.quantity)，仅统计 paid 订单", "数据团队", "published"),
+    metric_rows = tuple(
+        (
+            str(metric["name"]),
+            str(metric.get("grain") or ""),
+            str(metric.get("definition") or ""),
+            "增长团队" if str(metric["name"]) == "ROI" else "数据团队",
+            "published",
+        )
+        for metric in METRICS
     )
     for name, grain, definition, owner, status in metric_rows:
         conn.execute(

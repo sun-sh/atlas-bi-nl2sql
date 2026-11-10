@@ -2,7 +2,7 @@
 
 **用中文问经营数据，系统生成只读 SQL，并把结果解释清楚。**
 
-Atlas BI 是一个可运行、可评测的电商经营分析作品：从自然语言问题出发，经过 Schema 召回、意图规划、SQL 生成、安全门禁、只读执行和结果解读，最终在 Web 工作台展示数据、SQL、证据和解释。它不是聊天机器人套壳，也不是已经完成生产化的数据库网关。
+Atlas BI 是一个可运行、可评测的电商经营分析作品：从自然语言问题出发，经过 Schema 召回、意图规划、SQL 生成、安全门禁、只读执行和结果解读，最终在 Web 工作台展示数据、SQL、证据和解释。业务表、列、枚举、别名、时间词与指标公式统一由 `app/semantic.yaml` 渲染；它不是聊天机器人套壳，也不是已经完成生产化的数据库网关。
 
 [![CI](https://github.com/sun-sh/atlas-bi-nl2sql/actions/workflows/ci.yml/badge.svg)](https://github.com/sun-sh/atlas-bi-nl2sql/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
@@ -20,7 +20,7 @@ Atlas BI 是一个可运行、可评测的电商经营分析作品：从自然�
 | --- | --- |
 | 是不是一个完整项目 | 是。查询、会话、数据中台、评测中台、前端、测试和 CI 都在同一个可运行仓库里。 |
 | 能不能现场演示 | 能。无模型 Key 也能用确定性规则链路跑通；配置 OpenAI 兼容模型后走模型生成和模型解读。 |
-| 有没有真实证据 | 有。191 项自动化测试、严格模型回归 100/100、holdout 29/30、冻结口语 7/13、规则等价 100/100、自然语言 15/15 和检索/路由消融均可复现。 |
+| 有没有真实证据 | 有。209 项自动化测试；当前 source hash 下的严格模型回归答案 100/100、计划 94/100，holdout 答案 29/30、计划 28/30，冻结口语答案 11/13、计划 9/13；规则等价 100/100、自然语言 15/15 和检索/路由消融均可复现。 |
 | 够不够面试 | 够。它覆盖 Agent 编排、RAG/检索、SQL 安全、结果验收、SSE、评测工程和工程边界，适合准备 AI 应用 / 后端岗位。 |
 | 是不是生产平台 | 不是。真实数据库集成、连接池、SSO、多租户、分布式 worker 和完整安全治理仍是后续工作；见 [AUDIT](docs/AUDIT.md)。 |
 
@@ -125,7 +125,8 @@ flowchart TD
 | 模块 | 实现 |
 | --- | --- |
 | 可答性判定 | 模糊问题先要求补充指标；因果问题只提供可查询的拆解方向；写操作、敏感字段和域外请求在生成 SQL 前拒绝；澄清和拒答不生成伪造查询计划 |
-| Schema 检索 | BGE + Qdrant 与 Elasticsearch BM25 / 本地 IDF 双路召回，作为 Schema 证据和可选补充；5 表业务域默认只用确定性必需表，`ATLAS_RETRIEVAL_SUPPLEMENTS=1` 才允许最多一张 top-1 补充表进入 Prompt |
+| 语义单源 | `app/semantic.yaml` 定义表、列、主键、枚举、别名、时间词、意图和指标 `expr + filters`；SQLite DDL、Schema Prompt、规则 SQL、结果摘要别名和概览页业务公式均从这里读取 |
+| Schema 检索 | 默认为本地 IDF；安装 `requirements-retrieval.txt` 后可启用 BGE + Qdrant 与 Elasticsearch BM25。检索作为证据保存，5 表业务域默认只用确定性必需表，`ATLAS_RETRIEVAL_SUPPLEMENTS=1` 才允许最多一张 top-1 补充表进入 Prompt |
 | SQL 安全 | sqlglot AST、单条 SELECT、表/函数白名单、跨 Schema 拦截、拒绝 `SELECT *`、敏感字段拦截、只读连接和结果行数限制 |
 | 有限自愈 | 记录原 SQL、错误、Schema 和尝试次数，在预算内让模型修复；修复 SQL 仍走同一门禁；预算耗尽保留失败状态，业务语义错误仍可能通过执行 |
 | 结果解读 | 先执行可信查询，再生成解释；数字、榜首和趋势必须与确定性摘要一致，失败时回退摘要 |
@@ -134,25 +135,24 @@ flowchart TD
 | 数据中台 | SQLite/CSV 注册、快照、资产目录、质量规则、指标口径、字段血缘、只读服务和审计；PostgreSQL/MySQL 可作为查询目标 |
 | 评测中台 | 数据集版本、模型实验、优先级队列、取消与重试、1–3 个隔离进程、任务对比、失败候选审核后回流 |
 | 运行观测 | `/api/metrics` 进程内请求数、错误率和 P50/P95/Max；模型调用并发、排队和 token 指标；可选运营令牌 |
-| 可测试性 | 191 项 pytest；4 条 Playwright 浏览器用例；规则、自然语言、检索和范围门禁均在 CI 中运行 |
+| 可测试性 | 209 项 pytest（含 4 条 Playwright 浏览器用例）；规则、自然语言、检索和范围门禁均在 CI 中运行；语义层 DDL、双分母、CASE 与真实嵌套深度有专项回归 |
 
 ## 评测证据
 
 这里最重要的一条是：**固定数据集上的回归结果不等于开放域生产准确率。**
 
-100 条回归集是 19 个业务题型族在时间、地区、渠道和品类上的矩阵扩展，因此同时报告 raw case 与题型族。规则 100/100 验证的是回归门禁，不是模型能力。冻结口语集采用“先冻结题目、再改语义层”的流程，当前为 7/13，不用开发集的高分替代它。
+100 条回归集是 19 个业务题型族在时间、地区、渠道和品类上的矩阵扩展，因此同时报告 raw case 与题型族。规则 100/100 验证的是回归门禁，不是模型能力。评测同时报告 **answer-correct** 和 **plan-correct**：前者以独立基准 SQL 的结果验收和 grounded 解读为主，后者单独检查意图、指标和表路由，不能用一项掩盖另一项。冻结口语集采用“先冻结题目、再改语义层”的流程，当前答案 11/13、计划 9/13，不用开发集的高分替代它。
 
 | 证据 | 结果 | 说明 |
 | --- | --- | --- |
-| 严格模型回归 `strict-model-v3-100` | **100/100（19 个题型族）** | 默认确定性必需表路由、固定模型和网络条件下的日期快照；raw case 不等于独立语义样本 |
-| 独立 holdout `strict-model-v3-holdout-30` | **29/30** | 不参与调参的 30 条问题；销售 17/17、品类 3/3、退款 6/6、ROI 3/4 |
+| 严格模型回归 `strict-model-v3-100` | 答案 **100/100**；计划 **94/100** | 固定模型和网络条件下的日期快照；答案与计划独立记录，raw case 不等于独立语义样本 |
+| 独立 holdout `strict-model-v3-holdout-30` | 答案 **29/30**；计划 **28/30** | 不参与调参的 30 条问题；1 条商品行销量答案错误（过滤到 2 月）；2 条退款率题答案正确但计划指标记为退款单数 |
 | 规则链路等价 `rule-equivalence-v1` | **100/100（19 个题型族）** | 不调用模型；raw case 是时间/筛选矩阵，独立单位看题型族 |
 | 自然语言变体 `natural-language-holdout-v1` | **15/15（8 个题型族）** | 确定性规则链路 + 真实执行，不是模型能力 |
-| 冻结口语严格模型 `colloquial-frozen-v3` | **7/13** | 题目先单独冻结；10 条可回答、3 条应澄清；执行率/模型率 61.5%，失败集中在口语同义词、退款指标和澄清边界 |
-| 检索上下文消融 | 必需表 **7/13** vs 必需表 + top-1 补充 **7/13** | 同一冻结题集和同一 source hash；逐题命中一致，未观察到生成增益，默认关闭 |
-| 检索搜索消融 `retrieval-ablation-v1` | Top-1 **91.7%**、MRR **0.9444**、完整表召回@4 **100%** | 当前本地词法降级快照；仅证明 12 条小样本上的 Schema 搜索，不是 SQL 生成收益；其中已有销售问法 top-1 错排 |
+| 冻结口语严格模型 `colloquial-frozen-v3` | 答案 **11/13**；计划 **9/13** | 题目先单独冻结；10 条可回答、3 条应澄清；执行率/模型率 69.2% |
+| 检索搜索消融 `retrieval-ablation-v1` | Top-1 **91.7%**、MRR **0.9444**、完整表召回@4 **100%** | 默认本地 IDF 快照；仅证明 12 条小样本上的 Schema 搜索，不是 SQL 生成收益；其中已有销售问法 top-1 错排 |
 | 范围守卫 `scope-guard-v1` | **7/7** | 模糊、写操作、敏感字段、域外请求必须澄清或拒答，不产生 SQL 和结果行 |
-| HTTP 冒烟压测 | 20 请求、并发 4、20/20 成功、P50 55.7 ms、P95 158.6 ms | 关闭模型、规则 SQL、固定 SQLite；不是 LLM 延迟或生产容量 |
+| HTTP 冒烟压测 | 20 请求、并发 4、20/20 成功、P50 55.7 ms、P95 158.6 ms | 2026-11-06 历史快照，关闭模型、规则 SQL、固定 SQLite；不是 LLM 延迟或生产容量 |
 
 详细判分、历史快照、任务队列和复现方式见 [评测说明](docs/EVALUATION.md)。
 
@@ -170,6 +170,8 @@ python -m pip install -r requirements.txt
 python -m app.nl2sql.seed
 python -m uvicorn app.api.main:app --reload --port 8000
 ```
+
+默认安装不包含 BGE、Qdrant 或 Elasticsearch；`USE_BGE=false`，检索走本地 IDF。需要验证真实检索后端时再安装 `python -m pip install -r requirements-retrieval.txt`。`app/semantic.yaml` 是运行时业务语义单一事实源，修改表列或指标口径时不要只改 Python 常量。
 
 也可以直接运行 `run.ps1`（Windows）或 `./run.sh`（macOS / Linux）。打开 <http://127.0.0.1:8000/workspace> 即可提问。
 
@@ -284,7 +286,7 @@ python -m app.evaluation.run --suite colloquial-frozen --min-hit-rate 0
 node --check app/static/app.js
 ```
 
-`pytest` 默认关闭在线模型和 BGE 下载，使用本地数据和受控模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **191 项测试全部通过**，包含 4 条 Playwright 浏览器端到端用例。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。`colloquial-frozen` 是严格模型快照，需要模型 Key，不设固定 CI 分数；开发集 `colloquial` 仅用于调试。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
+`pytest` 默认关闭在线模型和 BGE 下载，使用本地数据和受控模型响应测试 API、SQL 门禁、修复、会话、数据中台和评测任务。当前 **209 项测试全部通过**，包含 4 条 Playwright 浏览器端到端用例。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行，不产生在线模型分数；`scope`、`rules`、`retrieval`、`natural` 四套门禁不依赖模型 Key。`colloquial-frozen` 是严格模型快照，需要模型 Key，不设固定 CI 分数；开发集 `colloquial` 仅用于调试。在线模型评测需要配置 Key 和 API，结果会随模型、网络和配置变化。
 
 ## 目录结构
 
@@ -294,7 +296,8 @@ app/
   evaluation/       # 评测 CLI、HTTP 压测
   nl2sql/
     workflow.py     # LangGraph 查询状态机
-    retrieval.py    # BGE/Qdrant + BM25/IDF 混合召回
+    semantic.py     # 读取 semantic.yaml，渲染 Schema、指标和 DDL
+    retrieval.py    # 本地 IDF；可选 BGE/Qdrant + Elasticsearch
     planner.py      # 意图、时间、指标、筛选与上下文继承
     generator.py    # 模型 SQL、规则 SQL、有限修复
     sql_engine.py   # 方言校验、只读适配器、结果行数限制
@@ -303,6 +306,7 @@ app/
     data_platform.py  # 数据源、快照、质量、指标、血缘与审计
     evaluation.py     # 严格模型评测与离线套件
     evaluation_tasks.py # 数据集、实验、队列、重试与失败回流
+  semantic.yaml     # 业务语义单一事实源
   static/           # 工作台前端资源
 data/               # 本地数据库、会话与模型配置（不入库）
 docs/
@@ -317,15 +321,16 @@ tests/              # 自动化测试和浏览器端到端测试
 
 ## 边界
 
-- 当前使用固定种子的电商数据和固定业务口径，换成其他业务需要补 Schema、业务规则和评测用例。
+- 当前使用固定种子的电商数据和固定业务口径；Schema、枚举、别名、时间词和指标公式都集中在 `app/semantic.yaml`，换业务时需要同步替换种子数据、语义文件与评测基准。
 - 可答性判定以规则为主，覆盖常见澄清、写操作、敏感字段和域外请求；它会减少硬答，但不能替代完整权限系统和人工复核。
 - 数据中台是单工作区、本地管理员，只有函数级角色检查；`X-Admin-Token` 只是可选的共享部署门禁，没有 SSO、多租户隔离、用户级授权和生产数据集群。外部 PostgreSQL/MySQL 目前只作为 NL2SQL 查询目标，读数据服务仍仅支持 SQLite 快照。
 - CSV 单表入库不能切换成 NL2SQL 分析库；SQLite 和显式配置的 PostgreSQL/MySQL 才能被启用为查询数据源。外部库适配器暂不含连接池、租户行级过滤和自动目录同步；DSN 以明文保存在本地元数据中，公开接口不返回，但部署时仍需文件权限和密钥管理。
 - `/api/metrics` 是单进程内存窗口，进程重启即清零，也不包含网关、数据库连接池或模型供应商侧指标；HTTP 压测关闭模型，不能当作 LLM 容量结论。
 - 评测中台使用 SQLite 队列和单执行槽，没有分布式后台进程、跨组织标注或线上流量评测。
 - 100 条回归集并不是 100 个独立语义样本：它由 19 个业务题型族在时间、地区、渠道和品类上扩展而来。README 同时报告 raw case 与题型族，避免把矩阵规模误读成语义覆盖。
-- 默认 SQL 生成只使用确定性业务必需表；检索是证据和可选补充，不是当前五表 Demo 的默认生成增益。开启一张检索补充表后，冻结口语集仍为 7/13，逐题命中一致且没有补充表进入可答题计划，因此默认值为 0。
-- 严格模型回归 **100/100**、holdout **29/30**、冻结口语 **7/13** 都是当前模型、网络和固定数据条件下的日期快照，不是开放域生产准确率，也不是稳定承诺。
+- 默认安装不包含 BGE、Qdrant 和 Elasticsearch；核心安装只跑本地 IDF。启用这些检索后端请执行 `python -m pip install -r requirements-retrieval.txt`，并保持 `USE_BGE=false` 作为默认值。
+- 默认 SQL 生成只使用确定性业务必需表；检索是证据和可选补充，不是当前五表 Demo 的默认生成增益。旧检索 A/B 在同一冻结题集上未观察到补充表增益，因此默认值为 0。
+- 严格模型回归答案 **100/100**、holdout 答案 **29/30**、冻结口语答案 **11/13** 都是当前模型、网络和固定数据条件下的日期快照，不是开放域生产准确率，也不是稳定承诺。计划正确率分别独立报告为 94/100、28/30、9/13。
 
 ## 文档
 

@@ -624,6 +624,34 @@ def test_call_scoped_model_error_does_not_leak_between_requests(monkeypatch):
 
 
 
+def test_conditional_case_expression_is_allowed():
+    from app.nl2sql.sql_engine import validate_sql
+
+    sql = (
+        "SELECT CASE WHEN o.status = 'paid' THEN 1 ELSE 0 END AS paid_flag "
+        "FROM orders o"
+    )
+    assert validate_sql(sql)
+
+
+def test_subquery_policy_counts_depth_not_sibling_count():
+    from app.nl2sql.sql_engine import SQLValidationError, validate_sql
+
+    siblings = (
+        "SELECT (SELECT COUNT(*) FROM orders o1) + "
+        "(SELECT COUNT(*) FROM orders o2) + "
+        "(SELECT COUNT(*) FROM orders o3) + "
+        "(SELECT COUNT(*) FROM orders o4) AS n FROM orders o"
+    )
+    assert validate_sql(siblings)
+    nested = (
+        "SELECT (SELECT (SELECT (SELECT (SELECT COUNT(*) FROM orders) "
+        "FROM orders) FROM orders) FROM orders) FROM orders"
+    )
+    with pytest.raises(SQLValidationError, match="子查询嵌套深度"):
+        validate_sql(nested)
+
+
 def test_window_ranking_function_is_allowed():
     from app.nl2sql.sql_engine import validate_sql
     sql = (

@@ -722,7 +722,7 @@ def run_data_scheduler(_: None = Depends(_require_admin_token)) -> dict:
 
 
 @app.get("/api/evaluation/datasets")
-def evaluation_datasets() -> dict:
+def evaluation_datasets(_: None = Depends(_require_admin_token)) -> dict:
     return {"datasets": list_datasets()}
 
 
@@ -735,7 +735,7 @@ def create_evaluation_dataset(payload: DatasetCreateRequest, _: None = Depends(_
 
 
 @app.get("/api/evaluation/experiments")
-def evaluation_experiments() -> dict:
+def evaluation_experiments(_: None = Depends(_require_admin_token)) -> dict:
     return {"experiments": list_experiments()}
 
 
@@ -750,7 +750,9 @@ def create_evaluation_experiment(payload: ExperimentCreateRequest, _: None = Dep
 
 
 @app.get("/api/evaluation/feedback")
-def evaluation_feedback(status: str | None = None) -> dict:
+def evaluation_feedback(
+    status: str | None = None, _: None = Depends(_require_admin_token)
+) -> dict:
     return {"feedback": list_feedback(status)}
 
 
@@ -772,7 +774,9 @@ def create_regression_candidates(task_id: str, _: None = Depends(_require_admin_
 
 
 @app.get("/api/evaluation/regression-candidates")
-def regression_candidates(status: str | None = None) -> dict:
+def regression_candidates(
+    status: str | None = None, _: None = Depends(_require_admin_token)
+) -> dict:
     return {"candidates": list_regression_candidates(status)}
 
 
@@ -837,7 +841,7 @@ def evaluation(_: None = Depends(_require_admin_token)) -> dict:
 
 
 @app.get("/api/evaluation/tasks")
-def evaluation_tasks(limit: int = 20) -> dict:
+def evaluation_tasks(limit: int = 20, _: None = Depends(_require_admin_token)) -> dict:
     return list_evaluation_tasks(limit)
 
 
@@ -866,7 +870,7 @@ def start_evaluation_task(payload: EvaluationTaskCreateRequest, background_tasks
 
 
 @app.get("/api/evaluation/tasks/{task_id}")
-def evaluation_task_detail(task_id: str) -> dict:
+def evaluation_task_detail(task_id: str, _: None = Depends(_require_admin_token)) -> dict:
     task = get_evaluation_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="评测任务不存在")
@@ -874,7 +878,9 @@ def evaluation_task_detail(task_id: str) -> dict:
 
 
 @app.get("/api/evaluation/compare")
-def evaluation_compare(baseline: str, candidate: str) -> dict:
+def evaluation_compare(
+    baseline: str, candidate: str, _: None = Depends(_require_admin_token)
+) -> dict:
     try:
         return compare_evaluation_tasks(baseline, candidate)
     except KeyError as exc:

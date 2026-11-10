@@ -75,6 +75,12 @@ def _summary_from_report(report: dict[str, Any]) -> dict[str, Any]:
         "total": int(report.get("total") or 0),
         "passed": int(report.get("passed") or 0),
         "hit_rate": float(report.get("hit_rate") or 0),
+        "answer_correct": int(report.get("answer_correct", report.get("passed", 0)) or 0),
+        "answer_correct_rate": float(
+            report.get("answer_correct_rate", report.get("hit_rate", 0)) or 0
+        ),
+        "plan_correct": int(report.get("plan_correct", 0) or 0),
+        "plan_correct_rate": float(report.get("plan_correct_rate", 0) or 0),
         "execution_rate": float(report.get("execution_rate") or 0),
         "model_rate": float(report.get("model_rate") or 0),
         "avg_elapsed_ms": float(report.get("avg_elapsed_ms") or 0),
@@ -103,8 +109,9 @@ def _insert_task(
             id, label, status, source, created_at, started_at, finished_at,
             workers, progress_total, progress_completed, suite_version,
             model_name, provider, total, passed, hit_rate, execution_rate,
-            model_rate, avg_elapsed_ms, available, report_json, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            model_rate, avg_elapsed_ms, available, report_json, error,
+            answer_correct, answer_correct_rate, plan_correct, plan_correct_rate
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             task_id,
@@ -129,6 +136,10 @@ def _insert_task(
             1 if summary["available"] else 0,
             json.dumps(_sanitize(report), ensure_ascii=False) if report else None,
             error,
+            summary["answer_correct"],
+            summary["answer_correct_rate"],
+            summary["plan_correct"],
+            summary["plan_correct_rate"],
         ),
     )
 
@@ -216,7 +227,11 @@ def init_task_store() -> None:
                 avg_elapsed_ms REAL NOT NULL DEFAULT 0,
                 available INTEGER NOT NULL DEFAULT 0,
                 report_json TEXT,
-                error TEXT NOT NULL DEFAULT ''
+                error TEXT NOT NULL DEFAULT '',
+                answer_correct INTEGER NOT NULL DEFAULT 0,
+                answer_correct_rate REAL NOT NULL DEFAULT 0,
+                plan_correct INTEGER NOT NULL DEFAULT 0,
+                plan_correct_rate REAL NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS evaluation_meta (
                 key TEXT PRIMARY KEY,
@@ -282,6 +297,10 @@ def init_task_store() -> None:
         conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN retry_of TEXT") if not _has_column(conn, 'evaluation_tasks', 'retry_of') else None
         conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN task_kind TEXT NOT NULL DEFAULT 'evaluation'") if not _has_column(conn, 'evaluation_tasks', 'task_kind') else None
         conn.execute("ALTER TABLE evaluation_datasets ADD COLUMN case_snapshot_json TEXT NOT NULL DEFAULT '[]'") if not _has_column(conn, 'evaluation_datasets', 'case_snapshot_json') else None
+        conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN answer_correct INTEGER NOT NULL DEFAULT 0") if not _has_column(conn, 'evaluation_tasks', 'answer_correct') else None
+        conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN answer_correct_rate REAL NOT NULL DEFAULT 0") if not _has_column(conn, 'evaluation_tasks', 'answer_correct_rate') else None
+        conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN plan_correct INTEGER NOT NULL DEFAULT 0") if not _has_column(conn, 'evaluation_tasks', 'plan_correct') else None
+        conn.execute("ALTER TABLE evaluation_tasks ADD COLUMN plan_correct_rate REAL NOT NULL DEFAULT 0") if not _has_column(conn, 'evaluation_tasks', 'plan_correct_rate') else None
         _seed_archived_reports(conn)
         _seed_datasets(conn)
 
@@ -410,6 +429,10 @@ def _row_to_task(row: sqlite3.Row, *, include_report: bool = False) -> dict[str,
         "total": row["total"],
         "passed": row["passed"],
         "hit_rate": row["hit_rate"],
+        "answer_correct": row["answer_correct"],
+        "answer_correct_rate": row["answer_correct_rate"],
+        "plan_correct": row["plan_correct"],
+        "plan_correct_rate": row["plan_correct_rate"],
         "execution_rate": row["execution_rate"],
         "model_rate": row["model_rate"],
         "avg_elapsed_ms": row["avg_elapsed_ms"],
@@ -839,7 +862,9 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
             )
         source_root = ROOT / "app"
         source_hash = hashlib.sha256()
-        for path in sorted(source_root.rglob("*.py")):
+        for path in sorted(
+            item for item in source_root.rglob("*") if item.suffix in {".py", ".yaml"}
+        ):
             source_hash.update(path.relative_to(source_root).as_posix().encode())
             source_hash.update(path.read_bytes())
         manifest = json.dumps(
@@ -864,7 +889,9 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
                     status = 'completed', finished_at = ?, progress_completed = progress_total,
                     suite_version = ?, model_name = ?, provider = ?, total = ?, passed = ?,
                     hit_rate = ?, execution_rate = ?, model_rate = ?, avg_elapsed_ms = ?,
-                    available = ?, report_json = ?, error = ''
+                    available = ?, report_json = ?, error = '',
+                    answer_correct = ?, answer_correct_rate = ?,
+                    plan_correct = ?, plan_correct_rate = ?
                 WHERE id = ?
                 """,
                 (
@@ -872,7 +899,10 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
                     summary["provider"], summary["total"], summary["passed"],
                     summary["hit_rate"], summary["execution_rate"], summary["model_rate"],
                     summary["avg_elapsed_ms"], 1 if summary["available"] else 0,
-                    json.dumps(report, ensure_ascii=False), task_id,
+                    json.dumps(report, ensure_ascii=False),
+                    summary["answer_correct"], summary["answer_correct_rate"],
+                    summary["plan_correct"], summary["plan_correct_rate"],
+                    task_id,
                 ),
             )
         return get_evaluation_task(task_id) or task
@@ -934,15 +964,27 @@ def compare_evaluation_tasks(baseline_id: str, candidate_id: str) -> dict[str, A
     return {
         "baseline": {key: baseline.get(key) for key in (
             "id", "label", "created_at", "model_name", "total", "passed", "hit_rate",
+            "answer_correct", "answer_correct_rate", "plan_correct", "plan_correct_rate",
             "execution_rate", "model_rate", "avg_elapsed_ms",
         )},
         "candidate": {key: candidate.get(key) for key in (
             "id", "label", "created_at", "model_name", "total", "passed", "hit_rate",
+            "answer_correct", "answer_correct_rate", "plan_correct", "plan_correct_rate",
             "execution_rate", "model_rate", "avg_elapsed_ms",
         )},
         "delta": {
             "passed": candidate["passed"] - baseline["passed"],
             "hit_rate": round(candidate["hit_rate"] - baseline["hit_rate"], 1),
+            "answer_correct": (candidate.get("answer_correct") or 0) - (baseline.get("answer_correct") or 0),
+            "answer_correct_rate": round(
+                (candidate.get("answer_correct_rate") or 0)
+                - (baseline.get("answer_correct_rate") or 0), 1
+            ),
+            "plan_correct": (candidate.get("plan_correct") or 0) - (baseline.get("plan_correct") or 0),
+            "plan_correct_rate": round(
+                (candidate.get("plan_correct_rate") or 0)
+                - (baseline.get("plan_correct_rate") or 0), 1
+            ),
             "execution_rate": round(candidate["execution_rate"] - baseline["execution_rate"], 1),
             "model_rate": round(candidate["model_rate"] - baseline["model_rate"], 1),
             "avg_elapsed_ms": round(candidate["avg_elapsed_ms"] - baseline["avg_elapsed_ms"], 1),

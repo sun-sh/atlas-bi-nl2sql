@@ -22,6 +22,9 @@ ALLOWED_FUNCTIONS = {
     "sum", "avg", "count", "min", "max", "round", "coalesce", "ifnull",
     "cast", "substr", "strftime", "date", "datetime", "lower", "upper",
     "abs", "nullif",
+    # CASE is a SQL expression, not a callable, but sqlglot exposes it as a
+    # function node. Blocking it rejects legitimate conditional aggregation.
+    "case",
     # Window functions are read-only ranking primitives and are useful for
     # top-N questions; they still pass the same SELECT/AST policy.
     "row_number", "rank", "dense_rank", "lag", "lead", "ntile",
@@ -281,7 +284,15 @@ def validate_sql(sql: str, *, dialect: str = "sqlite") -> str:
     if any(isinstance(item, exp.Star) or item.name == "*" for item in statement.expressions):
         raise SQLValidationError("禁止 SELECT *，请显式列出字段")
     for func in statement.find_all(exp.Func):
-        if isinstance(func, (exp.And, exp.Or, exp.Not, exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.Like, exp.In, exp.Between, exp.Is)):
+        # sqlglot represents boolean operators and CASE/IF branches as Func
+        # subclasses. They are expression syntax, not callable allowlist entries:
+        # treating CASE's nested IF as an unknown function made every legitimate
+        # conditional aggregation fail validation.
+        if isinstance(func, (
+            exp.And, exp.Or, exp.Not, exp.EQ, exp.NEQ, exp.GT, exp.GTE,
+            exp.LT, exp.LTE, exp.Like, exp.In, exp.Between, exp.Is,
+            exp.Case, exp.If,
+        )):
             continue
         name = (func.sql_name() or "").lower()
         if isinstance(func, exp.Anonymous):

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.nl2sql.semantic import DATASET_RANGE as SEMANTIC_DATASET_RANGE
+
 HOLDOUT_SUITE_VERSION = "strict-model-v3-holdout-30"
-HOLDOUT_DATASET_RANGE = "2025-10-01 至 2026-02-28"
+HOLDOUT_DATASET_RANGE = SEMANTIC_DATASET_RANGE
 
 PERIODS = {
     "jan": ("上个月", "2026-01-01", "2026-01-31"),
@@ -22,6 +24,7 @@ def _case(
     dimension: str = "",
     order: str = "",
     setup: str = "",
+    expected_time_range: str = "",
 ) -> dict[str, Any]:
     return {
         "id": case_id,
@@ -32,6 +35,7 @@ def _case(
         "dimension": dimension,
         "order": order,
         "setup": setup,
+        "expected_time_range": expected_time_range,
     }
 
 
@@ -192,7 +196,8 @@ def _holdout_cases() -> tuple[dict[str, Any], ...]:
               setup="holdout-sales-jan-east-miniprogram"),
         _case("holdout-followup-roi-jan", "那上个月呢？", "marketing_efficiency",
               _roi_sql(jan_start, jan_end), "ROI", "channel", "desc",
-              setup="holdout-roi-feb-all-channel"),
+              setup="holdout-roi-feb-all-channel",
+              expected_time_range="2026-01-01 至 2026-01-31"),
         _case("holdout-sales-last30-east-web", "近30天华东地区Web渠道已支付订单销售额是多少？", "sales_overview",
               _sales_sql(last30_start, last30_end, "o.region = '华东' AND o.channel = 'Web'")),
     )

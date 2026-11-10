@@ -9,6 +9,8 @@ Atlas BI has three runnable control planes plus bounded quality guardrails:
 3. **Evaluation platform** - versioned datasets, experiments, a SQLite task queue, isolated model processes, run comparison and bad-case feedback.
 4. **Quality guardrails** - independent acceptance SQL, strict model mode, deterministic tests and CI gates.
 
+The business semantic contract lives in `app/semantic.yaml`. It is the single runtime source for table/column metadata, keys and grain, relationships, enums and aliases, time windows, intent terms, required tables, dimensions and metric expressions/filters, including the overview dashboard formulas. `app/nl2sql/semantic.py` renders that YAML into the SQLite seed DDL, schema prompts, rule SQL, result-digest aliases, overview metrics and evaluation constants. Python modules may hold seed rows, SQL assembly and orchestration, but must not maintain a second table/metric/enum catalog.
+
 Session memory is deliberately bounded: SQLite-backed short-term state, at most 20 turns per session, expiring after 7 days. It stores structured query context, not a cross-session user profile.
 
 All rule-generated, model-generated and repaired SQL passes through the same validator before execution. Result narration runs only after a trusted SQL result exists: deterministic digest statistics constrain the prompt, the final text is validated against digest values, ranking and trend direction, and a validation, model or streaming failure falls back to the same deterministic summary. The model may summarize trusted rows, but it never rewrites SQL, rows or evidence.
@@ -44,9 +46,9 @@ flowchart TB
 
     subgraph Retrieval
         Fusion[Weighted Fusion]
-        Semantic[Qdrant and BGE]
-        Lexical[BM25 or IDF]
-        Catalog[Schema Catalog]
+        Semantic[Optional Qdrant and BGE]
+        Lexical[BM25 or local IDF]
+        Catalog[Semantic Catalog]
     end
 
     subgraph Control
@@ -81,6 +83,7 @@ flowchart TB
     Fusion --> Semantic
     Fusion --> Lexical
     Fusion --> Catalog
+    Catalog --> Planner
     Graph --> Planner
     Planner --> Generator
     Generator --> Gateway
@@ -90,6 +93,10 @@ flowchart TB
     Graph --> Repair
     Repair --> Generator
     Graph --> Health
+    SemanticYaml[app/semantic.yaml] --> Catalog
+    SemanticYaml --> Planner
+    SemanticYaml --> Generator
+    SemanticYaml --> Fixtures
     Fixtures --> Golden
     Golden --> CI
 ```
@@ -170,13 +177,13 @@ The LangGraph state carries the question, retrieval question, trace ID, timer, s
 
 ## Retrieval strategy
 
+- The default core installation is lightweight: local IDF/token scoring only. BGE, Qdrant and Elasticsearch live in `requirements-retrieval.txt`; `USE_BGE=false` is the default.
 - Query and schema text are tokenized for Chinese bigrams and identifier terms.
-- Semantic retrieval uses `BAAI/bge-small-zh-v1.5` embeddings.
-- Qdrant stores vectors in memory by default; a remote endpoint can be supplied. When a remote collection already exists it is reused and upserted, not deleted on process startup. The default collection/index names are prefixed with `atlas_` and can be overridden through `ATLAS_QDRANT_SCHEMA_COLLECTION` and `ATLAS_ES_SCHEMA_INDEX`.
+- When the optional stack is installed and enabled, semantic retrieval uses `BAAI/bge-small-zh-v1.5` embeddings. Qdrant stores vectors in memory by default; a remote endpoint can be supplied. Existing project-scoped collections/indexes are reused and upserted rather than deleted on startup.
 - Lexical retrieval uses Elasticsearch BM25 when reachable, otherwise local IDF scoring. Elasticsearch scores are scoped to one `search()` call rather than stored on the shared retriever.
-- Final scoring is `0.56 * semantic + 0.44 * lexical`, with evidence preserved in the response.
+- Final scoring, when semantic retrieval is active, is `0.56 * semantic + 0.44 * lexical`, with evidence preserved in the response.
 - Default SQL generation uses the deterministic business-required tables only. Retrieval is still returned as evidence and can be enabled as a discovery aid, but `ATLAS_RETRIEVAL_SUPPLEMENTS=0` keeps it out of the generation prompt. When set to `1`, at most one top-1 table that is not already required can be added; lower-ranked hits never become schema.
-- A frozen colloquial A/B on the five-table demo scored 7/13 both with required tables alone and with one optional retrieval supplement. The two variants had identical per-case hits and no supplemental table entered any answerable plan, so retrieval is not presented as a default generation gain.
+- A frozen colloquial A/B on the five-table demo found no measurable generation gain from one optional retrieval supplement, so retrieval is not presented as a default generation gain.
 - The search-only ablation reports Top-1 accuracy, MRR and full recall@4. On the current five-table labelled set, lexical-only also reaches full recall@4, and one sales question still puts the marketing table ahead of orders, so the evidence is a baseline rather than a claim that fusion dominates every alternative.
 
 ## Active query database
@@ -211,10 +218,19 @@ All operator mutations on data-platform, evaluation and model-probe routes pass 
 | Narrative stream fails after partial text | Reset the client text to the deterministic digest | Final narrative remains complete and persisted |
 | Retrieval adapter unavailable | Degrade to local IDF or no semantic signal | Health endpoint reports active backend |
 
+## Evaluation contracts
+
+The strict evaluator separates two denominators:
+
+- `answer_correct`: independent reference-SQL row comparison plus the grounded model narrative. This is the primary business-answer contract.
+- `plan-correct`: intent, metric and required-table routing, reported independently so a correct answer is not hidden by a stale plan label and a correct plan cannot mask a wrong answer.
+
+CI-style deterministic suites report the same top-level fields as aliases of their primary invariant; they do not claim a model or an independent plan oracle.
+
 ## Extension points
 
-- Add a table by updating the schema catalog, seed fixture and strict regression cases.
+- Add a table or change columns/enums/metric formulas in `app/semantic.yaml`; the SQLite seed DDL, prompts and rule SQL render from it. Add seed rows and strict regression cases separately.
 - Add a model provider through an OpenAI-compatible endpoint; orchestration remains unchanged.
 - Add a production database adapter/pool behind the execution boundary while retaining the AST validator contract; the current opt-in DB-API adapters do not include pooling or tenant filters.
-- Add authorization context to the schema catalog and validator before connecting multiple tenants.
+- Add authorization context to the semantic catalog and validator before connecting multiple tenants.
 - Export trace and attempt records to an observability backend without changing the response model.

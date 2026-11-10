@@ -5,20 +5,22 @@ import re
 from datetime import date, timedelta
 
 from app.nl2sql.models import QueryPlan, SchemaHit
-
-
-DATASET_REFERENCE_DATE = date(2026, 2, 28)
-REGION_TERMS = {"华东": "华东", "华南": "华南", "华北": "华北", "西南": "西南"}
-CHANNEL_TERMS = {"app": "App", "小程序": "MiniProgram", "miniprogram": "MiniProgram", "网页": "Web", "web": "Web", "抖音": "Douyin", "douyin": "Douyin"}
-CATEGORY_TERMS = ("运动鞋服", "食品饮料", "数码家电", "美妆个护")
-MEMBER_TERMS = ("普通", "银卡", "金卡")
-FOLLOW_UP_TERMS = ("那", "换成", "改成", "再看", "继续", "呢", "这个", "这些", "同样", "那个", "它")
-INTENT_TERMS = {
-    "refund_analysis": ("退款率", "售后", "退货", "退款", "退的钱"),
-    "marketing_efficiency": ("roi", "投产比", "投放", "广告", "获客成本", "花费", "值不值"),
-    "category_analysis": ("品类", "类目", "商品", "销量", "卖得最多", "卖得多", "件数"),
-    "sales_overview": ("销售额", "销售", "趋势", "每天", "按日", "订单", "渠道", "地区", "最赚钱", "收入", "每单平均", "客单价"),
-}
+from app.nl2sql.semantic import (
+    CATEGORIES,
+    CATEGORY_TERMS,
+    CHANNEL_TERMS,
+    DATASET_RANGE,
+    DATASET_REFERENCE_DATE,
+    DIMENSIONS,
+    ENUM_ALIAS_DISPLAY,
+    FOLLOW_UP_TERMS,
+    INTENT_TERMS,
+    MEMBER_TERMS,
+    REGION_TERMS,
+    metric_from_text,
+    REQUIRED_TABLES,
+    TIME_WINDOWS,
+)
 RETRIEVAL_SUPPLEMENT_LIMIT = 1
 
 
@@ -80,35 +82,36 @@ def _time_filter(
     reference_date: date | str | None = None,
 ) -> tuple[str, str, str]:
     q = question.lower()
-    if not any(
-        term in q
-        for term in (
-            "上个月", "上月", "本月", "这个月",
-            "近30天", "最近30天", "过去30天", "最近一个月", "过去一个月",
-            "近90天", "最近90天", "过去90天", "近三个月", "最近三个月", "过去三个月",
-        )
-    ):
+    all_time_terms = tuple(
+        str(alias)
+        for window in TIME_WINDOWS.values()
+        for alias in window.get("aliases") or ()
+    )
+    if not any(term in q for term in all_time_terms):
         return "", "", ""
     today = _reference_date(reference_date)
     month_start = date(today.year, today.month, 1)
-    if "上个月" in q or "上月" in q:
-        start, end = _last_month_sql(today)
-        return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", "上个月"
-    if "本月" in q or "这个月" in q:
-        start = month_start.isoformat()
-        end = today.isoformat()
-        return f"o.order_date >= '{start}' AND o.order_date <= '{end}'", f"{start} 至 {end}", "本月"
-    if "近30天" in q or "最近30天" in q:
-        start = (today - timedelta(days=29)).isoformat()
-        end = today.isoformat()
-        return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", "近30天"
-    if any(
-        term in q
-        for term in ("近90天", "最近90天", "过去90天", "近三个月", "最近三个月", "过去三个月")
-    ):
-        start = (today - timedelta(days=89)).isoformat()
-        end = today.isoformat()
-        return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", "近90天"
+    for window in TIME_WINDOWS.values():
+        aliases = tuple(str(alias) for alias in window.get("aliases") or ())
+        if not any(alias in q for alias in aliases):
+            continue
+        label = str(window.get("label") or "")
+        kind = str(window.get("kind") or "")
+        if kind == "previous_month":
+            start, end = _last_month_sql(today)
+            return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", label
+        if kind == "current_month":
+            end = today.isoformat()
+            return (
+                f"o.order_date >= '{month_start.isoformat()}' AND o.order_date <= '{end}'",
+                f"{month_start.isoformat()} 至 {end}",
+                label,
+            )
+        if kind == "last_days":
+            days = max(1, int(window.get("days") or 1))
+            start = (today - timedelta(days=days - 1)).isoformat()
+            end = today.isoformat()
+            return f"o.order_date BETWEEN '{start}' AND '{end}'", f"{start} 至 {end}", label
     return "", "", ""
 
 
@@ -165,17 +168,12 @@ def make_plan(
     is_follow_up = _follow_up(question, context)
 
     detected_intent = _detect_intent(q)
+    # A bare time follow-up ("那上个月呢？") has no business keyword of its own.
+    # Resolve its metric before routing the intent; otherwise the generic sales
+    # terms in a prior ROI turn can drag the follow-up into sales_overview.
+    detected_metric = metric_from_text(q)
     retrieved_tables = [h.table for h in hits]
-    if detected_intent == "refund_analysis":
-        required_tables = ["orders", "refunds"]
-    elif detected_intent == "marketing_efficiency":
-        required_tables = ["orders", "marketing_spend"]
-    elif detected_intent == "category_analysis":
-        required_tables = ["orders", "order_items"]
-    elif detected_intent == "sales_overview":
-        required_tables = ["orders"]
-    else:
-        required_tables = []
+    required_tables = list(REQUIRED_TABLES.get(detected_intent or "", ()))
 
     retrieval_supplements: list[str] = []
     if required_tables:
@@ -235,29 +233,14 @@ def make_plan(
         inherited.append("品类：" + str(context.get("category_label") or "继承上一轮"))
 
     metrics: list[str] = []
-    refund_metric = False
-    if "退款率" in q or ("售后" in q and any(term in q for term in ("占比", "比例", "多大"))):
-        metrics.append("退款率")
-        refund_metric = True
-    elif "退款金额" in q or "退的钱" in q:
-        metrics.append("退款金额")
-        refund_metric = True
+    if detected_metric is not None:
+        # The semantic name is the public plan/runtime contract. Do not invent a
+        # legacy alias that is absent from YAML.
+        metrics.append(str(detected_metric["name"]))
     elif "退款" in q and any(term in q for term in ("原因", "分布")):
         metrics.append("退款金额")
-        refund_metric = True
     elif "退款" in q and any(term in q for term in ("单数", "申请数", "多少单")):
         metrics.append("退款单数")
-        refund_metric = True
-    if (
-        "roi" in q or "投产比" in q
-        or ("广告" in q and "值不值" in q)
-        or (("投放" in q or "回报" in q) and any(term in q for term in ("划算", "回报", "最高", "最好")))
-    ):
-        metrics.append("ROI")
-    elif "客单价" in q or "每单平均" in q or "平均花" in q or "花多少钱" in q:
-        metrics.append("客单价")
-    elif not refund_metric and ("销量" in q or "件数" in q or "多少件" in q or "卖得最多" in q or "卖得多" in q):
-        metrics.append("销量")
     previous_metrics = list(context.get("metrics") or [])
     if is_follow_up:
         previous_intent = str(context.get("intent") or "")
@@ -268,9 +251,19 @@ def make_plan(
             inherited.append("指标：" + " / ".join(map(str, previous_metrics)))
     if not metrics:
         metrics.append("销售额")
+    if is_follow_up and context.get("metrics"):
+        previous_metric = str((context.get("metrics") or [])[0])
+        previous_intent = str(context.get("intent") or "")
+        if detected_metric is None and previous_intent in {
+            "marketing_efficiency", "refund_analysis", "category_analysis"
+        }:
+            intent = previous_intent
+            tables = list(context.get("tables") or REQUIRED_TABLES.get(intent, ()))
+            metrics = [previous_metric]
 
     if not time_range:
-        time_range = str(context.get("time_range") or "全部数据（2025-10-01 至 2026-02-28）") if is_follow_up else "全部数据（2025-10-01 至 2026-02-28）"
+        default_time_range = f"全部数据（{DATASET_RANGE}）"
+        time_range = str(context.get("time_range") or default_time_range) if is_follow_up else default_time_range
 
     region_label = next((v for k, v in REGION_TERMS.items() if k in q), str(context.get("region_label") or "") if is_follow_up and not asks_channel_dimension else "")
     channel_label = next((v for k, v in CHANNEL_TERMS.items() if k in q), str(context.get("channel_label") or "") if is_follow_up and not asks_region_dimension and not asks_channel_dimension else "")

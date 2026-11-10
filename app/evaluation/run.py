@@ -85,7 +85,11 @@ def main(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     source_root = Path(__file__).resolve().parents[1]
     source_hash = hashlib.sha256()
-    for path in sorted(source_root.rglob("*.py")):
+    # Include the semantic source as well as executable code. Otherwise a
+    # business-definition change could reuse the same provenance hash.
+    for path in sorted(
+        item for item in source_root.rglob("*") if item.suffix in {".py", ".yaml"}
+    ):
         source_hash.update(path.relative_to(source_root).as_posix().encode())
         source_hash.update(path.read_bytes())
     is_holdout = args.suite == "holdout"
@@ -149,6 +153,28 @@ def main(argv: list[str] | None = None) -> int:
         "source_sha256": source_hash.hexdigest(),
         "retrieval_supplements": retrieval_supplements,
     }
+    # Answer-first reporting is the common top-level contract for every suite
+    # that already has an independent result oracle. Suites without one expose
+    # the same fields as aliases of their primary invariant rather than
+    # pretending to have a separate plan oracle.
+    total = int(report.get("total") or 0)
+    answer_correct = int(report.get("answer_correct", report.get("passed", 0)) or 0)
+    plan_correct = int(report.get("plan_correct", 0) or 0)
+    report.setdefault("answer_correct", answer_correct)
+    report.setdefault(
+        "answer_correct_rate",
+        round(answer_correct * 100 / total, 1) if total else 0.0,
+    )
+    report.setdefault(
+        "plan_correct",
+        int(report.get("plan_correct", answer_correct) or 0),
+    )
+    report.setdefault(
+        "plan_correct_rate",
+        round(int(report.get("plan_correct", answer_correct) or 0) * 100 / total, 1)
+        if total
+        else 0.0,
+    )
     report["evaluation_contract"] = (
         "scope-guard-v1"
         if is_scope

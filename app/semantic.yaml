@@ -1,0 +1,315 @@
+version: "commerce-demo-v1"
+dataset:
+  name: "commerce-demo"
+  start: "2025-10-01"
+  end: "2026-02-28"
+  reference_date: "2026-02-28"
+
+tables:
+  - name: orders
+    label: "订单明细"
+    description: "电商平台订单主表，一行代表一个订单，包含下单时间、订单状态、渠道、地区、支付金额和优惠金额。"
+    grain: "order_id"
+    key: [order_id]
+    date_column: order_date
+    aliases: ["订单", "销售", "销售额", "GMV", "成交", "营收", "收入", "下单", "渠道", "地区", "华东", "华南", "华北", "西南"]
+    columns:
+      - {name: order_id, type: TEXT, description: "订单唯一编号"}
+      - {name: order_date, type: TEXT, description: "下单日期，格式 YYYY-MM-DD"}
+      - {name: status, type: TEXT, description: "订单状态：paid / refunded / cancelled"}
+      - {name: channel, type: TEXT, description: "销售渠道：App / MiniProgram / Web / Douyin"}
+      - {name: region, type: TEXT, description: "收货地区：华东 / 华南 / 华北 / 西南"}
+      - {name: city, type: TEXT, description: "收货城市"}
+      - {name: category, type: TEXT, description: "商品一级类目"}
+      - {name: product_id, type: TEXT, description: "商品编号"}
+      - {name: quantity, type: INTEGER, description: "购买件数"}
+      - {name: paid_amount, type: REAL, description: "用户实付金额，单位元，已扣除优惠"}
+      - {name: discount_amount, type: REAL, description: "优惠金额，单位元"}
+      - {name: customer_id, type: TEXT, description: "脱敏客户编号", sensitivity: restricted}
+  - name: order_items
+    label: "订单商品行"
+    description: "订单商品明细，一行代表一个商品行，用于品类、SKU 和件数分析。"
+    grain: "order_id + line_no"
+    key: [order_id, line_no]
+    date_parent: [orders, order_id]
+    aliases: ["商品", "品类", "SKU", "件数", "销量", "客单价", "连带率"]
+    columns:
+      - {name: order_id, type: TEXT, description: "订单编号"}
+      - {name: line_no, type: INTEGER, description: "订单内商品行号"}
+      - {name: product_id, type: TEXT, description: "商品编号"}
+      - {name: product_name, type: TEXT, description: "商品名称"}
+      - {name: category, type: TEXT, description: "商品一级类目"}
+      - {name: quantity, type: INTEGER, description: "购买件数"}
+      - {name: unit_price, type: REAL, description: "商品单价，单位元"}
+      - {name: cost_price, type: REAL, description: "商品成本价，单位元", sensitivity: restricted}
+  - name: refunds
+    label: "退款申请"
+    description: "退款申请与完成记录，一行代表一次退款申请，用于退款率、退款原因和售后分析。"
+    grain: "refund_id"
+    key: [refund_id]
+    date_column: request_date
+    aliases: ["退款", "退货", "售后", "退款率", "退款原因", "质量问题", "物流慢"]
+    columns:
+      - {name: refund_id, type: TEXT, description: "退款编号"}
+      - {name: order_id, type: TEXT, description: "原订单编号"}
+      - {name: request_date, type: TEXT, description: "退款申请日期"}
+      - {name: refund_amount, type: REAL, description: "退款金额，单位元"}
+      - {name: reason, type: TEXT, description: "退款原因"}
+      - {name: status, type: TEXT, description: "退款状态：approved / rejected / processing"}
+  - name: marketing_spend
+    label: "渠道投放费用"
+    description: "按日期和渠道汇总的广告投放花费、曝光、点击与归因订单，用于 ROI 和获客成本分析。"
+    grain: "spend_date + channel"
+    key: [spend_date, channel]
+    date_column: spend_date
+    aliases: ["投放", "广告", "花费", "ROI", "投产比", "曝光", "点击", "获客成本", "渠道"]
+    columns:
+      - {name: spend_date, type: TEXT, description: "投放日期"}
+      - {name: channel, type: TEXT, description: "投放渠道"}
+      - {name: campaign, type: TEXT, description: "投放计划名称"}
+      - {name: spend, type: REAL, description: "当日投放花费，单位元"}
+      - {name: impressions, type: INTEGER, description: "曝光次数"}
+      - {name: clicks, type: INTEGER, description: "点击次数"}
+      - {name: attributed_orders, type: INTEGER, description: "归因订单数"}
+  - name: customers
+    label: "客户画像"
+    description: "脱敏客户维度表，包含注册日期、会员等级、城市和首单渠道，用于分群与复购分析。"
+    grain: "customer_id"
+    key: [customer_id]
+    date_column: register_date
+    aliases: ["客户", "用户", "会员", "新客", "老客", "复购", "客群"]
+    columns:
+      - {name: customer_id, type: TEXT, description: "脱敏客户编号", sensitivity: restricted}
+      - {name: register_date, type: TEXT, description: "注册日期"}
+      - {name: member_level, type: TEXT, description: "会员等级：普通 / 银卡 / 金卡"}
+      - {name: city, type: TEXT, description: "所在城市"}
+      - {name: first_channel, type: TEXT, description: "首单渠道"}
+
+relationships:
+  - {source: order_items, source_column: order_id, target: orders, target_column: order_id, description: "商品行必须归属有效订单"}
+  - {source: refunds, source_column: order_id, target: orders, target_column: order_id, description: "退款申请必须关联有效订单"}
+  - {source: orders, source_column: customer_id, target: customers, target_column: customer_id, description: "订单必须关联有效客户"}
+
+enums:
+  orders.status:
+    values: [paid, refunded, cancelled]
+    prompt: "paid / refunded / cancelled"
+    aliases:
+      paid: [paid, 已支付]
+      refunded: [refunded, 已退款]
+      cancelled: [cancelled, 已取消]
+  orders.channel:
+    values: [App, MiniProgram, Web, Douyin]
+    prompt: "App / MiniProgram / Web / Douyin"
+    aliases:
+      App: [App, app]
+      MiniProgram: [MiniProgram, miniprogram, 小程序]
+      Web: [Web, web, 网页]
+      Douyin: [Douyin, douyin, 抖音]
+  orders.region:
+    values: [华东, 华南, 华北, 西南]
+    prompt: "华东 / 华南 / 华北 / 西南"
+    aliases:
+      华东: [华东]
+      华南: [华南]
+      华北: [华北]
+      西南: [西南]
+    cities:
+      华东: [上海, 杭州, 南京, 苏州]
+      华南: [广州, 深圳, 厦门]
+      华北: [北京, 天津, 青岛]
+      西南: [成都, 重庆, 昆明]
+  orders.category:
+    values: [运动鞋服, 食品饮料, 数码家电, 美妆个护]
+    prompt: "运动鞋服 / 食品饮料 / 数码家电 / 美妆个护"
+    aliases:
+      运动鞋服: [运动鞋服, 鞋服]
+      食品饮料: [食品饮料, 食品]
+      数码家电: [数码家电, 家电]
+      美妆个护: [美妆个护, 美妆]
+  refunds.reason:
+    values: [尺码不合适, 质量问题, 物流太慢, 不喜欢, 商品与描述不符]
+    prompt: "尺码不合适 / 质量问题 / 物流太慢 / 不喜欢 / 商品与描述不符"
+    aliases: {}
+  refunds.status:
+    values: [approved, rejected, processing]
+    prompt: "approved / rejected / processing"
+    aliases: {}
+  customers.member_level:
+    values: [普通, 银卡, 金卡]
+    prompt: "普通 / 银卡 / 金卡"
+    aliases: {}
+
+time_windows:
+  last_month:
+    label: "上个月"
+    aliases: [上个月, 上月]
+    kind: previous_month
+  current_month:
+    label: "本月"
+    aliases: [本月, 这个月]
+    kind: current_month
+  last_30_days:
+    label: "近30天"
+    aliases: [近30天, 最近30天, 过去30天, 最近一个月, 过去一个月]
+    kind: last_days
+    days: 30
+  last_90_days:
+    label: "近90天"
+    aliases: [近90天, 最近90天, 过去90天, 近三个月, 最近三个月, 过去三个月]
+    kind: last_days
+    days: 90
+
+follow_up_terms: [那, 换成, 改成, 再看, 继续, 呢, 这个, 这些, 同样, 那个, 它]
+
+intents:
+  refund_analysis:
+    terms: [退款率, 售后, 退货, 退款, 退的钱]
+    required_tables: [orders, refunds]
+  marketing_efficiency:
+    terms: [roi, 投产比, 投放, 广告, 获客成本, 花费, 值不值]
+    required_tables: [orders, marketing_spend]
+  category_analysis:
+    terms: [品类, 类目, 商品, 销量, 卖得最多, 卖得多, 件数]
+    required_tables: [orders, order_items]
+  sales_overview:
+    terms: [销售额, 销售, 趋势, 每天, 按日, 订单, 渠道, 地区, 最赚钱, 收入, 每单平均, 客单价]
+    required_tables: [orders]
+
+dimensions:
+  channel: {label: "渠道", aliases: [渠道, 各渠道, 按渠道, 渠道对比, 分渠道, 哪个渠道]}
+  region: {label: "地区", aliases: [地区, 各地区, 按地区, 地区对比, 分地区, 哪个地区, 区域]}
+  category: {label: "品类", aliases: [品类, 类目, 商品品类, 商品类目]}
+  reason: {label: "退款原因", aliases: [退款原因, 原因]}
+  order_date: {label: "日期", aliases: [日期, 每天, 按日, 趋势, order_date, date]}
+
+dashboard_metrics:
+  - name: 客户数
+    expr: "COUNT(DISTINCT {o}.customer_id)"
+    filters: []
+    definition: "已支付订单覆盖的去重客户数"
+    ratio: false
+  - name: 已通过退款单数
+    expr: "COUNT({r}.refund_id)"
+    filters: ["{r}.status = 'approved'"]
+    definition: "审核通过的退款申请数"
+    ratio: false
+  - name: 已通过退款金额
+    expr: "ROUND(SUM({r}.refund_amount), 2)"
+    filters: ["{r}.status = 'approved'"]
+    definition: "审核通过的退款金额"
+    ratio: false
+  - name: 概览退款率
+    expr: "ROUND({refund_count} * 100.0 / NULLIF({order_count}, 0), 2)"
+    filters: []
+    definition: "已通过退款单数 / 已支付订单数 × 100%"
+    ratio: true
+  - name: 综合ROI
+    expr: "ROUND({revenue} / NULLIF({spend}, 0), 2)"
+    filters: []
+    definition: "已支付销售额 / 投放花费"
+    ratio: true
+
+metrics:
+  - name: 销售额
+    output: 销售额
+    aliases: [销售额, 销售, 销售总额, 销售额度, 总销售额, 成交额, GMV, gmv, revenue, total_sales, total_revenue, sales_amount]
+    grain: 订单
+    tables: [orders]
+    expr: "ROUND(SUM({o}.paid_amount), 2)"
+    filters: ["{o}.status = 'paid'"]
+    definition: "SUM(orders.paid_amount)，仅统计 paid 订单"
+    ratio: false
+  - name: 客单价
+    output: 客单价
+    aliases: [客单价, 平均客单价, 每单平均, 平均花, 花多少钱, AOV, aov, avg_order_value]
+    grain: 订单
+    tables: [orders]
+    expr: "ROUND(AVG({o}.paid_amount), 2)"
+    filters: ["{o}.status = 'paid'"]
+    definition: "AVG(orders.paid_amount)，仅统计 paid 订单"
+    ratio: false
+  - name: 退款率
+    output: 退款率
+    aliases: [退款率, 退货率, 售后占比, 售后问题占比, refund_rate, return_rate]
+    grain: 订单 / 品类
+    tables: [orders, refunds]
+    expr: "ROUND(COUNT(DISTINCT {r}.refund_id) * 100.0 / COUNT(DISTINCT {o}.order_id), 2)"
+    filters: []
+    definition: "退款申请数 / 全部订单数 × 100%"
+    ratio: true
+  - name: 退款金额
+    output: 退款金额
+    aliases: [退款金额, 退款总额, 退款的钱, 退的钱, refund_amount, total_refund_amount]
+    grain: 退款申请
+    tables: [refunds, orders]
+    expr: "ROUND(SUM({r}.refund_amount), 2)"
+    filters: []
+    definition: "SUM(refunds.refund_amount)"
+    ratio: false
+  - name: 退款单数
+    output: 退款单数
+    aliases: [退款单数, 退款申请单数, 退款申请数, 退款订单数, 退款数, 多少单, 多少笔, refund_count, refund_orders]
+    grain: 退款申请
+    tables: [refunds, orders]
+    expr: "COUNT({r}.refund_id)"
+    filters: []
+    definition: "退款申请单数"
+    ratio: false
+  - name: ROI
+    output: ROI
+    # Keep the phrase containing “投放花费” under ROI; otherwise the shorter
+    # spend-metric alias wins and a ROI question is planned as ad spend.
+    aliases: [ROI, roi, 投产比, 投资回报率, 投放回报, 投放最划算, 广告值不值, 广告花的钱值不值, 各渠道ROI, 渠道ROI]
+    grain: 渠道
+    tables: [orders, marketing_spend]
+    expr: "ROUND({o}.revenue / NULLIF({m}.spend, 0), 2)"
+    filters: []
+    definition: "已支付销售额 / 投放花费，两表分别聚合后计算"
+    ratio: true
+  - name: 销量
+    output: 销量
+    aliases: [销量, 商品销量, 销售件数, 件数, 多少件, 卖得最多, 卖得多, quantity, units_sold, sales_volume]
+    grain: 商品行
+    tables: [order_items, orders]
+    expr: "SUM({oi}.quantity)"
+    filters: ["{o}.status = 'paid'"]
+    definition: "SUM(order_items.quantity)，仅统计 paid 订单"
+    ratio: false
+  - name: 投放花费
+    output: 投放花费
+    aliases: [投放花费, 花费, 广告花费, spend, ad_spend]
+    grain: 渠道
+    tables: [marketing_spend]
+    expr: "ROUND(SUM({m}.spend), 2)"
+    filters: []
+    definition: "SUM(marketing_spend.spend)"
+    ratio: false
+  - name: 归因订单数
+    output: 归因订单数
+    aliases: [归因订单数, attributed_orders]
+    grain: 渠道
+    tables: [marketing_spend]
+    expr: "SUM({m}.attributed_orders)"
+    filters: []
+    definition: "SUM(marketing_spend.attributed_orders)"
+    ratio: false
+  - name: 归因销售额
+    output: 归因销售额
+    aliases: [归因销售额, attributed_sales, attributed_revenue]
+    grain: 订单
+    tables: [orders]
+    # Used after the orders table has already been aggregated per channel.
+    expr: "ROUND(SUM({o}.revenue), 2)"
+    filters: ["{o}.status = 'paid'"]
+    definition: "已支付订单销售额"
+    ratio: false
+  - name: 订单数
+    output: 订单数
+    aliases: [订单数, 订单量, order_count, orders]
+    grain: 订单
+    tables: [orders]
+    expr: "COUNT(*)"
+    filters: []
+    definition: "订单记录数"
+    ratio: false

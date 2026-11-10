@@ -5,6 +5,16 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
+from app.nl2sql.semantic import (
+    CATEGORIES,
+    CHANNELS,
+    DATASET_END,
+    DATASET_START,
+    MEMBER_LEVELS,
+    REFUND_REASONS,
+    REGION_CITIES,
+    create_tables_sql,
+)
 from app.nl2sql.settings import get_settings
 
 
@@ -23,95 +33,26 @@ PRODUCTS = (
     ("P012", "头皮护理精华", "美妆个护", 169.0, 49.0),
 )
 
-CHANNELS = ("App", "MiniProgram", "Web", "Douyin")
-REGIONS = {
-    "华东": ("上海", "杭州", "南京", "苏州"),
-    "华南": ("广州", "深圳", "厦门"),
-    "华北": ("北京", "天津", "青岛"),
-    "西南": ("成都", "重庆", "昆明"),
-}
-REFUND_REASONS = ("尺码不合适", "质量问题", "物流太慢", "不喜欢", "商品与描述不符")
-MEMBER_LEVELS = ("普通", "银卡", "金卡")
+# Product names/prices remain seed data; business enums come from semantic.yaml.
+_REGION_CITIES = REGION_CITIES
 
 
 def _create_tables(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
-        DROP TABLE IF EXISTS refunds;
-        DROP TABLE IF EXISTS order_items;
-        DROP TABLE IF EXISTS orders;
-        DROP TABLE IF EXISTS marketing_spend;
-        DROP TABLE IF EXISTS customers;
-
-        CREATE TABLE orders (
-            order_id TEXT PRIMARY KEY,
-            order_date TEXT NOT NULL,
-            status TEXT NOT NULL,
-            channel TEXT NOT NULL,
-            region TEXT NOT NULL,
-            city TEXT NOT NULL,
-            category TEXT NOT NULL,
-            product_id TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            paid_amount REAL NOT NULL,
-            discount_amount REAL NOT NULL,
-            customer_id TEXT NOT NULL
-        );
-
-        CREATE TABLE order_items (
-            order_id TEXT NOT NULL,
-            line_no INTEGER NOT NULL,
-            product_id TEXT NOT NULL,
-            product_name TEXT NOT NULL,
-            category TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            unit_price REAL NOT NULL,
-            cost_price REAL NOT NULL,
-            PRIMARY KEY (order_id, line_no)
-        );
-
-        CREATE TABLE refunds (
-            refund_id TEXT PRIMARY KEY,
-            order_id TEXT NOT NULL,
-            request_date TEXT NOT NULL,
-            refund_amount REAL NOT NULL,
-            reason TEXT NOT NULL,
-            status TEXT NOT NULL
-        );
-
-        CREATE TABLE marketing_spend (
-            spend_date TEXT NOT NULL,
-            channel TEXT NOT NULL,
-            campaign TEXT NOT NULL,
-            spend REAL NOT NULL,
-            impressions INTEGER NOT NULL,
-            clicks INTEGER NOT NULL,
-            attributed_orders INTEGER NOT NULL,
-            PRIMARY KEY (spend_date, channel)
-        );
-
-        CREATE TABLE customers (
-            customer_id TEXT PRIMARY KEY,
-            register_date TEXT NOT NULL,
-            member_level TEXT NOT NULL,
-            city TEXT NOT NULL,
-            first_channel TEXT NOT NULL
-        );
-        """
-    )
-
+    # DDL is rendered from semantic.yaml, so the executable fixture and the
+    # columns exposed to the planner/model cannot silently drift apart.
+    conn.executescript(create_tables_sql())
 
 def generate_database(path: Path | None = None, seed: int = 20260214) -> dict[str, int]:
     settings = get_settings()
     db_path = path or settings.db_path
     db_path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.Random(seed)
-    start = date(2025, 10, 1)
-    end = date(2026, 2, 28)
+    start = date.fromisoformat(DATASET_START)
+    end = date.fromisoformat(DATASET_END)
 
     customers = []
     for idx in range(1, 1801):
-        city = rng.choice([city for cities in REGIONS.values() for city in cities])
+        city = rng.choice([city for cities in _REGION_CITIES.values() for city in cities])
         register = start - timedelta(days=rng.randint(0, 420))
         customers.append(
             (
@@ -138,7 +79,7 @@ def generate_database(path: Path | None = None, seed: int = 20260214) -> dict[st
             daily_orders = int(rng.gauss(26 * seasonal, 5))
             for _ in range(max(8, daily_orders)):
                 customer = rng.choice(customers)
-                region = next((r for r, cities in REGIONS.items() if customer[3] in cities), "华东")
+                region = next((r for r, cities in _REGION_CITIES.items() if customer[3] in cities), "华东")
                 channel = rng.choices(CHANNELS, weights=[42, 24, 19, 15], k=1)[0]
                 order_id = f"O{order_no:07d}"
                 order_no += 1
@@ -195,7 +136,7 @@ def generate_database(path: Path | None = None, seed: int = 20260214) -> dict[st
         current = start
         while current <= end:
             for channel in CHANNELS:
-                base = {"App": 1800, "MiniProgram": 1200, "Web": 900, "Douyin": 2600}[channel]
+                base = {"App": 1800, "MiniProgram": 1200, "Web": 900, "Douyin": 2600}.get(channel, 1200)
                 spend = round(base * rng.uniform(0.75, 1.3), 2)
                 impressions = int(spend * rng.uniform(22, 38))
                 clicks = int(impressions * rng.uniform(0.025, 0.06))

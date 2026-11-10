@@ -10,11 +10,17 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from app.nl2sql.model_config import get_model_config, model_config_snapshot
 from app.nl2sql.result_insight import METRIC_ALIASES, digest_from_result, validate_narrative
+from app.nl2sql.semantic import (
+    CATEGORIES as SEMANTIC_CATEGORIES,
+    CHANNEL_TERMS as SEMANTIC_CHANNEL_TERMS,
+    DATASET_RANGE as SEMANTIC_DATASET_RANGE,
+    REGIONS as SEMANTIC_REGIONS,
+)
 from app.nl2sql.sql_engine import execute_sql
 from app.nl2sql.workflow import run_query
 
 
-DATASET_RANGE = "2025-10-01 至 2026-02-28"
+DATASET_RANGE = SEMANTIC_DATASET_RANGE
 MODEL_MODE = "model"
 SUITE_VERSION = "strict-model-v3-100"
 # Evaluation runs the strict model path and never invokes rule SQL fallback.
@@ -145,9 +151,12 @@ PERIODS = {
     "last30": ("近30天", "2026-01-30", "2026-02-28", LAST30),
     "last90": ("近90天", "2025-12-01", "2026-02-28", LAST90),
 }
-REGION_LABELS = ("华东", "华南", "华北", "西南")
-CHANNEL_LABELS = (("App", "App"), ("MiniProgram", "小程序"), ("Web", "Web"), ("Douyin", "抖音"))
-CATEGORY_LABELS = ("运动鞋服", "食品饮料", "数码家电", "美妆个护")
+REGION_LABELS = SEMANTIC_REGIONS
+CHANNEL_LABELS = tuple(
+    (channel, next((alias for alias, value in SEMANTIC_CHANNEL_TERMS.items() if value == channel and alias != channel.lower()), channel))
+    for channel in ("App", "MiniProgram", "Web", "Douyin")
+)
+CATEGORY_LABELS = SEMANTIC_CATEGORIES
 
 
 def _matrix_cases() -> tuple[dict[str, Any], ...]:
@@ -309,23 +318,7 @@ def _matrix_cases() -> tuple[dict[str, Any], ...]:
 
 CASES = BASE_CASES + _matrix_cases()
 
-DIMENSION_ALIASES = {
-    "category": {"category", "品类", "类目", "商品品类"},
-    "channel": {"channel", "渠道", "销售渠道"},
-    "region": {"region", "地区", "区域"},
-    "order_date": {"order_date", "date", "日期", "时间", "下单日期"},
-    "reason": {"reason", "refund_reason", "退款原因"},
-}
-
-METRIC_NAME_ALIASES = {
-    "销售额": {"销售额", "总销售额", "销售总额", "成交额", "sales_amount", "revenue", "total_sales", "total_revenue", "total_amount", "sum_sales"},
-    "客单价": {"客单价", "平均客单价", "avg_order_value", "average_order_value", "aov"},
-    "销量": {"销量", "总销量", "商品销量", "销售件数", "件数", "quantity", "total_quantity", "quantity_sum", "units", "total_units", "units_sold", "sales_volume"},
-    "退款率": {"退款率", "refund_rate", "return_rate"},
-    "ROI": {"roi", "投产比", "投资回报率"},
-    "退款单数": {"退款单数", "退款申请单数", "退款申请数", "退款订单数", "退款数", "refund_count", "refund_orders", "refunds", "total_refunds"},
-    "退款金额": {"退款金额", "退款总额", "refund_amount", "refund_total", "total_refund_amount"},
-}
+from app.nl2sql.semantic import DIMENSION_ALIASES, METRIC_ALIASES as METRIC_NAME_ALIASES
 
 
 def _normalize(value: Any) -> str:
@@ -333,10 +326,15 @@ def _normalize(value: Any) -> str:
 
 
 def _column_value(row: dict[str, Any], column: str) -> Any:
-    aliases = [column, *sorted(DIMENSION_ALIASES.get(column, set())), *sorted(METRIC_NAME_ALIASES.get(column, set()))]
-    aliases.extend(sorted(METRIC_ALIASES.get(column, set())))
-    if column == "ROI":
-        aliases.extend(sorted(METRIC_ALIASES["roi"]))
+    aliases = [
+        column,
+        *sorted(DIMENSION_ALIASES.get(column, set())),
+        *sorted(METRIC_NAME_ALIASES.get(column, set())),
+    ]
+    for canonical, values in METRIC_ALIASES.items():
+        if str(canonical).lower() == str(column).lower():
+            aliases.extend(sorted(str(value) for value in values))
+            break
     names = {_normalize(alias) for alias in aliases}
     matches = [(key, value) for key, value in row.items() if _normalize(key) in names]
     if not matches:
@@ -500,7 +498,41 @@ def _model_grounded(result: Any) -> bool:
     return bool(digest.get("facts")) and digest.get("row_count", 0) > 0
 
 
-def _result_error(result: Any, case: dict[str, Any]) -> str:
+def _plan_error(result: Any, case: dict[str, Any]) -> str:
+    """Score plan metadata independently from answer correctness."""
+    plan = getattr(result, "plan", None)
+    if plan is None:
+        return "没有查询计划"
+    if plan.intent != case.get("intent", ""):
+        return f"意图不符：期望 {case.get('intent', '')}，实际 {plan.intent}"
+    expected_metric = case.get("metric", "")
+    if expected_metric and plan.metrics != [expected_metric]:
+        return f"指标计划不符：期望 {expected_metric}，实际 {plan.metrics}"
+    expected_tables = set(case.get("expected_tables") or ())
+    if expected_tables and not expected_tables.issubset(set(plan.tables)):
+        return f"计划表不足：期望 {sorted(expected_tables)}，实际 {plan.tables}"
+    expected_time_range = str(case.get("expected_time_range") or "")
+    if expected_time_range and plan.time_range != expected_time_range:
+        return (
+            f"计划时间范围不符：期望 {expected_time_range}，"
+            f"实际 {plan.time_range}"
+        )
+    return ""
+
+
+def _result_error(
+    result: Any,
+    case: dict[str, Any],
+    *,
+    require_plan: bool = False,
+) -> str:
+    """Answer-first validation.
+
+    Execution, independent row comparison and grounded narrative are the
+    primary contract. Intent/metric/table planning is reported separately by
+    ``plan-correct`` and only blocks when a caller explicitly asks for a
+    plan-contract suite.
+    """
     if result.mode == "model-failed":
         return "模型未生成 SQL；严格模型评测未使用其他生成器补位"
     if result.mode == "model-repair-failed":
@@ -509,6 +541,10 @@ def _result_error(result: Any, case: dict[str, Any]) -> str:
         return "模型 SQL 未成功执行"
     if result.mode not in MODEL_SQL_MODES:
         return "该用例未由模型完成 SQL 生成"
+    if require_plan:
+        plan_error = _plan_error(result, case)
+        if plan_error:
+            return plan_error
     if getattr(result, "narrative_mode", "") != "model":
         return "模型解读回退为确定性摘要，严格模型评测不通过"
     if not str(getattr(result, "answer", "") or "").strip():
@@ -589,13 +625,22 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
     hit = False
     selected_cases = CASES if cases is None else cases
     setup = next((item for item in selected_cases if item["id"] == case["setup"]), None)
+    plan_error = ""
+    answer_error = ""
     try:
         context = None
         for step in ([setup, case] if setup else [case]):
             result = run_query(step["question"], context=context, allow_rule_fallback=False)
             results.append(result)
             warnings.extend(result.warnings)
-            error = _result_error(result, step)
+            # Setup questions still need a successful answer before the
+            # follow-up can be meaningful, but their plan metadata is diagnostic.
+            answer_error = _result_error(result, step)
+            # Plan correctness is an independent denominator. Even when the
+            # model answer fails, retain whether its plan metadata was correct.
+            if step is case:
+                plan_error = _plan_error(result, step)
+            error = answer_error
             if error:
                 if step is setup:
                     error = "前置问题未通过：" + error
@@ -607,6 +652,7 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
         hit = not error
     except Exception as exc:
         error = str(exc)
+        answer_error = str(exc)
 
     elapsed = (time.perf_counter() - started) * 1000
 
@@ -620,6 +666,10 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
             "expected_metric": case.get("metric", ""),
             "executed": executed,
             "hit": hit,
+            "answer_correct": hit,
+            "plan_correct": not plan_error,
+            "plan_error": plan_error or None,
+            "answer_error": answer_error or None,
             "model_used": model_used,
             "narrative_mode": getattr(result, "narrative_mode", "unavailable") if result else "error",
             "narrative_validation": getattr(result, "narrative_validation", {}) if result else {},
@@ -775,6 +825,10 @@ def run_evaluation(
             "passed": 0,
             "execution_rate": 0.0,
             "hit_rate": 0.0,
+            "answer_correct": 0,
+            "answer_correct_rate": 0.0,
+            "plan_correct": 0,
+            "plan_correct_rate": 0.0,
             "model_rate": 0.0,
             "avg_elapsed_ms": 0.0,
             "intents": len({case["intent"] for case in selected_cases}),
@@ -787,6 +841,8 @@ def run_evaluation(
                     "expected_metric": case.get("metric", ""),
                     "executed": False,
                     "hit": False,
+                    "answer_correct": False,
+                    "plan_correct": False,
                     "model_used": False,
                     "narrative_mode": "unavailable",
                     "elapsed_ms": 0.0,
@@ -826,6 +882,7 @@ def run_evaluation(
         results_by_case = ordered
     executed_count = sum(bool(case['executed']) for case in results_by_case)
     hit_count = sum(bool(case['hit']) for case in results_by_case)
+    plan_count = sum(bool(case.get("plan_correct")) for case in results_by_case)
     total_elapsed = sum(case['elapsed_ms'] for case in results_by_case)
 
     total = len(results_by_case)
@@ -842,6 +899,10 @@ def run_evaluation(
         "passed": hit_count,
         "execution_rate": round(executed_count * 100 / total, 1),
         "hit_rate": round(hit_count * 100 / total, 1),
+        "answer_correct": hit_count,
+        "answer_correct_rate": round(hit_count * 100 / total, 1),
+        "plan_correct": plan_count,
+        "plan_correct_rate": round(plan_count * 100 / total, 1),
         "model_rate": round(model_count * 100 / total, 1),
         "avg_elapsed_ms": round(total_elapsed / total, 1),
         "intents": len({case["intent"] for case in selected_cases}),
@@ -963,6 +1024,10 @@ def run_rule_equivalence_evaluation(on_case: Callable[[dict[str, Any]], None] | 
             "row_count": len(result.rows) if result else 0,
             "sql_mode": result.mode if result else "error",
             "hit": not error,
+            "answer_correct": not error,
+            # This suite is deterministic rule result equivalence; it has no
+            # independent planning oracle beyond the execution contract.
+            "plan_correct": not error,
             "error": error or None,
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
         }
@@ -978,6 +1043,10 @@ def run_rule_equivalence_evaluation(on_case: Callable[[dict[str, Any]], None] | 
         "total": total,
         "passed": passed,
         "hit_rate": round(passed * 100 / total, 1) if total else 0.0,
+        "answer_correct": passed,
+        "answer_correct_rate": round(passed * 100 / total, 1) if total else 0.0,
+        "plan_correct": passed,
+        "plan_correct_rate": round(passed * 100 / total, 1) if total else 0.0,
         "cases": results,
         "raw_case_count": total,
         "family_summary": case_family_summary(results),
@@ -1254,11 +1323,23 @@ def run_colloquial_evaluation(
             if expected_outcome == "answered"
             else bool(result is not None and not result.rows and not result.sql)
         )
+        answer_error = error
+        # Plan correctness is independent from answer/execution correctness.
+        # An answer that fails row acceptance can still have the correct intent,
+        # metric, table route and scope outcome.
+        plan_ok = (
+            table_ok and intent_ok and metric_ok
+            and decision.outcome == expected_outcome
+            and result is not None
+            and result.outcome == expected_outcome
+            if expected_outcome == "answered"
+            else bool(result is not None and result.plan.intent == "")
+        )
+        # Clarification correctness is itself the answer. For answered cases,
+        # independent rows are primary; intent/metric mismatches are diagnostic
+        # and tracked by plan_correct below.
         hit = (
-            not error
-            and table_ok
-            and intent_ok
-            and metric_ok
+            not answer_error
             and metric_column_ok
             and rows_ok
             and (expected_outcome != "answered" or (executed and model_used))
@@ -1289,10 +1370,15 @@ def run_colloquial_evaluation(
             "row_count": len(result.rows) if result is not None else 0,
             "attempts": list(result.attempts) if result is not None else [],
             "hit": hit,
+            "answer_correct": hit,
+            "plan_correct": plan_ok,
+            "plan_error": None if plan_ok else "计划意图、指标或表不符合预期",
+            "answer_error": answer_error or None,
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
             "error": None if hit else (error or "范围、意图、指标、表召回、执行或解读未通过"),
         })
     passed = sum(1 for case in cases if case["hit"])
+    plan_passed = sum(1 for case in cases if case.get("plan_correct"))
     answerable = sum(1 for case in cases if case["expected_outcome"] == "answered")
     total = len(cases)
     return {
@@ -1302,6 +1388,10 @@ def run_colloquial_evaluation(
         "total": total,
         "passed": passed,
         "hit_rate": round(passed * 100 / total, 1) if total else 0.0,
+        "answer_correct": passed,
+        "answer_correct_rate": round(passed * 100 / total, 1) if total else 0.0,
+        "plan_correct": plan_passed,
+        "plan_correct_rate": round(plan_passed * 100 / total, 1) if total else 0.0,
         "execution_rate": round(
             sum(1 for case in cases if case["executed"]) * 100 / total, 1
         ) if total else 0.0,

@@ -55,10 +55,29 @@ def validate_policy(sql: str, parsed=None, *, dialect: str = "sqlite") -> None:
         raise HarnessPolicyError(f"JOIN 数量超过上限 {MAX_JOINS}")
     if any(str(join.args.get("kind") or "").upper() == "CROSS" for join in joins):
         raise HarnessPolicyError("禁止 CROSS JOIN，请使用带关联条件的 JOIN")
-    selects = list(statement.find_all(exp.Select))
-    if len(selects) > MAX_SUBQUERY_DEPTH + 1:
-        raise HarnessPolicyError(f"子查询层级超过上限 {MAX_SUBQUERY_DEPTH}")
-    for select in selects:
+    # Count actual nesting depth, not the total number of SELECT nodes. A CTE
+    # or four sibling scalar subqueries is wide, not deeply nested, and should
+    # not be rejected by a depth policy.
+    def _select_depth(node: Any, parent_depth: int = 0) -> int:
+        depth = parent_depth + 1 if isinstance(node, exp.Select) else parent_depth
+        child_depths = [
+            _select_depth(child, depth)
+            for child in node.args.values()
+            if isinstance(child, (exp.Expression, list))
+            for child in (child if isinstance(child, list) else [child])
+        ]
+        return max([depth, *child_depths])
+
+    deepest = _select_depth(statement)
+    # The configured limit is the number of SELECT levels, including the outer
+    # query. Express the error as nested subquery depth so it remains intuitive
+    # for callers and tests.
+    if deepest > MAX_SUBQUERY_DEPTH + 1:
+        raise HarnessPolicyError(
+            f"子查询嵌套深度超过上限 {MAX_SUBQUERY_DEPTH}"
+            f"（实际 {max(0, deepest - 1)} 层）"
+        )
+    for select in statement.find_all(exp.Select):
         for item in select.expressions:
             target = item.this if isinstance(item, exp.Alias) else item
             if isinstance(target, exp.Star) or (isinstance(target, exp.Column) and isinstance(target.this, exp.Star)):

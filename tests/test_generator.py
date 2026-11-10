@@ -117,3 +117,33 @@ def test_roi_prompt_requires_all_channels_unless_single_top_requested():
     assert "必须返回每个有投放花费的渠道" in SQL_INSTRUCTIONS
     assert "不要加 LIMIT 1" in SQL_INSTRUCTIONS
     assert "上个月各渠道ROI" in prompt
+
+
+
+def test_rule_sql_uses_semantic_metric_filters():
+    from app.nl2sql.generator import generate_rule_sql
+    from app.nl2sql.planner import make_plan
+    from app.nl2sql.sql_engine import execute_sql
+
+    question = "近90天各品类已支付商品销量排名，按商品行的品类汇总件数，销量降序"
+    sql = generate_rule_sql(question, make_plan(question, []))
+    assert "o.status = 'paid'" in sql
+    assert execute_sql(sql)["rows"]
+
+    question = "上个月各渠道ROI：已支付销售额除以投放花费，两表各自按渠道汇总后计算，按ROI降序"
+    sql = generate_rule_sql(question, make_plan(question, []))
+    rows = execute_sql(sql)["rows"]
+    assert len(rows) == 4
+    assert "o.status = 'paid'" in sql
+    assert "GROUP BY m.channel" in sql
+
+
+def test_rule_sql_renders_item_grain_sales_from_semantic_expression():
+    from app.nl2sql.generator import generate_rule_sql
+    from app.nl2sql.planner import make_plan
+    from app.nl2sql.sql_engine import execute_sql
+
+    question = "近90天各品类已支付商品销售额排名，按商品行的品类汇总"
+    sql = generate_rule_sql(question, make_plan(question, []))
+    assert "ROUND(SUM(o.revenue), 2)" in sql
+    assert execute_sql(sql)["rows"]

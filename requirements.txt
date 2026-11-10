@@ -4,13 +4,16 @@ pydantic>=2.10,<3
 python-dotenv>=1,<2
 httpx>=0.28,<1
 langgraph>=1.0,<2
-qdrant-client>=1.12,<2
-elasticsearch>=8.15,<10
-fastembed>=0.5,<1
 sqlglot>=26,<30
+PyYAML>=6,<7
 openai>=1.60
 # Optional external query adapters: install the matching driver only when
 # activating a PostgreSQL or MySQL source. They are intentionally optional so
 # the default SQLite demo remains lightweight.
 # psycopg[binary]>=3.2,<4
 # pymysql>=1.1,<2
+
+# Optional retrieval backends: install with `pip install -r requirements-retrieval.txt`
+# qdrant-client>=1.12,<2
+# elasticsearch>=8.15,<10
+# fastembed>=0.5,<1

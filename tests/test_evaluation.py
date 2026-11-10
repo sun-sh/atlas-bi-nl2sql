@@ -156,6 +156,56 @@ def test_correct_values_cannot_mask_model_failures(monkeypatch, active_model, ov
     assert reason in report["cases"][0]["error"]
 
 
+def test_answer_and_plan_scores_are_independent(monkeypatch, active_model):
+    case = case_named("sales-east")
+    monkeypatch.setattr(evaluation, "CASES", (case,))
+
+    # Correct answer, wrong plan metadata.
+    wrong_plan = model_result(case)
+    wrong_plan.plan.intent = "refund_analysis"
+    monkeypatch.setattr(evaluation, "run_query", lambda *args, **kwargs: wrong_plan)
+    report = evaluation.run_evaluation()
+    assert report["answer_correct"] == 1
+    assert report["plan_correct"] == 0
+
+    # Correct plan metadata, answer rejected by the independent row oracle.
+    correct_plan_bad_rows = model_result(case, rows=[{"销售额": 1}])
+    monkeypatch.setattr(evaluation, "run_query", lambda *args, **kwargs: correct_plan_bad_rows)
+    report = evaluation.run_evaluation()
+    assert report["answer_correct"] == 0
+    assert report["plan_correct"] == 1
+    assert report["cases"][0]["answer_error"]
+    assert report["cases"][0]["plan_error"] is None
+
+
+def test_plan_correct_checks_expected_time_range(monkeypatch, active_model):
+    case = case_named("followup-month")
+    setup = case_named(case["setup"])
+    monkeypatch.setattr(evaluation, "CASES", (setup, case))
+    calls = []
+    def fake_query(question, **kwargs):
+        item = setup if question == setup["question"] else case
+        calls.append(question)
+        return model_result(item, context=kwargs.get("context"))
+    monkeypatch.setattr(evaluation, "run_query", fake_query)
+    report = evaluation.run_evaluation()
+    # Both selected cases run in the suite; the follow-up is the one whose
+    # expected time range must be checked.
+    assert report["answer_correct"] == 2
+    assert report["plan_correct"] == 2
+
+
+def test_unavailable_model_has_neither_answer_nor_plan_correct(monkeypatch):
+    case = case_named("sales-east")
+    monkeypatch.setattr(evaluation, "CASES", (case,))
+    monkeypatch.setattr(evaluation, "_model_state", lambda: {
+        "configured": False, "active": False, "model": "", "provider": "",
+    })
+    report = evaluation.run_evaluation()
+    assert report["answer_correct"] == 0
+    assert report["plan_correct"] == 0
+
+
 def test_model_repair_can_pass_when_both_model_stages_succeed(monkeypatch, active_model):
     case = case_named("sales-east")
     monkeypatch.setattr(evaluation, "CASES", (case,))
@@ -385,6 +435,23 @@ def test_colloquial_suite_uses_strict_model_path_and_independent_rows(monkeypatc
     assert "family_summary" in report
 
 
+def test_runtime_self_healing_grounds_small_ratios_and_rejects_unrelated_numbers():
+    from app.nl2sql.result_insight import validate_narrative
+
+    digest = {
+        "question": "各渠道ROI",
+        "time_range": "2026-01-01 至 2026-01-31",
+        "facts": ["ROI"],
+        "metrics": [{"column": "ROI", "sum": 2.5, "avg": 0.85, "min": 0.52, "max": 2.18}],
+        "sample_rows": [{"渠道": "App", "ROI": 0.85}, {"渠道": "Web", "ROI": 0.52}],
+        "ranking": [],
+        "trend": {},
+        "row_count": 2,
+    }
+    assert validate_narrative("App 的 ROI 是 0.85，Web 是 0.52。", digest)["passed"]
+    assert not validate_narrative("App 的 ROI 是 1.52。", digest)["passed"]
+
+
 def test_case_family_summary_reduces_matrix_to_business_shapes():
     report = evaluation.case_family_summary(
         [{**case, "hit": case["id"] != "matrix-roi-last90-web"} for case in evaluation.CASES]
@@ -398,3 +465,59 @@ def test_case_family_summary_reduces_matrix_to_business_shapes():
     )
     assert roi_family["total"] == 8
     assert roi_family["passed"] == 7
+
+
+
+def test_colloquial_answer_and_plan_are_scored_independently(monkeypatch):
+    from app.nl2sql.holdout import COLLOQUIAL_CASES
+    from app.nl2sql.retrieval import HybridSchemaRetriever
+
+    case = next(
+        item for item in COLLOQUIAL_CASES
+        if item["id"] == "colloquial-channel-sales"
+    )
+    rows = execute_sql(case["reference_sql"])["rows"]
+    plan = make_plan(case["question"], [], reference_date="2026-02-28")
+    plan.intent = case["expected_intent"]
+    plan.metrics = [case["expected_metric"]]
+    plan.tables = sorted(case["expected_tables"])
+
+    # Correct plan, wrong rows / failed answer.
+    monkeypatch.setattr(
+        evaluation,
+        "run_query",
+        lambda *args, **kwargs: QueryResult(
+            question=case["question"], sql=case["reference_sql"],
+            rows=[{"渠道": "not-a-channel", "销售额": 1}],
+            columns=["渠道", "销售额"], chart_type="table",
+            answer="依据查询结果生成的模型解读。", plan=plan, retrieval=[],
+            attempts=[{"status": "success"}], elapsed_ms=1, mode="llm",
+            narrative_mode="model", narrative_model="test-model",
+        ),
+    )
+    report = evaluation.run_colloquial_evaluation(
+        HybridSchemaRetriever(), selected_cases=(case,),
+        suite_version="test",
+    )
+    assert report["answer_correct"] == 0
+    assert report["plan_correct"] == 1
+
+    # Correct rows / answer, wrong plan metadata.
+    plan.intent = "refund_analysis"
+    monkeypatch.setattr(
+        evaluation,
+        "run_query",
+        lambda *args, **kwargs: QueryResult(
+            question=case["question"], sql=case["reference_sql"], rows=rows,
+            columns=list(rows[0]), chart_type="table",
+            answer="依据查询结果生成的模型解读。", plan=plan, retrieval=[],
+            attempts=[{"status": "success"}], elapsed_ms=1, mode="llm",
+            narrative_mode="model", narrative_model="test-model",
+        ),
+    )
+    report = evaluation.run_colloquial_evaluation(
+        HybridSchemaRetriever(), selected_cases=(case,),
+        suite_version="test",
+    )
+    assert report["answer_correct"] == 1
+    assert report["plan_correct"] == 0

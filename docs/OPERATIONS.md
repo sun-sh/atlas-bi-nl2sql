@@ -8,7 +8,7 @@ python -m app.nl2sql.seed
 python -m uvicorn app.api.main:app --port 8000
 ```
 
-The application creates a missing deterministic database on demand. The first BGE-backed request may take longer while local embeddings initialize. The relative-date anchor is read from `MAX(order_date)` in the active query database; `ATLAS_REFERENCE_DATE` is only a planner fallback for offline calls.
+The application creates a missing deterministic database on demand. `app/semantic.yaml` is the runtime semantic source; its DDL renders the seeded SQLite schema, so schema changes belong there rather than in a second Python catalog. The default core install uses local IDF and no BGE download. To use the optional retrieval stack, run `python -m pip install -r requirements-retrieval.txt`, set `USE_BGE=true`, and provide Qdrant/Elasticsearch settings as needed. The relative-date anchor is read from `MAX(order_date)` in the active query database; `ATLAS_REFERENCE_DATE` is only a planner fallback for offline calls.
 
 ## Readiness checks
 
@@ -54,7 +54,7 @@ python -m app.evaluation.run --suite natural --min-hit-rate 100
 python -m app.evaluation.run --suite colloquial-frozen --min-hit-rate 0
 ```
 
-A release candidate should have all tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores. The frozen colloquial suite uses the strict model path; the current 7/13 result is a small fixed-dataset snapshot, not an open-domain score. The pytest suite includes four Playwright browser cases against a real local FastAPI process; CI installs Chromium for that gate.
+A release candidate should have all **209** tests passing and no unexpected warning regressions. The scope, rule-equivalence, retrieval and natural-language gates are deterministic and do not require a model key; the strict model suites are dated capability snapshots and are not run as fixed CI scores. The frozen colloquial suite uses the strict model path; the current snapshot is answer 11/13 and plan 9/13, a small fixed-dataset result rather than an open-domain score. The pytest suite includes four Playwright browser cases against a real local FastAPI process; CI installs Chromium for that gate.
 
 `/api/metrics` includes a `model_calls` block with a process-wide concurrency cap, admission timeout, started/succeeded/failed/rejected counts, provider token usage and queue/call latency. These counters are in-memory and per process; aggregate them externally when running multiple workers. The call timeout and SQL token budgets are configurable through `MODEL_CALL_TIMEOUT_SECONDS`, `MODEL_MAX_CONCURRENCY`, `MODEL_ADMISSION_TIMEOUT_SECONDS`, `MODEL_SQL_MAX_TOKENS` and `MODEL_SQL_RETRY_MAX_TOKENS`.
 
@@ -113,4 +113,4 @@ The result narrative is checked against the deterministic digest before it is re
 
 Evaluation datasets, experiments, feedback and queue tasks live in `data/evaluation_tasks.db`; override with `ATLAS_EVALUATION_DB_PATH`. The queue enforces one running evaluation at a time. A task may run 1-3 isolated model processes. Execution is triggered by FastAPI `BackgroundTasks` for the submitted task or by the explicit `POST /api/evaluation/queue/claim` worker path; there is no Celery-style resident distributed worker. Queued rows survive a process restart but must be claimed again before they resume.
 
-The default local role context is an administrator. Workspace and viewer/analyst/admin checks exist in the data-platform functions, but SSO, multi-tenant identity propagation and production authorization are not included.
+Evaluation read APIs for datasets, experiments, feedback, regression candidates, tasks, task detail and comparisons use the same optional `X-Admin-Token` gate as the corresponding writes. The default local role context is an administrator. Workspace and viewer/analyst/admin checks exist in the data-platform functions, but SSO, multi-tenant identity propagation and production authorization are not included.
