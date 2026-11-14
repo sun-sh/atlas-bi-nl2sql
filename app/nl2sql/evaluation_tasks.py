@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from app.evaluation.provenance import database_identity, evaluation_provenance
+from app.nl2sql.data_platform import active_query_database
 from app.nl2sql.evaluation import run_evaluation
 from app.nl2sql.model_config import get_model_config, model_config_snapshot
 from app.nl2sql.settings import get_settings
@@ -152,8 +154,8 @@ def _seed_archived_reports(conn: sqlite3.Connection) -> None:
         return
     archive_dir = ROOT / "docs" / "evaluations"
     entries = (
-        ("ev_archive_v3_final", "归档 · strict-model-v3-100 最终", "evaluation-v3-100-2026-10-27.json"),
-        ("ev_archive_v3_initial", "归档 · strict-model-v3-100 首轮", "evaluation-v3-100-initial-2026-10-27.json"),
+        ("ev_archive_v3_final", "归档 · strict-model-v3-103 最终", "evaluation-v3-100-2026-10-27.json"),
+        ("ev_archive_v3_initial", "归档 · strict-model-v3-103 首轮", "evaluation-v3-100-initial-2026-10-27.json"),
         ("ev_archive_v2", "归档 · strict-model-v2 旧版", "evaluation-v2-2026-10-27.json"),
     )
     for task_id, label, filename in entries:
@@ -316,8 +318,8 @@ def _seed_datasets(conn: sqlite3.Connection) -> None:
     holdout_ids = [c['id'] for c in HOLDOUT_CASES]
     all_cases = {case['id']: case for case in (*CASES, *HOLDOUT_CASES)}
     payload = {
-        'dataset_v3_100': ('strict-model-v3-100', 'published', ids, 'Strict model full regression set'),
-        'dataset_v3_initial': ('strict-model-v3-100', 'archived', ids, 'Original 100-case diagnostic run'),
+        'dataset_v3_100': ('strict-model-v3-103', 'published', ids, 'Strict model full regression set'),
+        'dataset_v3_initial': ('strict-model-v3-103', 'archived', ids, 'Original 100-case diagnostic run'),
         'dataset_v3_holdout_30': ('strict-model-v3-holdout-30', 'holdout', holdout_ids, 'Independent 30-case holdout set'),
     }
     for dataset_id, (name, status, case_ids, description) in payload.items():
@@ -852,6 +854,7 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
         )
     try:
         config = get_model_config()
+        query_target = active_query_database()["target"]
         with model_config_snapshot(config):
             report = run_evaluation(
                 on_case=lambda _case: _advance_task(task_id),
@@ -859,14 +862,8 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
                 cases=selected_cases,
                 cancel_check=lambda: _task_cancelled(task_id),
                 suite_version=dataset_row["name"],
+                target=query_target,
             )
-        source_root = ROOT / "app"
-        source_hash = hashlib.sha256()
-        for path in sorted(
-            item for item in source_root.rglob("*") if item.suffix in {".py", ".yaml"}
-        ):
-            source_hash.update(path.relative_to(source_root).as_posix().encode())
-            source_hash.update(path.read_bytes())
         manifest = json.dumps(
             [case["id"] for case in selected_cases],
             sort_keys=True,
@@ -875,7 +872,8 @@ def _execute_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
         report["runtime"] = {
             "workers": int(task["workers"]),
             "wall_elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
-            "source_sha256": source_hash.hexdigest(),
+            **evaluation_provenance(),
+            "database": database_identity(query_target),
         }
         report["evaluation_contract"] = "strict-v3-result-equivalence-v1"
         report["case_manifest_sha256"] = hashlib.sha256(manifest).hexdigest()

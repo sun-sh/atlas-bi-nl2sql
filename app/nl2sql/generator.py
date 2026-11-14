@@ -12,10 +12,13 @@ from app.nl2sql.semantic import (
     DATASET_START,
     DATASET_END,
     REFERENCE_DATE,
+    dimension_label,
+    dimension_sql,
     enum_prompt,
     metric_filters,
     metric_prompt,
     metric_sql,
+    metric_table_grain,
     output_metric_names,
 )
 from app.nl2sql.schema_catalog import semantic_schema_prompt
@@ -40,7 +43,7 @@ SQL_INSTRUCTIONS = (
     "orders别名可用o，order_items可用oi，marketing_spend可用m；规划中o.order_date对应投放表spend_date。"
     "未要求分组的总量只返回一行；按要求排序，指标保留两位小数。"
     f"输出列使用明确业务名：{'、'.join(output_metric_names())}；"
-    "维度用地区、渠道、品类、日期、退款原因。"
+    "维度用地区、渠道、品类、日期、退款原因、会员等级、客户城市。"
     "追问必须以当前计划的指标、时间与筛选为准，并结合前置问题理解继承项。"
 )
 
@@ -95,6 +98,94 @@ def _marketing_filters(plan: QueryPlan) -> list[str]:
     return filters
 
 
+def _plan_metric_names(plan: QueryPlan) -> list[str]:
+    """Use the planner's metric contract, with a narrow compatibility default."""
+    return list(dict.fromkeys(plan.metrics or ["销售额"]))
+
+
+def _plan_dimension_sql(plan: QueryPlan) -> tuple[list[str], list[str]]:
+    return (
+        [dimension_sql(item) for item in plan.dimensions],
+        [dimension_label(item) for item in plan.dimensions],
+    )
+
+
+def _plan_requires_customer_join(plan: QueryPlan) -> bool:
+    return any(item in {"member_level", "customer_city"} for item in plan.dimensions)
+
+
+def _grouped_metric_sql(
+    plan: QueryPlan,
+    *,
+    filters: list[str],
+    table_sql: str,
+    default_metric: str = "销售额",
+    extra_metrics: list[str] | None = None,
+    extra_metrics_first: bool = True,
+) -> str:
+    """Render the generic rule path from the same plan the API reports.
+
+    The rule generator must not re-infer metrics or dimensions from the
+    question. Specialized intents (ROI and item-grain quantity) retain their
+    own joins, but ordinary sales/refund/category queries share this renderer.
+    """
+    metrics = _plan_metric_names(plan)
+    metric = metrics[0] if metrics else default_metric
+    dimensions, labels = _plan_dimension_sql(plan)
+    selected = []
+    aliases = []
+    for dimension, label in zip(dimensions, labels):
+        selected.append(f"{dimension} AS {label}")
+        aliases.append(dimension)
+    ordered_metrics = [
+        *((extra_metrics or []) if extra_metrics_first else []),
+        *metrics,
+        *([] if extra_metrics_first else (extra_metrics or [])),
+    ]
+    for metric_name in ordered_metrics:
+        selected.append(f"{metric_sql(metric_name)} AS {metric_name}")
+    selected_sql = ", ".join(selected)
+    all_filters = _with_metric_filters(filters, *metrics)
+    where_sql = _where(all_filters)
+    if dimensions:
+        order = f" ORDER BY {aliases[0]}" if aliases[0].endswith("order_date") else f" ORDER BY {metric} DESC"
+        from_sql = f"SELECT {selected_sql} FROM {table_sql}"
+        if _plan_requires_customer_join(plan):
+            from_sql += " JOIN customers c ON c.customer_id = o.customer_id"
+        return from_sql + where_sql + " GROUP BY " + ", ".join(aliases) + order
+    from_sql = f"SELECT {selected_sql} FROM {table_sql}"
+    if _plan_requires_customer_join(plan):
+        from_sql += " JOIN customers c ON c.customer_id = o.customer_id"
+    return from_sql + where_sql
+
+def _item_grain_sales_sql(plan: QueryPlan, filters: list[str]) -> str:
+    """Aggregate order revenue before joining item rows to avoid duplication."""
+    metrics = _plan_metric_names(plan)
+    metric = metrics[0]
+    dimensions = [
+        "oi.category" if item == "category" else dimension_sql(item)
+        for item in plan.dimensions
+    ]
+    labels = [dimension_label(item) for item in plan.dimensions]
+    selected = [f"{dimension} AS {label}" for dimension, label in zip(dimensions, labels)]
+    selected.append(f"{metric_sql('归因销售额', aliases={'o': 'o'})} AS {metric}")
+    inner_metric = "销售额" if metric == "销售额" else metric
+    inner = (
+        f"(SELECT order_id, {metric_sql(inner_metric)} AS revenue FROM orders o "
+        + _where(_with_metric_filters(filters, inner_metric))
+        + " GROUP BY order_id) o"
+    )
+    from_sql = "SELECT " + ", ".join(selected) + " FROM order_items oi JOIN " + inner
+    from_sql += " ON oi.order_id = o.order_id"
+    if dimensions:
+        return (
+            from_sql + " GROUP BY " + ", ".join(dimensions)
+            + f" ORDER BY {metric} DESC"
+        )
+    return from_sql
+
+
+
 def generate_rule_sql(question: str, plan: QueryPlan) -> str:
     q = question.lower()
     filters = list(plan.filters)
@@ -129,138 +220,93 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             "GROUP BY m.channel ORDER BY ROI DESC"
         )
     if plan.intent == "refund_analysis":
-        refund_reason_filters = _with_metric_filters(
-            filters, "退款单数", "退款金额"
-        )
-        if "原因" in q:
-            reason_metric = "退款金额" if "退款金额" in q else "退款单数"
-            return (
-                f"SELECT r.reason AS 退款原因, {metric_sql('退款单数')} AS 退款单数, "
-                f"{metric_sql('退款金额')} AS 退款金额 FROM refunds r "
-                "JOIN orders o ON o.order_id = r.order_id " + _where(refund_reason_filters)
-                + " GROUP BY r.reason ORDER BY " + reason_metric + " DESC"
-            )
-        if "退款金额" in q:
-            # Refund amount is additive; using the refund-rate query here would
-            # silently answer a different business question.
-            item_category = "商品行" in q or "商品明细" in q
-            category_expr = "oi.category" if item_category else "o.category"
-            join = (
-                "JOIN order_items oi ON oi.order_id = o.order_id JOIN orders o ON o.order_id = oi.order_id"
-                if item_category
-                else "JOIN orders o ON o.order_id = r.order_id"
-            )
-            return (
-                f"SELECT {category_expr} AS 品类, {metric_sql('退款单数')} AS 退款单数, "
-                f"{metric_sql('退款金额')} AS 退款金额 FROM refunds r "
-                + join + _where(_with_metric_filters(filters, "退款单数", "退款金额"))
-                + " GROUP BY " + category_expr + " ORDER BY 退款金额 DESC"
-            )
+        metrics = _plan_metric_names(plan)
+        metric = metrics[0]
+        dimensions, labels = _plan_dimension_sql(plan)
+        if metric == "退款率":
+            table_sql = "orders o LEFT JOIN refunds r ON r.order_id = o.order_id"
+        else:
+            table_sql = "refunds r JOIN orders o ON o.order_id = r.order_id"
         top_only = (
             any(term in q for term in ("最高", "最大", "第一", "top 1", "top1"))
             or any(term in q for term in ("哪一个", "哪个品类", "哪个类目"))
         )
-        return (
-            f"SELECT o.category AS 品类, {metric_sql('订单数')} AS 订单数, "
-            f"{metric_sql('退款单数')} AS 退款单数, "
-            f"{metric_sql('退款率')} AS 退款率 "
-            "FROM orders o LEFT JOIN refunds r ON r.order_id = o.order_id "
-            + _where(_with_metric_filters(filters, "订单数", "退款单数", "退款率"))
-            + " GROUP BY o.category ORDER BY 退款率 DESC"
-            + (" LIMIT 1" if top_only else "")
-        )
-    if plan.intent == "category_analysis":
-        item_grain = any(term in q for term in ("商品行", "商品明细"))
-        aggregate_only = not any(
-            term in q
-            for term in ("各品类", "按品类", "分品类", "品类排名", "类目排名", "哪些品类", "哪些类目")
-        ) and any(term in q for term in CATEGORY_TERMS)
-        if "销量" in q or "件数" in q or "卖得最多" in q or "卖得多" in q:
-            sales_filters = _with_metric_filters(filters, "销量")
-            if aggregate_only:
-                return (
-                    f"SELECT {metric_sql('销量')} AS 销量 FROM order_items oi "
-                    "JOIN orders o ON o.order_id = oi.order_id "
-                    + _where(sales_filters)
+        extra_metrics = {
+            "退款金额": ["退款单数"],
+            "退款率": ["退款单数", "订单数"],
+        }.get(metric)
+        if metric == "退款率":
+            # Ratio metrics cannot share the generic metric filter append path:
+            # the denominator must count orders independently of refund joins.
+            selected = []
+            group_aliases = []
+            for dimension, label in zip(dimensions, labels):
+                selected.append(f"{dimension} AS {label}")
+                group_aliases.append(dimension)
+            selected.extend([
+                f"{metric_sql(metric)} AS {metric}",
+                f"{metric_sql('退款单数')} AS 退款单数",
+                f"{metric_sql('订单数')} AS 订单数",
+            ])
+            from_sql = "SELECT " + ", ".join(selected) + " FROM " + table_sql
+            order_expr = "退款率"
+            if group_aliases:
+                sql = (
+                    from_sql + _where(filters) + " GROUP BY "
+                    + ", ".join(group_aliases) + " ORDER BY " + order_expr + " DESC"
                 )
-            return (
-                f"SELECT oi.category AS 品类, {metric_sql('销量')} AS 销量 "
-                "FROM order_items oi JOIN orders o ON o.order_id = oi.order_id "
-                + _where(sales_filters)
-                + " GROUP BY oi.category ORDER BY 销量 DESC"
+            else:
+                sql = from_sql + _where(filters)
+            return sql + (" LIMIT 1" if top_only and group_aliases else "")
+        sql = _grouped_metric_sql(
+            plan,
+            filters=filters,
+            table_sql=table_sql,
+            extra_metrics=extra_metrics,
+            extra_metrics_first=(metric == "退款金额"),
+        )
+        if top_only and dimensions:
+            sql += " LIMIT 1"
+        return sql
+
+    if plan.intent == "category_analysis":
+        metrics = _plan_metric_names(plan)
+        metric = metrics[0]
+        if metric == "销量":
+            dimensions, labels = _plan_dimension_sql(plan)
+            selected = []
+            for dimension, label in zip(dimensions, labels):
+                item_dimension = "oi.category" if dimension.endswith("category") else dimension
+                selected.append(f"{item_dimension} AS {label}")
+            selected.append(f"{metric_sql(metric)} AS {metric}")
+            sales_filters = _with_metric_filters(filters, metric)
+            from_sql = (
+                "SELECT " + ", ".join(selected)
+                + " FROM order_items oi JOIN orders o ON o.order_id = oi.order_id"
             )
-        if item_grain:
-            # Amounts live on orders. For item-grain grouping, aggregate order
-            # amounts first, otherwise a two-line order repeats its paid amount.
-            return (
-                f"SELECT oi.category AS 品类, "
-                f"{metric_sql('归因销售额', aliases={'o': 'o'})} AS 销售额 "
-                "FROM order_items oi JOIN (SELECT order_id, "
-                f"{metric_sql('销售额')} AS revenue FROM orders o "
-                + _where(_with_metric_filters(filters, "销售额"))
-                + " GROUP BY order_id) o ON o.order_id = oi.order_id "
-                "GROUP BY oi.category ORDER BY 销售额 DESC"
-            )
-        if aggregate_only:
-            return (
-                f"SELECT {metric_sql('销售额')} AS 销售额 FROM orders o "
-                + _where(_with_metric_filters(filters, "销售额"))
-            )
-        # The semantic layer defines category sales on the order grain unless
-        # the question explicitly asks for item-line grain.
-        return (
-            f"SELECT o.category AS 品类, {metric_sql('订单数')} AS 订单数, "
-            f"{metric_sql('销售额')} AS 销售额 FROM orders o "
-            + _where(_with_metric_filters(filters, "销售额"))
-            + " GROUP BY o.category ORDER BY 销售额 DESC"
+            if _plan_requires_customer_join(plan):
+                from_sql += " JOIN customers c ON c.customer_id = o.customer_id"
+            if dimensions:
+                return (
+                    from_sql + _where(sales_filters) + " GROUP BY "
+                    + ", ".join("oi.category" if item.endswith("category") else item for item in dimensions) + f" ORDER BY {metric} DESC"
+                )
+            return from_sql + _where(sales_filters)
+        item_grain_requested = any(
+            term in q for term in ("商品行", "商品明细")
         )
-    paid_filters = _with_metric_filters(filters, "销售额")
-    paid_where = _where(paid_filters)
-    if plan.chart_type == "line":
-        return (
-            f"SELECT o.order_date AS 日期, {metric_sql('销售额')} AS 销售额, "
-            f"{metric_sql('订单数')} AS 订单数 FROM orders o " + paid_where
-            + " GROUP BY o.order_date ORDER BY o.order_date"
+        if item_grain_requested and "category" in plan.dimensions:
+            return _item_grain_sales_sql(plan, filters)
+        return _grouped_metric_sql(
+            plan,
+            filters=filters,
+            table_sql="orders o",
         )
-    asks_region_dimension = any(
-        term in q for term in ("各地区", "按地区", "分地区", "地区客单价", "区域客单价")
-    )
-    if "客单价" in q or "每单平均" in q or "平均花" in q:
-        group, label = (
-            ("o.region", "地区") if asks_region_dimension else ("o.channel", "渠道")
-        )
-        return (
-            f"SELECT {group} AS {label}, {metric_sql('订单数')} AS 订单数, {metric_sql('销售额')} AS 销售额, "
-            f"{metric_sql('客单价')} AS 客单价 FROM orders o " + paid_where
-            + f" GROUP BY {group} ORDER BY 客单价 DESC"
-        )
-    region_filter = next(
-        (item for item in filters if "o.region" in item),
-        "",
-    )
-    channel_filter = next(
-        (item for item in filters if "o.channel" in item),
-        "",
-    )
-    asks_channel_group = any(term in q for term in ("各渠道", "按渠道", "分渠道", "渠道排名", "渠道对比"))
-    asks_region_group = any(term in q for term in ("各地区", "按地区", "分地区", "地区排名", "地区对比"))
-    single_region_total = region_filter and not asks_channel_group
-    single_channel_total = channel_filter and not asks_region_group
-    if single_region_total or single_channel_total:
-        # A single-region/single-channel question without an explicit grouping
-        # dimension is a scalar total, not a breakdown by the other dimension.
-        return (
-            f"SELECT {metric_sql('销售额')} AS 销售额 FROM orders o " + paid_where
-        )
-    if asks_region_group:
-        group, label = "o.region", "地区"
-    elif asks_channel_group:
-        group, label = "o.channel", "渠道"
-    else:
-        group, label = "o.region", "地区"
-    return (
-        f"SELECT {group} AS {label}, {metric_sql('订单数')} AS 订单数, {metric_sql('销售额')} AS 销售额 "
-        "FROM orders o " + paid_where + f" GROUP BY {group} ORDER BY 销售额 DESC"
+
+    return _grouped_metric_sql(
+        plan,
+        filters=filters,
+        table_sql="orders o",
     )
 
 

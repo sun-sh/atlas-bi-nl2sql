@@ -169,10 +169,13 @@ def metric_from_text(text: str) -> dict[str, Any] | None:
         for alias in aliases:
             folded = alias.lower()
             if folded and folded in q:
-                candidates.append((len(folded), metric))
+                candidates.append((q.find(folded), -len(folded), metric))
     if not candidates:
         return None
-    return max(candidates, key=lambda item: item[0])[1]
+    # Prefer the metric named earliest in the question. This prevents an
+    # explanatory phrase such as “退款率为退款申请单数除以…” from replacing
+    # the actually requested 退款率 with the later 退款单数 alias.
+    return min(candidates, key=lambda item: (item[0], item[1], str(item[2]["name"])))[2]
 
 
 def metric_aliases(metric_name: str) -> set[str]:
@@ -187,6 +190,41 @@ def metric_aliases(metric_name: str) -> set[str]:
 
 def dimension_aliases(dimension: str) -> set[str]:
     return DIMENSION_ALIASES.get(str(dimension), {str(dimension)})
+
+
+def dimension_sql(dimension: str) -> str:
+    """Render the one canonical SQL expression for a planning dimension."""
+    config = DIMENSIONS.get(str(dimension)) or {}
+    expr = str(config.get("expr") or "")
+    if not expr:
+        raise ValueError(f"维度缺少 expr：{dimension}")
+    return expr
+
+
+def dimension_label(dimension: str) -> str:
+    return str((DIMENSIONS.get(str(dimension)) or {}).get("label") or dimension)
+
+
+def metric_table_grain(metric_name: str) -> str:
+    """Return the semantic grain at which a metric must first be aggregated."""
+    metric = METRIC_BY_NAME.get(str(metric_name))
+    if metric is None:
+        metric = next(
+            (item for item in METRICS if str(item["name"]).lower() == str(metric_name).lower()),
+            None,
+        )
+    return str((metric or {}).get("grain") or "")
+
+
+def metric_dimensions(metric_name: str) -> tuple[str, ...]:
+    """Return dimensions explicitly supported by a semantic metric."""
+    metric = METRIC_BY_NAME.get(str(metric_name))
+    if metric is None:
+        metric = next(
+            (item for item in METRICS if str(item["name"]).lower() == str(metric_name).lower()),
+            None,
+        )
+    return tuple(str(item) for item in (metric or {}).get("dimensions") or ())
 
 
 def _alias_map(aliases: dict[str, str] | None = None) -> dict[str, str]:
@@ -239,6 +277,7 @@ def semantic_snapshot() -> dict[str, Any]:
                 "expr": metric.get("expr"),
                 "filters": list(metric.get("filters") or ()),
                 "tables": list(metric.get("tables") or ()),
+                "dimensions": list(metric.get("dimensions") or ()),
                 "grain": metric.get("grain"),
                 "definition": metric.get("definition"),
             }

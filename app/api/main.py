@@ -704,7 +704,13 @@ def activate_data_source(source_id: str, _: None = Depends(_require_admin_token)
 
 
 @app.get("/api/data-platform/data-service")
-def query_data_service(source_id: str, table: str, limit: int = 100, workspace_id: str = DEFAULT_WORKSPACE) -> dict:
+def query_data_service(
+    source_id: str,
+    table: str,
+    limit: int = 100,
+    workspace_id: str = DEFAULT_WORKSPACE,
+    _: None = Depends(_require_admin_token),
+) -> dict:
     try:
         return data_service_query(workspace_id, source_id, table, limit=limit)
     except PermissionDenied as exc:

@@ -36,8 +36,8 @@ def active_model(monkeypatch):
 
 def test_suite_coverage_and_independent_business_references():
     cases = evaluation.CASES
-    assert len(cases) == len({case["id"] for case in cases}) == 100
-    assert len({case["question"] for case in cases}) == 100
+    assert len(cases) == len({case["id"] for case in cases}) == 103
+    assert len({case["question"] for case in cases}) == 103
     assert len({case["intent"] for case in cases}) == 4
     assert sum(bool(case["setup"]) for case in cases) == 11
     assert {case["metric"] for case in cases} >= {"销售额", "销量", "退款率", "退款单数", "退款金额", "ROI", "客单价"}
@@ -119,9 +119,9 @@ def test_each_followup_uses_a_fresh_model_run_and_real_plan_context(monkeypatch,
 
     monkeypatch.setattr(evaluation, "run_query", fake_query)
     report = evaluation.run_evaluation()
-    assert report["passed"] == report["total"] == 100
+    assert report["passed"] == report["total"] == 103
     assert report["execution_rate"] == report["model_rate"] == 100
-    assert len(calls) == 111
+    assert len(calls) == len(evaluation.CASES) + sum(bool(case["setup"]) for case in evaluation.CASES)
     followups = [case for case in report["cases"] if case["setup_question"]]
     assert all(case["attempts"] == 2 for case in followups)
 
@@ -382,13 +382,13 @@ def test_natural_language_suite_and_retrieval_ablation():
     assert selected["mrr"] >= 0.8
 
 
-def test_rule_equivalence_suite_matches_all_100_gold_results():
+def test_rule_equivalence_suite_matches_all_103_gold_results():
     from app.nl2sql.evaluation import run_rule_equivalence_evaluation
 
     report = run_rule_equivalence_evaluation()
     assert report["suite_version"] == "rule-equivalence-v1"
-    assert report["total"] == 100
-    assert report["passed"] == 100
+    assert report["total"] == len(evaluation.CASES)
+    assert report["passed"] == len(evaluation.CASES)
     assert all(case["hit"] for case in report["cases"])
 
 

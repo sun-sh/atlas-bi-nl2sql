@@ -177,11 +177,13 @@ intents:
     required_tables: [orders]
 
 dimensions:
-  channel: {label: "渠道", aliases: [渠道, 各渠道, 按渠道, 渠道对比, 分渠道, 哪个渠道]}
-  region: {label: "地区", aliases: [地区, 各地区, 按地区, 地区对比, 分地区, 哪个地区, 区域]}
-  category: {label: "品类", aliases: [品类, 类目, 商品品类, 商品类目]}
-  reason: {label: "退款原因", aliases: [退款原因, 原因]}
-  order_date: {label: "日期", aliases: [日期, 每天, 按日, 趋势, order_date, date]}
+  channel: {label: "渠道", expr: "o.channel", aliases: [渠道, 各渠道, 按渠道, 渠道对比, 分渠道, 哪个渠道]}
+  region: {label: "地区", expr: "o.region", aliases: [地区, 各地区, 按地区, 地区对比, 分地区, 哪个地区, 区域]}
+  category: {label: "品类", expr: "o.category", aliases: [品类, 类目, 商品品类, 商品类目]}
+  reason: {label: "退款原因", expr: "r.reason", aliases: [退款原因, 原因]}
+  order_date: {label: "日期", expr: "o.order_date", aliases: [日期, 每天, 按日, 趋势, order_date, date]}
+  member_level: {label: "会员等级", expr: "c.member_level", aliases: [会员等级, 各会员等级, 按会员等级, 分会员等级, 会员分层]}
+  customer_city: {label: "客户城市", expr: "c.city", aliases: [客户城市, 各城市, 按城市, 城市对比, 分城市]}
 
 dashboard_metrics:
   - name: 客户数
@@ -216,6 +218,7 @@ metrics:
     aliases: [销售额, 销售, 销售总额, 销售额度, 总销售额, 成交额, GMV, gmv, revenue, total_sales, total_revenue, sales_amount]
     grain: 订单
     tables: [orders]
+    dimensions: [channel, region, category, order_date, member_level, customer_city]
     expr: "ROUND(SUM({o}.paid_amount), 2)"
     filters: ["{o}.status = 'paid'"]
     definition: "SUM(orders.paid_amount)，仅统计 paid 订单"
@@ -225,6 +228,7 @@ metrics:
     aliases: [客单价, 平均客单价, 每单平均, 平均花, 花多少钱, AOV, aov, avg_order_value]
     grain: 订单
     tables: [orders]
+    dimensions: [channel, region, category, order_date, member_level, customer_city]
     expr: "ROUND(AVG({o}.paid_amount), 2)"
     filters: ["{o}.status = 'paid'"]
     definition: "AVG(orders.paid_amount)，仅统计 paid 订单"
@@ -234,6 +238,7 @@ metrics:
     aliases: [退款率, 退货率, 售后占比, 售后问题占比, refund_rate, return_rate]
     grain: 订单 / 品类
     tables: [orders, refunds]
+    dimensions: [channel, region, category, order_date]
     expr: "ROUND(COUNT(DISTINCT {r}.refund_id) * 100.0 / COUNT(DISTINCT {o}.order_id), 2)"
     filters: []
     definition: "退款申请数 / 全部订单数 × 100%"
@@ -243,6 +248,7 @@ metrics:
     aliases: [退款金额, 退款总额, 退款的钱, 退的钱, refund_amount, total_refund_amount]
     grain: 退款申请
     tables: [refunds, orders]
+    dimensions: [channel, region, category, reason, order_date]
     expr: "ROUND(SUM({r}.refund_amount), 2)"
     filters: []
     definition: "SUM(refunds.refund_amount)"
@@ -252,6 +258,7 @@ metrics:
     aliases: [退款单数, 退款申请单数, 退款申请数, 退款订单数, 退款数, 多少单, 多少笔, refund_count, refund_orders]
     grain: 退款申请
     tables: [refunds, orders]
+    dimensions: [channel, region, category, reason, order_date]
     expr: "COUNT({r}.refund_id)"
     filters: []
     definition: "退款申请单数"
@@ -263,6 +270,7 @@ metrics:
     aliases: [ROI, roi, 投产比, 投资回报率, 投放回报, 投放最划算, 广告值不值, 广告花的钱值不值, 各渠道ROI, 渠道ROI]
     grain: 渠道
     tables: [orders, marketing_spend]
+    dimensions: [channel, order_date]
     expr: "ROUND({o}.revenue / NULLIF({m}.spend, 0), 2)"
     filters: []
     definition: "已支付销售额 / 投放花费，两表分别聚合后计算"
@@ -272,6 +280,7 @@ metrics:
     aliases: [销量, 商品销量, 销售件数, 件数, 多少件, 卖得最多, 卖得多, quantity, units_sold, sales_volume]
     grain: 商品行
     tables: [order_items, orders]
+    dimensions: [channel, region, category, order_date, member_level]
     expr: "SUM({oi}.quantity)"
     filters: ["{o}.status = 'paid'"]
     definition: "SUM(order_items.quantity)，仅统计 paid 订单"
@@ -309,6 +318,7 @@ metrics:
     aliases: [订单数, 订单量, order_count, orders]
     grain: 订单
     tables: [orders]
+    dimensions: [channel, region, category, order_date, member_level, customer_city]
     expr: "COUNT(*)"
     filters: []
     definition: "订单记录数"

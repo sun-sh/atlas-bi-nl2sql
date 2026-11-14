@@ -17,6 +17,7 @@ from app.nl2sql.semantic import (
     INTENT_TERMS,
     MEMBER_TERMS,
     REGION_TERMS,
+    metric_dimensions,
     metric_from_text,
     REQUIRED_TABLES,
     TIME_WINDOWS,
@@ -130,6 +131,10 @@ def _detect_intent(q: str) -> str | None:
         return "refund_analysis"
     if any(term in q for term in INTENT_TERMS["marketing_efficiency"]):
         return "marketing_efficiency"
+    if ("商品行" in q or "商品明细" in q) and any(
+        term in q for term in ("销售额", "营业额", "收入")
+    ):
+        return "category_analysis"
     if any(term in q for term in ("件数", "多少件", "商品行", "商品明细")):
         return "category_analysis"
     if any(term in q for term in ("品类", "类目")) and "渠道" not in q and "地区" not in q:
@@ -224,8 +229,8 @@ def make_plan(
         filters.append(_context_filter(context, "channel_filter"))
         inherited.append("渠道：" + str(context.get("channel_label") or "继承上一轮"))
 
-    item_category = any(term in q for term in ("商品行", "商品明细")) and any(term in q for term in ("销量", "件数"))
-    category_filter = f"{'oi' if item_category else 'o'}.category = '{category}'" if category else ""
+    item_metric = detected_metric is not None and str(detected_metric["name"]) == "销量"
+    category_filter = f"{'oi' if item_metric else 'o'}.category = '{category}'" if category else ""
     if category:
         filters.append(category_filter)
     elif is_follow_up and _context_filter(context, "category_filter") and not asks_channel_dimension:
@@ -249,6 +254,9 @@ def make_plan(
         if not metrics and previous_metrics:
             metrics = previous_metrics
             inherited.append("指标：" + " / ".join(map(str, previous_metrics)))
+    if metrics and metrics[0] == "销量":
+        intent = "category_analysis"
+        tables = list(dict.fromkeys([*tables, *REQUIRED_TABLES["category_analysis"]]))
     if not metrics:
         metrics.append("销售额")
     if is_follow_up and context.get("metrics"):
@@ -270,6 +278,12 @@ def make_plan(
     category_label = next((c for c in CATEGORY_TERMS if c in q), str(context.get("category_label") or ""))
 
     dimensions: list[str] = []
+    asks_member_dimension = any(
+        term in q for term in ("各会员等级", "按会员等级", "分会员等级", "会员等级对比", "会员分层")
+    )
+    asks_customer_city_dimension = any(
+        term in q for term in ("各城市", "按城市", "分城市", "城市对比", "客户城市")
+    )
     if (
         asks_channel_dimension
         or (("渠道" in q or "投放" in q) and detected_intent in {"sales_overview", "marketing_efficiency"})
@@ -279,18 +293,45 @@ def make_plan(
         dimensions.append("channel")
     if (
         asks_region_dimension
-        or ("地区" in q and detected_intent == "sales_overview")
-        or ("哪个地区" in q)
-        or ("各地区" in q)
+        or "哪个地区" in q
     ):
         dimensions.append("region")
-    if detected_intent == "category_analysis" or "品类" in q:
+    asks_category_dimension = any(
+        term in q
+        for term in (
+            "各品类", "按品类", "分品类", "品类排名", "类目排名",
+            "哪些品类", "哪些类目", "按商品行", "按商品明细",
+        )
+    )
+    # Category analysis implies a category breakdown unless the named category
+    # is only a filter for a scalar question (e.g. 食品饮料销量是多少).
+    if detected_intent == "category_analysis":
+        ask_category_for_metric = not category or asks_category_dimension
+    elif detected_intent == "refund_analysis" and (
+        "品类" in q or "类目" in q
+    ):
+        ask_category_for_metric = True
+    else:
+        ask_category_for_metric = asks_category_dimension
+
+
+    if ask_category_for_metric:
         dimensions.append("category")
+
     if "原因" in q or ("退款" in q and any(term in q for term in ("主要是什么", "损失的钱", "哪些原因"))):
         dimensions.append("reason")
     if chart == "line":
         dimensions.append("order_date")
-    dimensions = list(dict.fromkeys(dimensions))
+    if asks_member_dimension:
+        dimensions.append("member_level")
+    if asks_customer_city_dimension:
+        dimensions.append("customer_city")
+
+    # Only emit dimensions that the selected metric declares it supports.
+    supported_dimensions = set(metric_dimensions(metrics[0]))
+    dimensions = [
+        item for item in dict.fromkeys(dimensions) if item in supported_dimensions
+    ]
     return QueryPlan(
         intent=intent,
         tables=tables,

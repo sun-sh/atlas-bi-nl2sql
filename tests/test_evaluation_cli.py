@@ -284,3 +284,76 @@ def test_source_hash_covers_semantic_yaml(monkeypatch, tmp_path):
     finally:
         semantic_path.write_bytes(original)
     assert before != after
+
+
+def test_cli_report_binds_git_head_and_dirty_flag(monkeypatch, tmp_path):
+    from app.evaluation import provenance
+
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
+    monkeypatch.setattr(run, "active_query_database", lambda: {"target": None})
+    monkeypatch.setattr(run, "run_evaluation", lambda **kwargs: {
+        "available": True,
+        "total": len(run.CASES),
+        "hit_rate": 100.0,
+        "passed": len(run.CASES),
+        "cases": [],
+    })
+    monkeypatch.setattr(provenance, "_git", lambda *args: {
+        ("rev-parse", "HEAD"): "abc123",
+        ("status", "--porcelain", "--", "app"): " M app/demo.py",
+    }.get(tuple(args), ""))
+    output = tmp_path / "provenance.json"
+    assert run.main(["--output", str(output)]) == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["runtime"]["git_head"] == "abc123"
+    assert report["runtime"]["app_dirty"] is True
+    assert len(report["runtime"]["source_sha256"]) == 64
+
+
+def test_provenance_function_reports_clean_worktree(monkeypatch):
+    from app.evaluation import provenance
+
+    monkeypatch.setattr(provenance, "_git", lambda *args: {
+        ("rev-parse", "HEAD"): "clean-head",
+        ("status", "--porcelain", "--", "app"): "",
+    }.get(tuple(args), ""))
+    result = provenance.evaluation_provenance()
+    assert result["git_head"] == "clean-head"
+    assert result["app_dirty"] is False
+    assert len(result["source_sha256"]) == 64
+
+
+def test_provenance_function_reports_app_only_dirty(monkeypatch):
+    from app.evaluation import provenance
+
+    monkeypatch.setattr(provenance, "_git", lambda *args: {
+        ("rev-parse", "HEAD"): "dirty-head",
+        ("status", "--porcelain", "--", "app"): "?? app/debug.py",
+    }.get(tuple(args), ""))
+    result = provenance.evaluation_provenance()
+    assert result["git_head"] == "dirty-head"
+    assert result["app_dirty"] is True
+
+def test_task_report_uses_the_same_provenance_contract(monkeypatch, tmp_path):
+    from app.evaluation import provenance
+    from app.nl2sql import evaluation_tasks
+
+    monkeypatch.setenv("ATLAS_EVALUATION_DB_PATH", str(tmp_path / "tasks.db"))
+    monkeypatch.setattr(evaluation_tasks, "get_model_config", lambda: SimpleNamespace(
+        enabled=True, active=True, api_key="", base_url="", model="test", provider="test",
+    ))
+    monkeypatch.setattr(evaluation_tasks, "active_query_database", lambda: {"target": None})
+    monkeypatch.setattr(evaluation_tasks, "evaluation_provenance", lambda: {
+        "source_sha256": "a" * 64, "git_head": "abc123", "app_dirty": False,
+    })
+    monkeypatch.setattr(evaluation_tasks, "run_evaluation", lambda **kwargs: {
+        "suite_version": "strict-model-v3-100", "available": True,
+        "model": {"active": True, "model": "test", "provider": "test"},
+        "total": 2, "passed": 2, "hit_rate": 100.0, "execution_rate": 100.0,
+        "model_rate": 100.0, "avg_elapsed_ms": 1.0, "cases": [],
+    })
+    task = evaluation_tasks.create_evaluation_task(label="prov", workers=1)
+    completed = evaluation_tasks.execute_evaluation_task(task["id"])
+    report = completed["report"]
+    assert report["runtime"]["git_head"] == "abc123"
+    assert report["runtime"]["app_dirty"] is False

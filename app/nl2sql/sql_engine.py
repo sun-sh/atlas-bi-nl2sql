@@ -249,8 +249,6 @@ def validate_sql(sql: str, *, dialect: str = "sqlite") -> str:
     text = sql.strip().rstrip(";").strip()
     if not text:
         raise SQLValidationError("SQL 为空")
-    if ";" in text:
-        raise SQLValidationError("只允许单条 SQL")
     if FORBIDDEN.search(text):
         raise SQLValidationError("检测到写操作或危险关键字")
     parse_dialect = SQL_DIALECTS.get(dialect, dialect)
@@ -299,8 +297,17 @@ def validate_sql(sql: str, *, dialect: str = "sqlite") -> str:
             name = func.name.lower()
         if name and name not in ALLOWED_FUNCTIONS:
             raise SQLValidationError(f"未授权函数：{name}")
+    # A restricted identifier may be used only as a join key. It must not be
+    # selected, filtered, grouped or ordered as a user-visible value.
+    join_key_columns = set()
+    for join in statement.find_all(exp.Join):
+        on = join.args.get("on")
+        if isinstance(on, exp.EQ):
+            for side in (on.this, on.expression):
+                if isinstance(side, exp.Column):
+                    join_key_columns.add(id(side))
     for col in statement.find_all(exp.Column):
-        if col.name.lower() in SENSITIVE_COLUMNS:
+        if col.name.lower() in SENSITIVE_COLUMNS and id(col) not in join_key_columns:
             raise SQLValidationError(f"敏感字段不可直接查询：{col.name}")
     try:
         validate_policy(text, parsed=statement, dialect=dialect)

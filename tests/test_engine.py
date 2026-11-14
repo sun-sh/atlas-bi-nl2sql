@@ -681,3 +681,32 @@ def test_elasticsearch_scores_are_request_local(monkeypatch):
     assert first
     assert second
     assert not hasattr(retriever, "elastic_scores")
+
+
+def test_sql_semicolon_inside_string_is_not_a_second_statement():
+    sql = "SELECT COUNT(*) AS n FROM orders WHERE channel = 'App;Web'"
+    assert validate_sql(sql)
+
+
+def test_validator_allows_restricted_join_key_but_not_projection():
+    joined = (
+        "SELECT c.member_level AS level, ROUND(SUM(o.paid_amount), 2) AS revenue "
+        "FROM orders o JOIN customers c ON c.customer_id = o.customer_id "
+        "WHERE o.status = 'paid' GROUP BY c.member_level"
+    )
+    assert validate_sql(joined)
+    with pytest.raises(SQLValidationError, match="敏感字段"):
+        validate_sql("SELECT o.customer_id FROM orders o")
+
+
+def test_failed_query_narrative_uses_attempt_error(monkeypatch):
+    from app.nl2sql import workflow
+
+    def empty_rule(question, plan):
+        return ""
+
+    monkeypatch.setattr(workflow, "generate_rule_sql", empty_rule)
+    result = workflow.run_query("本月销售额", narrate=False, force_rule=True)
+    assert result.outcome == "failed"
+    assert "当前离线模式使用规则 SQL 生成器" not in result.answer
+    assert "SQL 为空" in result.answer

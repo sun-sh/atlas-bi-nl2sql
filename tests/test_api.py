@@ -69,8 +69,8 @@ def test_evaluation_endpoint_reports_model_only_status(monkeypatch):
     assert body["mode"] == "model"
     assert body["dataset_range"] == "2025-10-01 至 2026-02-28"
     assert body["evaluated_at"]
-    assert body["total"] == 100
-    assert body["suite_version"] == "strict-model-v3-100"
+    assert body["total"] == 103
+    assert body["suite_version"] == "strict-model-v3-103"
     assert sum(bool(case["setup_question"]) for case in body["cases"]) == 11
     assert body["available"] is False
     assert body["passed"] == 0
@@ -546,3 +546,15 @@ def test_query_rate_bucket_map_is_bounded(monkeypatch):
     api_main._check_query_rate("198.51.100.3")
     assert len(api_main._RATE_BUCKETS) == 2
     assert "198.51.100.1" not in api_main._RATE_BUCKETS
+
+
+def test_admin_token_protects_data_service_route(monkeypatch):
+    import app.api.main as api
+
+    settings = type("Settings", (), {"admin_api_token": "unit-secret"})()
+    monkeypatch.setattr(api, "get_settings", lambda: settings)
+    response = client.get(
+        "/api/data-platform/data-service",
+        params={"source_id": "ds_commerce", "table": "orders"},
+    )
+    assert response.status_code == 401

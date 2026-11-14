@@ -115,6 +115,7 @@ class QueryResult:
     run_context: dict[str, Any] = field(default_factory=dict)
     outcome: str = "answered"
     narrative_validation: dict[str, Any] = field(default_factory=dict)
+    query_target: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         return {

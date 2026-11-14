@@ -27,6 +27,8 @@ from app.nl2sql.colloquial_holdout import (
     COLLOQUIAL_HOLDOUT_CASES,
     COLLOQUIAL_HOLDOUT_SUITE_VERSION,
 )
+from app.evaluation.provenance import database_identity, evaluation_provenance
+from app.nl2sql.data_platform import active_query_database
 from app.nl2sql.model_config import get_model_config
 from app.nl2sql.seed import generate_database
 from app.nl2sql.settings import get_settings
@@ -47,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     if not settings.db_path.exists():
         generate_database(settings.db_path)
     config = get_model_config()
+    query_target = active_query_database()["target"]
 
     def redacted(value: dict) -> str:
         text = json.dumps(value, ensure_ascii=False, indent=2)
@@ -83,15 +86,6 @@ def main(argv: list[str] | None = None) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.with_suffix(".cases.jsonl").write_text("", encoding="utf-8")
     started = time.perf_counter()
-    source_root = Path(__file__).resolve().parents[1]
-    source_hash = hashlib.sha256()
-    # Include the semantic source as well as executable code. Otherwise a
-    # business-definition change could reuse the same provenance hash.
-    for path in sorted(
-        item for item in source_root.rglob("*") if item.suffix in {".py", ".yaml"}
-    ):
-        source_hash.update(path.relative_to(source_root).as_posix().encode())
-        source_hash.update(path.read_bytes())
     is_holdout = args.suite == "holdout"
     is_scope = args.suite == "scope"
     is_retrieval = args.suite == "retrieval"
@@ -128,12 +122,13 @@ def main(argv: list[str] | None = None) -> int:
         report = run_colloquial_evaluation(
             selected_cases=colloquial_cases,
             suite_version=colloquial_version,
+            target=query_target,
         )
         report["available"] = True
         report["evaluated_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
         _natural_progress(report)
     elif is_rules:
-        report = run_rule_equivalence_evaluation(on_case=progress)
+        report = run_rule_equivalence_evaluation(on_case=progress, target=query_target)
         report["evaluated_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
     else:
         report = run_evaluation(
@@ -142,15 +137,18 @@ def main(argv: list[str] | None = None) -> int:
             workers=args.workers,
             suite_version=HOLDOUT_SUITE_VERSION if is_holdout else SUITE_VERSION,
             dataset_range=HOLDOUT_DATASET_RANGE if is_holdout else DATASET_RANGE,
+            target=query_target,
         )
     try:
         retrieval_supplements = max(0, min(1, int(os.getenv("ATLAS_RETRIEVAL_SUPPLEMENTS", "0"))))
     except ValueError:
         retrieval_supplements = 0
+    provenance = evaluation_provenance()
     report["runtime"] = {
         "workers": args.workers,
         "wall_elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
-        "source_sha256": source_hash.hexdigest(),
+        **provenance,
+        "database": database_identity(query_target),
         "retrieval_supplements": retrieval_supplements,
     }
     # Answer-first reporting is the common top-level contract for every suite

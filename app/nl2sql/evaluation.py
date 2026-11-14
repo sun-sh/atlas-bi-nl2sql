@@ -22,24 +22,47 @@ from app.nl2sql.workflow import run_query
 
 DATASET_RANGE = SEMANTIC_DATASET_RANGE
 MODEL_MODE = "model"
-SUITE_VERSION = "strict-model-v3-100"
+SUITE_VERSION = "strict-model-v3-103"
 # Evaluation runs the strict model path and never invokes rule SQL fallback.
 MODEL_SQL_MODES = {"llm", "llm-repair"}
 
 
-def _run_rule_query(question: str, *, context: dict[str, Any] | None = None) -> Any:
+def _query_with_target(question: str, *, target=None, **kwargs):
+    """Call run_query with the target only when the callable accepts it.
+
+    Tests intentionally use small fakes with the public pre-target signature.
+    Production always passes a resolved QueryTarget so gold SQL and runtime
+    SQL are compared against the same database.
+    """
+    import inspect
+
+    if target is not None and "query_target" in inspect.signature(run_query).parameters:
+        kwargs["query_target"] = target
+    return run_query(question, **kwargs)
+
+
+def _run_rule_query(
+    question: str,
+    *,
+    context: dict[str, Any] | None = None,
+    target=None,
+) -> Any:
     """Run the deterministic rule path even if a model is configured."""
     # Resolve the entry point at call time so callers and tests can consistently
     # patch the workflow boundary without bypassing the forced-rule contract.
     from app.nl2sql.workflow import run_query as workflow_run_query
 
-    return workflow_run_query(
-        question,
-        context=context,
-        narrate=False,
-        allow_rule_fallback=True,
-        force_rule=True,
-    )
+    import inspect
+
+    kwargs = {
+        "context": context,
+        "narrate": False,
+        "allow_rule_fallback": True,
+        "force_rule": True,
+    }
+    if target is not None and "query_target" in inspect.signature(workflow_run_query).parameters:
+        kwargs["query_target"] = target
+    return workflow_run_query(question, **kwargs)
 
 
 JAN = "o.order_date BETWEEN '2026-01-01' AND '2026-01-31'"
@@ -176,6 +199,18 @@ def _matrix_cases() -> tuple[dict[str, Any], ...]:
                 f"SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
                 f"WHERE o.status = 'paid' AND o.order_date BETWEEN '{start}' AND '{end}' AND o.region = '{region}'",
             ))
+
+    # Three unfiltered, ungrouped sales totals close the matrix blind spot.
+    # Each must be one scalar row; no implicit GROUP BY region/channel.
+    for period_id in ("jan", "feb", "last30"):
+        period_label, start, end, _ = PERIODS[period_id]
+        cases.append(_case(
+            f"matrix-scalar-sales-{period_id}",
+            f"{period_label}已支付订单销售额是多少？",
+            "sales_overview",
+            f"SELECT ROUND(SUM(o.paid_amount), 2) AS 销售额 FROM orders o "
+            f"WHERE o.status = 'paid' AND o.order_date BETWEEN '{start}' AND '{end}'",
+        ))
 
     # 16 channel/time scalar sales cases, including Chinese channel aliases.
     for period_id, (period_label, start, end, _) in PERIODS.items():
@@ -367,14 +402,19 @@ def _dimension_value(value: Any, dimension: str) -> str:
     return text
 
 
-def _check_rows(case: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+def _check_rows(
+    case: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    target=None,
+) -> str:
     """Compare model output with an independent, read-only business reference.
 
     Extra columns and recognized SQL aliases are allowed. Missing/duplicate
     groups, incorrect numbers and incorrect ordering are not. Rates are in
     percentage points; all numeric tolerances are absolute (0.01).
     """
-    expected = execute_sql(case["reference_sql"])
+    expected = execute_sql(case["reference_sql"], target=target)
     if expected["truncated"]:
         return "验收基准被行数上限截断"
     gold = expected["rows"]
@@ -549,7 +589,7 @@ def _result_error(
         return "模型解读回退为确定性摘要，严格模型评测不通过"
     if not str(getattr(result, "answer", "") or "").strip():
         return "模型解读为空，严格模型评测不通过"
-    mismatch = _check_rows(case, result.rows)
+    mismatch = _check_rows(case, result.rows, target=getattr(result, "query_target", None))
     if mismatch:
         return mismatch
     if not _model_grounded(result):
@@ -614,7 +654,12 @@ def _diagnostics(cases: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 
-def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any]:
+def _evaluate_case(
+    case: dict[str, Any],
+    cases: tuple[dict[str, Any], ...] | None = None,
+    *,
+    target=None,
+) -> dict[str, Any]:
     started = time.perf_counter()
     error = ""
     results = []
@@ -633,7 +678,12 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
     try:
         context = None
         for step in ([setup, case] if setup else [case]):
-            result = run_query(step["question"], context=context, allow_rule_fallback=False)
+            result = _query_with_target(
+                step["question"],
+                target=target,
+                context=context,
+                allow_rule_fallback=False,
+            )
             results.append(result)
             warnings.extend(result.warnings)
             # Setup questions still need a successful answer before the
@@ -702,9 +752,9 @@ def _evaluate_case(case: dict[str, Any], cases: tuple[dict[str, Any], ...] | Non
     }
 
 
-def _evaluate_with_config(case, config, cases=None):
+def _evaluate_with_config(case, config, cases=None, target=None):
     with model_config_snapshot(config):
-        return _evaluate_case(case, cases)
+        return _evaluate_case(case, cases, target=target)
 
 
 def _case_family(case: dict[str, Any]) -> str:
@@ -799,6 +849,7 @@ def run_evaluation(
     cancel_check: Callable[[], bool] | None = None,
     suite_version: str = SUITE_VERSION,
     dataset_range: str = DATASET_RANGE,
+    target=None,
 ) -> dict[str, Any]:
     """Run every golden case through the strict model path.
 
@@ -868,14 +919,17 @@ def run_evaluation(
         for case in selected_cases:
             if cancel_check and cancel_check():
                 raise RuntimeError("evaluation cancelled")
-            item = _evaluate_with_config(case, config, selected_cases)
+            item = _evaluate_with_config(case, config, selected_cases, target=target)
             results_by_case.append(item)
             if on_case:
                 on_case(item)
     else:
         ordered = [None] * len(selected_cases)
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_evaluate_with_config, case, config, selected_cases): index for index, case in enumerate(selected_cases)}
+            futures = {
+                pool.submit(_evaluate_with_config, case, config, selected_cases, target): index
+                for index, case in enumerate(selected_cases)
+            }
             for future in as_completed(futures):
                 if cancel_check and cancel_check():
                     pool.shutdown(wait=False, cancel_futures=True)
@@ -992,7 +1046,11 @@ def run_retrieval_ablation(retriever=None) -> dict[str, Any]:
     }
 
 
-def run_rule_equivalence_evaluation(on_case: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+def run_rule_equivalence_evaluation(
+    on_case: Callable[[dict[str, Any]], None] | None = None,
+    *,
+    target=None,
+) -> dict[str, Any]:
     """Check the deterministic rule path against every independent gold SQL.
 
     This is deliberately separate from the strict model suites. It validates
@@ -1009,15 +1067,28 @@ def run_rule_equivalence_evaluation(on_case: Callable[[dict[str, Any]], None] | 
         steps = [cases_by_id[case["setup"]], case] if case["setup"] else [case]
         try:
             for step in steps:
-                result = _run_rule_query(step["question"], context=context)
+                result = _run_rule_query(
+                    step["question"],
+                    context=context,
+                    target=target,
+                )
                 if result.outcome != "answered":
                     error = f"规则链路未回答：{result.outcome}/{result.plan.reason_code}"
                     break
                 if step is case:
-                    error = _check_rows(case, result.rows)
-                context = {**result.plan.as_dict(), **result.plan.context, "question": step["question"]}
+                    error = _check_rows(
+                        case,
+                        result.rows,
+                        target=getattr(result, "query_target", None),
+                    )
+                context = {
+                    **result.plan.as_dict(),
+                    **result.plan.context,
+                    "question": step["question"],
+                }
         except Exception as exc:
             error = str(exc)
+
         item = {
             "id": case["id"],
             "question": case["question"],
@@ -1234,6 +1305,7 @@ def run_colloquial_evaluation(
     *,
     selected_cases: tuple[dict[str, Any], ...] | None = None,
     suite_version: str = "colloquial-holdout-v2",
+    target=None,
 ) -> dict[str, Any]:
     """Run no-definition wording through the strict model path when answerable.
 
@@ -1259,8 +1331,9 @@ def run_colloquial_evaluation(
         model_used = False
         executed = False
         try:
-            result = run_query(
+            result = _query_with_target(
                 case["question"],
+                target=target,
                 allow_rule_fallback=False,
             )
             if expected_outcome == "clarification":

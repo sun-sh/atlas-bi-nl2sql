@@ -46,7 +46,7 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 5. **Credential storage.** Model keys and external DSNs are stored in local files/SQLite metadata. They are masked or omitted from public responses, but not encrypted at rest or managed by a secret service.
 6. **Complete browser hardening.** Escaping has been tightened in the identified paths, but the UI is still a large `innerHTML`-based rendering surface. A templating/DOMPurify pass and a Content-Security-Policy deployment policy remain necessary. Operator-read endpoints now share the optional token guard, but this remains a shared secret rather than SSO/RBAC.
 7. **Open-domain evaluation.** The current 100-case regression, 30-case holdout, 15 natural-language variants, 13 frozen colloquial cases and 12 retrieval-search cases are project-defined and small. The 100-case matrix has 19 business-shape families; raw case count is not independent semantic coverage. The current frozen colloquial run is answer 11/13 and plan 9/13, so these are regression and diagnostic evidence, not production accuracy.
-8. **Evaluation provenance.** Source hash in a persisted task currently covers `app/` Python and YAML files, not the full repository, prompt/model configuration or database snapshot. Add those dimensions before treating historical task comparisons as reproducible experiments.
+8. **Evaluation provenance.** Persisted reports now record `git_head`, `app_dirty` and a working-tree `source_sha256` over `app/` Python and YAML files. A dirty worktree still lacks a commit, prompt/model configuration and database snapshot, so dirty reports remain experiments rather than reproducible release evidence.
 9. **Operational controls.** There is no SSO, full RBAC, distributed/ingress rate limiting, audit retention policy, backup/restore drill, dead-letter queue or alert routing. The query token bucket is process-local and only protects a single process.
 10. **External query cancellation/timeouts.** PostgreSQL and MySQL now issue server-side statement-timeout commands, but there is no live integration test and no cross-thread active-query cancellation equivalent to SQLite's progress handler. Treat the external adapters as opt-in, not production-complete.
 
@@ -65,7 +65,7 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 
 ## Verification snapshot
 
-All current evidence was produced from source hash `1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178` after the semantic single-source refactor.
+Historical evidence was produced from source hash `1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178` after the semantic single-source refactor. This is a historical working-tree snapshot, not a commit identifier; new reports add `git_head` and `app_dirty` to make that distinction explicit.
 
 - Full pytest suite: **209 passed** in an approved environment (Windows sandbox blocked pytest temp paths, named pipes and local sockets; the same code passed outside it).
 - Rule equivalence: **100/100 raw cases / 19 fully passed business-shape families**, forced rule path.

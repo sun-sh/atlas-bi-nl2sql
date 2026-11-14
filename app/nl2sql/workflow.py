@@ -368,7 +368,11 @@ def finalize_node(state: GraphState) -> GraphState:
         warnings.append("当前离线模式使用规则 SQL 生成器；可在模型配置中启用模型生成。")
     if not execution_succeeded:
         warnings.append("查询未成功执行；没有可信数据结果，当前回答不是业务结论。")
-        failure = warnings[-2] if len(warnings) > 1 else "查询未成功执行"
+        failure = (
+            state.get("attempts", [{}])[-1].get("error")
+            if state.get("attempts")
+            else "查询未成功执行"
+        ) or "查询未成功执行"
         narrative = NarrativeResult(
             text=(
                 "查询未成功执行，不能给出业务结论。\n"
@@ -408,6 +412,7 @@ def finalize_node(state: GraphState) -> GraphState:
             else "failed"
         ),
         narrative_validation=narrative_check,
+        query_target=state.get("query_target"),
     )
     return {"final": final}
 
