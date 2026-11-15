@@ -187,7 +187,7 @@ def make_plan(
         # Retrieval may add one supporting table, never remove or flood the
         # business-required schema. Lower-ranked hits remain UI evidence only.
         tables, retrieval_supplements = _selected_tables(required_tables, retrieved_tables)
-        chart = "line" if ("趋势" in q or "每天" in q or "按日" in q) else "bar"
+        chart = "line" if ("趋势" in q or "每天" in q or "每日" in q or "按日" in q) else "bar"
     elif detected_intent == "sales_overview":
         intent = "sales_overview"
         tables = ["orders"]

@@ -135,7 +135,8 @@ def test_rule_sql_uses_semantic_metric_filters():
     rows = execute_sql(sql)["rows"]
     assert len(rows) == 4
     assert "o.status = 'paid'" in sql
-    assert "GROUP BY m.channel" in sql
+    assert "SELECT channel, SUM(spend) AS spend" in sql
+    assert "GROUP BY channel" in sql
 
 
 def test_rule_sql_renders_item_grain_sales_from_semantic_expression():

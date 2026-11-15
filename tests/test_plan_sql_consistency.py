@@ -187,3 +187,54 @@ def test_single_channel_roi_is_a_filter_not_a_dimension():
     assert result.plan.dimensions == []
     assert len(result.rows) == 1
     assert result.rows[0]["渠道"] == "App"
+
+
+def test_marketing_scalar_sql_has_no_join_or_group_by():
+    result = run_query(
+        "本月ROI",
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+    normalized = " ".join(result.sql.lower().split())
+    assert " join " not in normalized
+    assert " group by " not in normalized
+    assert normalized.count("select") >= 3
+
+
+def test_marketing_grouped_sql_selects_only_group_keys_and_aggregates():
+    result = run_query(
+        "本月每天的投放花费",
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+    normalized = " ".join(result.sql.lower().split())
+    assert "from (select spend_date, sum(spend) as spend, sum(attributed_orders) as attributed_orders" in normalized
+    assert " group by m." not in normalized
+
+
+def test_marketing_daily_channel_order_is_date_then_channel_ascending():
+    result = run_query(
+        "本月每天的投放花费按渠道",
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+    assert result.outcome == "answered", result.attempts
+    assert result.plan.dimensions == ["channel", "order_date"]
+    normalized = " ".join(result.sql.split())
+    assert "ORDER BY 日期 ASC, 渠道 ASC" in normalized
+
+
+def test_marketing_sql_avoids_dialect_sensitive_bare_columns():
+    scalar = run_query("本月ROI", narrate=False, allow_rule_fallback=True, force_rule=True)
+    grouped = run_query("本月每日投放花费按渠道", narrate=False, allow_rule_fallback=True, force_rule=True)
+    scalar_sql = " ".join(scalar.sql.lower().split())
+    grouped_sql = " ".join(grouped.sql.lower().split())
+    assert " join " not in scalar_sql
+    assert " group by " not in scalar_sql
+    assert "select channel, spend_date, sum" not in scalar_sql
+    assert "select channel, spend_date, sum(spend)" in grouped_sql
+    assert "on 1=1" not in grouped_sql
+    assert "order by 日期 asc, 渠道 asc" in grouped_sql

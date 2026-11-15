@@ -106,7 +106,7 @@ def derived_columns_for_plan(plan: QueryPlan) -> dict[str, str]:
     """Declare response-only companion columns without changing plan metrics."""
     metrics = set(plan.metrics or [])
     if plan.intent == "marketing_efficiency":
-        derived = {"归因订单数": "marketing companion column"} if metrics & {"ROI", "投放花费"} else {}
+        derived = {"归因订单数": "marketing companion column"} if metrics & MARKETING_SPEND_COMPANION_METRICS else {}
         if channel_filter_present(plan):
             derived["渠道"] = "single-channel filter label"
         return derived
@@ -208,13 +208,35 @@ def _item_grain_sales_sql(plan: QueryPlan, filters: list[str]) -> str:
 
 
 
+def _marketing_channel_value(plan: QueryPlan) -> str:
+    for item in plan.filters:
+        marker = "channel = '"
+        if marker in item and item.rstrip().endswith("'"):
+            value = item.split(marker, 1)[1].rsplit("'", 1)[0]
+            if value:
+                return value
+    return ""
+
+
+def _marketing_metric_column_sql(metric_name: str) -> str:
+    if metric_name == "ROI":
+        return "ROUND(o.revenue / NULLIF(m.spend, 0), 2)"
+    if metric_name == "归因销售额":
+        return "ROUND(o.revenue, 2)"
+    if metric_name == "投放花费":
+        return "ROUND(m.spend, 2)"
+    if metric_name == "归因订单数":
+        return "m.attributed_orders"
+    return metric_sql(metric_name)
+
+
+MARKETING_SPEND_COMPANION_METRICS = {"ROI", "投放花费"}
+
+
 def generate_rule_sql(question: str, plan: QueryPlan) -> str:
     q = question.lower()
     filters = list(plan.filters)
     if plan.intent == "marketing_efficiency":
-        # Aggregate each source at the requested grain before joining. A
-        # scalar ROI must aggregate the whole period, not inherit the first
-        # channel row from a channel-grouped subquery.
         filters = _marketing_filters(plan)
         spend_where = _where(filters)
         order_filters: list[str] = []
@@ -231,12 +253,33 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
         order_where = _where(order_filters)
         metrics = _plan_metric_names(plan)
         dimensions = [item for item in plan.dimensions if item in {"channel", "order_date"}]
-        single_channel = channel_filter_present(plan) and not dimensions
+        companion = bool(set(metrics) & MARKETING_SPEND_COMPANION_METRICS)
+
+        if not dimensions:
+            spend_expr = f"(SELECT SUM(m.spend) FROM marketing_spend m {spend_where})"
+            revenue_expr = f"(SELECT SUM(o.paid_amount) FROM orders o {order_where})"
+            attributed_expr = f"(SELECT SUM(m.attributed_orders) FROM marketing_spend m {spend_where})"
+            scalar = {
+                "ROI": f"ROUND({revenue_expr} / NULLIF({spend_expr}, 0), 2)",
+                "投放花费": f"ROUND({spend_expr}, 2)",
+                "归因订单数": attributed_expr,
+                "归因销售额": f"ROUND({revenue_expr}, 2)",
+            }
+            selected = []
+            channel = _marketing_channel_value(plan)
+            if channel:
+                selected.append(f"'{channel}' AS 渠道")
+            for metric_name in metrics:
+                selected.append(f"{scalar.get(metric_name, metric_sql(metric_name))} AS {metric_name}")
+            if companion:
+                selected.append(f"{attributed_expr} AS 归因订单数")
+            return "SELECT " + ", ".join(selected)
+
         spend_keys = []
         revenue_keys = []
         join_conditions = []
         selected = []
-        if "channel" in dimensions or single_channel:
+        if "channel" in dimensions:
             spend_keys.append("channel")
             revenue_keys.append("channel")
             join_conditions.append("o.channel = m.channel")
@@ -247,37 +290,37 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             join_conditions.append("o.order_date = m.spend_date")
             selected.append("m.spend_date AS 日期")
         for metric_name in metrics:
-            if metric_name == "归因销售额":
-                selected.append(f"{metric_sql('归因销售额')} AS {metric_name}")
-            else:
-                selected.append(f"{metric_sql(metric_name)} AS {metric_name}")
-        if metrics in (["ROI"], ["投放花费"]):
-            selected.append(f"{metric_sql('归因订单数')} AS 归因订单数")
-        spend_group = " GROUP BY " + ", ".join(dict.fromkeys(["channel", *spend_keys])) if spend_keys else ""
-        revenue_group = " GROUP BY " + ", ".join(dict.fromkeys(["channel", *revenue_keys])) if revenue_keys else ""
-        join_sql = " ON " + " AND ".join(join_conditions) if join_conditions else " ON 1=1"
-        suffix = ""
-        if dimensions:
-            group_columns = []
-            order_columns = []
+            selected.append(f"{_marketing_metric_column_sql(metric_name)} AS {metric_name}")
+        if companion:
+            selected.append("m.attributed_orders AS 归因订单数")
+        spend_select = ", ".join([*spend_keys, "SUM(spend) AS spend", "SUM(attributed_orders) AS attributed_orders"])
+        revenue_select = ", ".join([*revenue_keys, "SUM(paid_amount) AS revenue"])
+        spend_group = " GROUP BY " + ", ".join(spend_keys)
+        revenue_group = " GROUP BY " + ", ".join(revenue_keys)
+        join_sql = " ON " + " AND ".join(join_conditions)
+        # The inner aggregate already produced one row per requested grain.
+        # Do not add an outer GROUP BY; that is redundant and dialect-sensitive.
+        if "order_date" in dimensions:
+            order_parts = ["日期 ASC"]
             if "channel" in dimensions:
-                group_columns.append("m.channel")
-                order_columns.append("渠道")
-            if "order_date" in dimensions:
-                group_columns.append("m.spend_date")
-                order_columns.append("日期")
-            direction = " ASC" if dimensions == ["order_date"] else " DESC"
-            suffix = " GROUP BY " + ", ".join(group_columns)
-            order_column = "日期" if dimensions == ["order_date"] else metrics[0]
-            suffix += " ORDER BY " + order_column + direction
+                order_parts.append("渠道 ASC")
+        else:
+            order_parts = [f"{metrics[0]} DESC"]
+        suffix = " ORDER BY " + ", ".join(order_parts)
+        if any(item in {"ROI", "归因销售额"} for item in metrics):
+            return (
+                "SELECT " + ", ".join(selected) +
+                " FROM (SELECT " + spend_select + " FROM marketing_spend m "
+                + spend_where + spend_group + ") m "
+                "LEFT JOIN (SELECT " + revenue_select + " FROM orders o "
+                + order_where + revenue_group + ") o "
+                + join_sql + suffix
+            )
         return (
             "SELECT " + ", ".join(selected) +
-            " FROM (SELECT channel, spend_date, SUM(spend) AS spend, "
-            "SUM(attributed_orders) AS attributed_orders FROM marketing_spend m "
+            " FROM (SELECT " + spend_select + " FROM marketing_spend m "
             + spend_where + spend_group + ") m "
-            "LEFT JOIN (SELECT channel, order_date, SUM(paid_amount) AS revenue "
-            "FROM orders o " + order_where + revenue_group + ") o "
-            + join_sql + suffix
+            + suffix
         )
     if plan.intent == "refund_analysis":
         metrics = _plan_metric_names(plan)
@@ -291,10 +334,7 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             any(term in q for term in ("最高", "最大", "第一", "top 1", "top1"))
             or any(term in q for term in ("哪一个", "哪个品类", "哪个类目"))
         )
-        extra_metrics = {
-            "退款金额": ["退款单数"],
-            "退款率": ["退款单数", "订单数"],
-        }.get(metric)
+        extra_metrics = {"退款金额": ["退款单数"], "退款率": ["退款单数", "订单数"]}.get(metric)
         if metric == "退款率":
             selected = []
             group_aliases = []
@@ -308,20 +348,11 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             ])
             from_sql = "SELECT " + ", ".join(selected) + " FROM " + table_sql
             if group_aliases:
-                sql = (
-                    from_sql + _where(filters) + " GROUP BY "
-                    + ", ".join(group_aliases) + " ORDER BY 退款率 DESC"
-                )
+                sql = from_sql + _where(filters) + " GROUP BY " + ", ".join(group_aliases) + " ORDER BY 退款率 DESC"
             else:
                 sql = from_sql + _where(filters)
             return sql + (" LIMIT 1" if top_only and group_aliases else "")
-        sql = _grouped_metric_sql(
-            plan,
-            filters=filters,
-            table_sql=table_sql,
-            extra_metrics=extra_metrics,
-            extra_metrics_first=(metric == "退款金额"),
-        )
+        sql = _grouped_metric_sql(plan, filters=filters, table_sql=table_sql, extra_metrics=extra_metrics, extra_metrics_first=(metric == "退款金额"))
         if top_only and dimensions:
             sql += " LIMIT 1"
         return sql
@@ -337,18 +368,12 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
                 selected.append(f"{item_dimension} AS {label}")
             selected.append(f"{metric_sql(metric)} AS {metric}")
             sales_filters = _with_metric_filters(filters, metric)
-            from_sql = (
-                "SELECT " + ", ".join(selected)
-                + " FROM order_items oi JOIN orders o ON o.order_id = oi.order_id"
-            )
+            from_sql = "SELECT " + ", ".join(selected) + " FROM order_items oi JOIN orders o ON o.order_id = oi.order_id"
             if _plan_requires_customer_join(plan):
                 from_sql += " JOIN customers c ON c.customer_id = o.customer_id"
             if dimensions:
-                return (
-                    from_sql + _where(sales_filters) + " GROUP BY "
-                    + ", ".join("oi.category" if item.endswith("category") else item for item in dimensions)
-                    + f" ORDER BY {metric} DESC"
-                )
+                group_columns = ["oi.category" if item.endswith("category") else item for item in dimensions]
+                return from_sql + _where(sales_filters) + " GROUP BY " + ", ".join(group_columns) + f" ORDER BY {metric} DESC"
             return from_sql + _where(sales_filters)
         item_grain_requested = any(term in q for term in ("商品行", "商品明细"))
         if item_grain_requested and "category" in plan.dimensions:
