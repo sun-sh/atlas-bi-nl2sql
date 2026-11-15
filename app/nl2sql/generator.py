@@ -212,8 +212,9 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
     q = question.lower()
     filters = list(plan.filters)
     if plan.intent == "marketing_efficiency":
-        # Aggregate each grain before joining. Joining daily spend directly to
-        # orders repeats the spend for every matching order and understates ROI.
+        # Aggregate each source at the requested grain before joining. A
+        # scalar ROI must aggregate the whole period, not inherit the first
+        # channel row from a channel-grouped subquery.
         filters = _marketing_filters(plan)
         spend_where = _where(filters)
         order_filters: list[str] = []
@@ -226,18 +227,25 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
                 )
             elif "m.channel" in item:
                 order_filters.append(item.replace("m.channel", "o.channel"))
-        # ROI revenue is paid revenue. Keep this invariant in the rule path even
-        # when the planner did not add a status filter.
         order_filters = _with_metric_filters(order_filters, "归因销售额")
         order_where = _where(order_filters)
         metrics = _plan_metric_names(plan)
-        dimensions, labels = _plan_dimension_sql(plan)
-        grouped = "channel" in plan.dimensions
+        dimensions = [item for item in plan.dimensions if item in {"channel", "order_date"}]
+        single_channel = channel_filter_present(plan) and not dimensions
+        spend_keys = []
+        revenue_keys = []
+        join_conditions = []
         selected = []
-        if grouped or channel_filter_present(plan):
+        if "channel" in dimensions or single_channel:
+            spend_keys.append("channel")
+            revenue_keys.append("channel")
+            join_conditions.append("o.channel = m.channel")
             selected.append("m.channel AS 渠道")
-        # The specialized marketing query carries the spend/revenue join inputs
-        # internally. Only plan-declared metrics may become response columns.
+        if "order_date" in dimensions:
+            spend_keys.append("spend_date")
+            revenue_keys.append("order_date")
+            join_conditions.append("o.order_date = m.spend_date")
+            selected.append("m.spend_date AS 日期")
         for metric_name in metrics:
             if metric_name == "归因销售额":
                 selected.append(f"{metric_sql('归因销售额')} AS {metric_name}")
@@ -245,14 +253,31 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
                 selected.append(f"{metric_sql(metric_name)} AS {metric_name}")
         if metrics in (["ROI"], ["投放花费"]):
             selected.append(f"{metric_sql('归因订单数')} AS 归因订单数")
-        group_suffix = " GROUP BY m.channel ORDER BY " + metrics[0] + " DESC" if grouped else ""
+        spend_group = " GROUP BY " + ", ".join(dict.fromkeys(["channel", *spend_keys])) if spend_keys else ""
+        revenue_group = " GROUP BY " + ", ".join(dict.fromkeys(["channel", *revenue_keys])) if revenue_keys else ""
+        join_sql = " ON " + " AND ".join(join_conditions) if join_conditions else " ON 1=1"
+        suffix = ""
+        if dimensions:
+            group_columns = []
+            order_columns = []
+            if "channel" in dimensions:
+                group_columns.append("m.channel")
+                order_columns.append("渠道")
+            if "order_date" in dimensions:
+                group_columns.append("m.spend_date")
+                order_columns.append("日期")
+            direction = " ASC" if dimensions == ["order_date"] else " DESC"
+            suffix = " GROUP BY " + ", ".join(group_columns)
+            order_column = "日期" if dimensions == ["order_date"] else metrics[0]
+            suffix += " ORDER BY " + order_column + direction
         return (
             "SELECT " + ", ".join(selected) +
-            " FROM (SELECT channel, SUM(spend) AS spend, SUM(attributed_orders) AS attributed_orders "
-            "FROM marketing_spend m " + spend_where + " GROUP BY channel) m "
-            "LEFT JOIN (SELECT channel, SUM(paid_amount) AS revenue FROM orders o "
-            + order_where + " GROUP BY channel) o ON o.channel = m.channel "
-            + group_suffix
+            " FROM (SELECT channel, spend_date, SUM(spend) AS spend, "
+            "SUM(attributed_orders) AS attributed_orders FROM marketing_spend m "
+            + spend_where + spend_group + ") m "
+            "LEFT JOIN (SELECT channel, order_date, SUM(paid_amount) AS revenue "
+            "FROM orders o " + order_where + revenue_group + ") o "
+            + join_sql + suffix
         )
     if plan.intent == "refund_analysis":
         metrics = _plan_metric_names(plan)
@@ -271,8 +296,6 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             "退款率": ["退款单数", "订单数"],
         }.get(metric)
         if metric == "退款率":
-            # Ratio metrics cannot share the generic metric filter append path:
-            # the denominator must count orders independently of refund joins.
             selected = []
             group_aliases = []
             for dimension, label in zip(dimensions, labels):
@@ -284,11 +307,10 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
                 f"{metric_sql('订单数')} AS 订单数",
             ])
             from_sql = "SELECT " + ", ".join(selected) + " FROM " + table_sql
-            order_expr = "退款率"
             if group_aliases:
                 sql = (
                     from_sql + _where(filters) + " GROUP BY "
-                    + ", ".join(group_aliases) + " ORDER BY " + order_expr + " DESC"
+                    + ", ".join(group_aliases) + " ORDER BY 退款率 DESC"
                 )
             else:
                 sql = from_sql + _where(filters)
@@ -324,25 +346,17 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
             if dimensions:
                 return (
                     from_sql + _where(sales_filters) + " GROUP BY "
-                    + ", ".join("oi.category" if item.endswith("category") else item for item in dimensions) + f" ORDER BY {metric} DESC"
+                    + ", ".join("oi.category" if item.endswith("category") else item for item in dimensions)
+                    + f" ORDER BY {metric} DESC"
                 )
             return from_sql + _where(sales_filters)
-        item_grain_requested = any(
-            term in q for term in ("商品行", "商品明细")
-        )
+        item_grain_requested = any(term in q for term in ("商品行", "商品明细"))
         if item_grain_requested and "category" in plan.dimensions:
             return _item_grain_sales_sql(plan, filters)
-        return _grouped_metric_sql(
-            plan,
-            filters=filters,
-            table_sql="orders o",
-        )
+        return _grouped_metric_sql(plan, filters=filters, table_sql="orders o")
 
-    return _grouped_metric_sql(
-        plan,
-        filters=filters,
-        table_sql="orders o",
-    )
+    return _grouped_metric_sql(plan, filters=filters, table_sql="orders o")
+
 
 
 LAST_LLM_ERROR: str | None = None

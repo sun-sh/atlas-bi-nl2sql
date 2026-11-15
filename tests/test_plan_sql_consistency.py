@@ -4,6 +4,7 @@ import pytest
 
 from app.nl2sql.planner import make_plan
 from app.nl2sql.semantic import dimension_label
+from app.nl2sql.sql_engine import execute_sql
 from app.nl2sql.workflow import run_query
 
 
@@ -138,3 +139,51 @@ def test_marketing_scalar_does_not_invent_a_channel_dimension():
     assert result.plan.dimensions == []
     assert result.columns == ["投放花费", "归因订单数"]
     assert len(result.rows) == 1
+
+
+def test_scalar_roi_aggregates_the_whole_period_not_first_channel():
+    result = run_query(
+        "本月ROI",
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+    assert result.outcome == "answered", result.attempts
+    assert result.plan.dimensions == []
+    assert len(result.rows) == 1
+    expected = execute_sql(
+        "SELECT ROUND("
+        "(SELECT SUM(paid_amount) FROM orders WHERE status = 'paid' "
+        "AND order_date BETWEEN '2026-02-01' AND '2026-02-28') "
+        "/ (SELECT SUM(spend) FROM marketing_spend "
+        "WHERE spend_date BETWEEN '2026-02-01' AND '2026-02-28'), 2) AS ROI"
+    )["rows"][0]["ROI"]
+    assert result.rows[0]["ROI"] == expected
+
+
+def test_daily_spend_emits_the_declared_order_date_dimension():
+    result = run_query(
+        "本月每天的投放花费",
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+    assert result.outcome == "answered", result.attempts
+    assert result.plan.dimensions == ["order_date"]
+    assert "日期" in result.columns
+    assert len(result.rows) == 28
+    assert result.rows[0]["日期"] == "2026-02-01"
+    assert result.rows[-1]["日期"] == "2026-02-28"
+
+
+def test_single_channel_roi_is_a_filter_not_a_dimension():
+    result = run_query(
+        "本月App渠道ROI",
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+    assert result.outcome == "answered", result.attempts
+    assert result.plan.dimensions == []
+    assert len(result.rows) == 1
+    assert result.rows[0]["渠道"] == "App"

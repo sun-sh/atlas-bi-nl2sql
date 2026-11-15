@@ -359,9 +359,10 @@ def test_task_report_uses_the_same_provenance_contract(monkeypatch, tmp_path):
     assert report["runtime"]["app_dirty"] is False
 
 
-def test_archive_provenance_check_rejects_missing_fields_and_dirty_reports(tmp_path):
+def test_archive_provenance_check_rejects_missing_fields_and_dirty_reports(tmp_path, monkeypatch):
     from app.evaluation import check_archives
 
+    monkeypatch.setattr(check_archives, "_git", lambda *args: True)
     missing = tmp_path / "missing.json"
     missing.write_text(json.dumps({"runtime": {}}), encoding="utf-8")
     assert check_archives.validate_report(missing)
@@ -376,6 +377,38 @@ def test_archive_provenance_check_rejects_missing_fields_and_dirty_reports(tmp_p
     }), encoding="utf-8")
     assert check_archives.validate_report(dirty) == []
     assert check_archives.validate_report(dirty, require_clean=True)
+
+
+def test_archive_check_rejects_unknown_commit(tmp_path, monkeypatch):
+    from app.evaluation import check_archives
+
+    report = tmp_path / "unknown.json"
+    report.write_text(json.dumps({"runtime": {
+        "source_sha256": "a" * 64,
+        "git_head": "deadbeef",
+        "app_dirty": False,
+    }}), encoding="utf-8")
+    monkeypatch.setattr(check_archives, "_git", lambda *args: False)
+    errors = " ".join(check_archives.validate_report(report, require_clean=True))
+    assert "does not resolve" in errors
+
+
+def test_archive_check_rejects_non_ancestor_commit(tmp_path, monkeypatch):
+    from app.evaluation import check_archives
+
+    report = tmp_path / "offbranch.json"
+    report.write_text(json.dumps({"runtime": {
+        "source_sha256": "a" * 64,
+        "git_head": "deadbeef",
+        "app_dirty": False,
+    }}), encoding="utf-8")
+    calls = []
+    def fake_git(*args):
+        calls.append(args)
+        return args[0] == "cat-file"
+    monkeypatch.setattr(check_archives, "_git", fake_git)
+    errors = " ".join(check_archives.validate_report(report, require_clean=True))
+    assert "not an ancestor" in errors
 
 
 def test_current_v3_103_archive_has_provenance_contract():

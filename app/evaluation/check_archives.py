@@ -2,11 +2,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
 
 REQUIRED_RUNTIME_FIELDS = {"source_sha256", "git_head", "app_dirty"}
+
+
+def _git(*args: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
 
 
 def validate_report(path: Path, *, require_clean: bool = False) -> list[str]:
@@ -27,6 +42,10 @@ def validate_report(path: Path, *, require_clean: bool = False) -> list[str]:
     digest = str(runtime.get("source_sha256") or "")
     if digest and (len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest.lower())):
         errors.append(f"{path}: invalid source_sha256")
+    if head and not _git("cat-file", "-e", f"{head}^{{commit}}"):
+        errors.append(f"{path}: git_head does not resolve to a commit: {head!r}")
+    elif head and not _git("merge-base", "--is-ancestor", head, "HEAD"):
+        errors.append(f"{path}: git_head is not an ancestor of HEAD: {head!r}")
     if require_clean and runtime.get("app_dirty") is not False:
         errors.append(f"{path}: app_dirty must be false for archived release evidence")
     return errors
