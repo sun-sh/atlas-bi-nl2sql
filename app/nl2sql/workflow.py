@@ -182,7 +182,9 @@ def generate_node(state: GraphState) -> GraphState:
         if state.get("allow_rule_fallback", True):
             sql = generate_rule_sql(state["question"], plan)
             mode = "rule"
-            if llm_error:
+            # A deliberately disabled model is an offline mode, not a runtime
+            # failure. Do not present a normal rule-path demo as an error.
+            if llm_error and llm_error != "模型未启用":
                 warnings.append("模型调用失败，已回退规则 SQL：" + llm_error)
         else:
             warnings.append("模型未生成 SQL，严格模型评测不回退规则：" + reason)

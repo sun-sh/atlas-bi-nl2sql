@@ -171,7 +171,7 @@ async function loadExamples() {
 const SQL_SOURCE_LABELS = {
   llm: '模型生成',
   'llm-repair': '模型修复',
-  rule: '规则回退',
+  rule: '离线规则',
   'rule-repair': '规则修复',
   'model-failed': '模型未产出',
   'model-repair-failed': '模型修复失败',
@@ -1490,7 +1490,7 @@ function renderModelHeading(model, active) {
   if (!pill) return;
   const label = active && model?.model
     ? `当前模型 · ${model.model}`
-    : '规则回退 · 未启用模型';
+    : '离线规则 · 未启用模型';
   pill.innerHTML = `<span class="status-dot"></span>${escapeHtml(label)}`;
   pill.classList.toggle('offline', !active);
 }

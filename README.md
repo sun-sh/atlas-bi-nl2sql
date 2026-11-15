@@ -10,9 +10,13 @@ Atlas BI 是一个面向固定电商业务域的自托管 NL2SQL 分析应用。
 ![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-1f6feb)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-![Atlas BI 分析会话](docs/images/readme/atlas-workspace.png)
+![Atlas BI 查询结果](docs/images/readme/atlas-query-result.png)
+
+一张真实回答应同时保留结论、结果表、SQL 和执行证据；上图是离线规则模式下的 ROI 查询示例。
 
 [快速开始](#快速开始) · [架构](#架构) · [评测](#评测) · [API](docs/API.md) · [边界](#设计边界) · [文档](#文档)
+
+> 适合想研究“自然语言分析如何做到可执行、可验收、可审计”的开发者。默认使用固定电商数据和规则 SQL，无需模型即可运行；配置 OpenAI 兼容接口后可启用模型生成、修复和解释。
 
 ## 功能
 
@@ -59,6 +63,14 @@ python -m pip install -r requirements-retrieval.txt
 | 评测中台 | <http://127.0.0.1:8000/evaluation> |
 | 模型配置 | <http://127.0.0.1:8000/models> |
 | OpenAPI | <http://127.0.0.1:8000/docs> |
+
+## 产品界面
+
+| 数据中台 | 评测中台 |
+| --- | --- |
+| ![数据中台](docs/images/readme/atlas-data-platform.png) | ![评测中台](docs/images/readme/atlas-evaluation.png) |
+
+更多界面可通过本地运行后的页面入口查看。模型配置截图不放入公开首页，避免展示个人或内部服务地址。
 
 ## 接入模型
 
@@ -120,11 +132,11 @@ flowchart LR
 
 固定数据集上的通过率不等于开放域生产准确率。当前 v3-103 规则集在历史 v3-100 基础上新增 3 条无筛选标量销售用例，仍按题型族报告，因此 raw case 不等于独立语义样本；严格模型评测同时报告 **answer-correct** 和 **plan-correct**，两者互不覆盖。
 
-历史最终报告绑定的是 source hash `1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178`；该哈希是当时的 `app/` 工作树快照，不能单独定位 commit。新报告同时记录 `git_head`、`app_dirty` 和数据库指纹：干净提交 `5b2cc0fde8045182b78638649d92f21318bfa6a4` 实测 `app_dirty=false`；只新增一个 `app/` 临时文件后变为 `true`。历史 100 条报告不追改、不伪签：
+历史模型报告绑定的是工作树 `source_sha256`，不是 commit，不能单凭它追溯代码版本。新报告同时记录 `git_head`、`app_dirty` 和数据库指纹；当前 v3-103 规则报告绑定 `git_head=0d3342c`、`app_dirty=false`，归档门禁会校验该 commit 存在且位于当前 HEAD 历史中。历史报告不追改、不伪签：
 
 | 套件 | 当前结果 | 说明 |
 | --- | ---: | --- |
-| pytest | **230 passed** | 含 4 条 Playwright 浏览器用例 |
+| pytest | **249 passed** | 含 4 条 Playwright 浏览器用例；与当前 GitHub Actions CI 一致 |
 | 严格模型回归（历史 v3-100） | 答案 **100/100**；计划 **94/100** | 19 个题型族；自愈 2/2；v3-103 当前仅重跑规则链路 |
 | 独立 holdout | 答案 **30/30**；计划 **28/30** | 不参与调参的 30 条固定用例；自愈 3/3 |
 | 冻结口语 | 答案 **11/13**；计划 **9/13** | 10 条可回答、3 条应澄清；小样本快照 |
