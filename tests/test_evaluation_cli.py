@@ -357,3 +357,30 @@ def test_task_report_uses_the_same_provenance_contract(monkeypatch, tmp_path):
     report = completed["report"]
     assert report["runtime"]["git_head"] == "abc123"
     assert report["runtime"]["app_dirty"] is False
+
+
+def test_archive_provenance_check_rejects_missing_fields_and_dirty_reports(tmp_path):
+    from app.evaluation import check_archives
+
+    missing = tmp_path / "missing.json"
+    missing.write_text(json.dumps({"runtime": {}}), encoding="utf-8")
+    assert check_archives.validate_report(missing)
+
+    dirty = tmp_path / "dirty.json"
+    dirty.write_text(json.dumps({
+        "runtime": {
+            "source_sha256": "a" * 64,
+            "git_head": "abc1234",
+            "app_dirty": True,
+        }
+    }), encoding="utf-8")
+    assert check_archives.validate_report(dirty) == []
+    assert check_archives.validate_report(dirty, require_clean=True)
+
+
+def test_current_v3_103_archive_has_provenance_contract():
+    from app.evaluation import check_archives
+
+    report = Path(run.__file__).resolve().parents[2] / "docs" / "evaluations" / "rule-equivalence-v3-103.json"
+    assert report.exists()
+    assert check_archives.validate_report(report) == []

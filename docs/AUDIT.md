@@ -67,7 +67,7 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 
 Historical evidence was produced from source hash `1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178` after the semantic single-source refactor. This is a historical working-tree snapshot, not a commit identifier; new reports add `git_head` and `app_dirty` to make that distinction explicit.
 
-- Full pytest suite: **209 passed** in an approved environment (Windows sandbox blocked pytest temp paths, named pipes and local sockets; the same code passed outside it).
+- Full pytest suite: **240 passed** in an approved environment (Windows sandbox blocked pytest temp paths, named pipes and local sockets; the same code passed outside it).
 - Rule equivalence (current v3-103): **103/103 raw cases** after adding three unfiltered scalar sales cases; historical v3-100 report remains **100/100**, forced rule path.
 - Natural-language deterministic end-to-end: **15/15 raw cases / 8 fully passed families**.
 - Scope guard: **7/7**.

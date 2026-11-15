@@ -302,10 +302,12 @@ def validate_sql(sql: str, *, dialect: str = "sqlite") -> str:
     join_key_columns = set()
     for join in statement.find_all(exp.Join):
         on = join.args.get("on")
-        if isinstance(on, exp.EQ):
-            for side in (on.this, on.expression):
-                if isinstance(side, exp.Column):
-                    join_key_columns.add(id(side))
+        # An equality may be nested inside AND for composite ON clauses.
+        for equality in (on.find_all(exp.EQ) if isinstance(on, exp.Expression) else ()):
+            left, right = equality.this, equality.expression
+            if isinstance(left, exp.Column) and isinstance(right, exp.Column):
+                join_key_columns.add(id(left))
+                join_key_columns.add(id(right))
     for col in statement.find_all(exp.Column):
         if col.name.lower() in SENSITIVE_COLUMNS and id(col) not in join_key_columns:
             raise SQLValidationError(f"敏感字段不可直接查询：{col.name}")

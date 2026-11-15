@@ -14,11 +14,36 @@ CONSISTENCY_QUERIES = [
     "上个月华东地区各品类销售额",
     "各会员等级的销售额",
     "本月各渠道退款率",
+    "本月各渠道投放花费",
+    "上个月各渠道归因订单数",
+    "本月App渠道销售额",
+    "本月投放花费是多少",
 ]
 
 
+KNOWN_DERIVED_COLUMNS = {
+    "退款金额": {"退款单数"},
+    "退款率": {"退款单数", "订单数"},
+}
+
+
+def _assert_bidirectional_contract(result):
+    expected = set(result.plan.metrics) | {
+        dimension_label(item) for item in result.plan.dimensions
+    }
+    derived = set()
+    for metric in result.plan.metrics:
+        derived.update(KNOWN_DERIVED_COLUMNS.get(metric, set()))
+    derived.update(result.derived_columns)
+    assert set(result.plan.metrics) <= set(result.columns)
+    assert expected <= set(result.columns)
+    assert set(result.columns) <= expected | derived, (
+        result.question, result.plan.as_dict(), result.columns, result.sql
+    )
+
+
 @pytest.mark.parametrize("question", CONSISTENCY_QUERIES)
-def test_plan_routes_to_sql(question):
+def test_plan_and_sql_columns_are_bidirectionally_consistent(question):
     result = run_query(
         question,
         narrate=False,
@@ -26,9 +51,7 @@ def test_plan_routes_to_sql(question):
         force_rule=True,
     )
     assert result.outcome == "answered", result.attempts
-    assert set(result.plan.metrics) <= set(result.columns)
-    expected_dimensions = {dimension_label(item) for item in result.plan.dimensions}
-    assert expected_dimensions <= set(result.columns)
+    _assert_bidirectional_contract(result)
 
 
 @pytest.mark.parametrize(
@@ -64,6 +87,12 @@ def test_region_breakdown_still_requires_an_explicit_grouping():
     assert plan.dimensions == ["region"]
 
 
+def test_channel_filter_does_not_become_a_channel_dimension():
+    plan = make_plan("本月App渠道销售额", [])
+    assert plan.dimensions == []
+    assert any("o.channel = 'App'" in item for item in plan.filters)
+
+
 def test_planner_uses_metric_declared_dimensions_only():
     plan = make_plan("本月各渠道退款率", [])
     assert plan.intent == "refund_analysis"
@@ -81,3 +110,31 @@ def test_member_level_sales_plan_joins_customer_dimension():
     assert result.plan.dimensions == ["member_level"]
     assert "JOIN customers" in result.sql
     assert result.columns == ["会员等级", "销售额"]
+
+
+def test_attributed_orders_routes_to_marketing_table():
+    result = run_query(
+        "上个月各渠道归因订单数",
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+    assert result.outcome == "answered", result.attempts
+    assert result.plan.intent == "marketing_efficiency"
+    assert "marketing_spend" in result.plan.tables
+    assert "marketing_spend" in result.sql
+    assert result.columns == ["渠道", "归因订单数"]
+    assert len(result.rows) == 4
+
+
+def test_marketing_scalar_does_not_invent_a_channel_dimension():
+    result = run_query(
+        "本月投放花费是多少",
+        narrate=False,
+        allow_rule_fallback=True,
+        force_rule=True,
+    )
+    assert result.outcome == "answered", result.attempts
+    assert result.plan.dimensions == []
+    assert result.columns == ["投放花费", "归因订单数"]
+    assert len(result.rows) == 1

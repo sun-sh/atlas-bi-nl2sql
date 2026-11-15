@@ -710,3 +710,12 @@ def test_failed_query_narrative_uses_attempt_error(monkeypatch):
     assert result.outcome == "failed"
     assert "当前离线模式使用规则 SQL 生成器" not in result.answer
     assert "SQL 为空" in result.answer
+
+
+def test_validator_allows_composite_join_key():
+    composite = (
+        "SELECT c.member_level AS level, ROUND(SUM(o.paid_amount), 2) AS revenue "
+        "FROM orders o JOIN customers c ON c.customer_id = o.customer_id AND c.city = o.city "
+        "WHERE o.status = 'paid' GROUP BY c.member_level"
+    )
+    assert validate_sql(composite)

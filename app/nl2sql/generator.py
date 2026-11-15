@@ -98,6 +98,28 @@ def _marketing_filters(plan: QueryPlan) -> list[str]:
     return filters
 
 
+def channel_filter_present(plan: QueryPlan) -> bool:
+    return any("m.channel" in item or "o.channel" in item for item in plan.filters)
+
+
+def derived_columns_for_plan(plan: QueryPlan) -> dict[str, str]:
+    """Declare response-only companion columns without changing plan metrics."""
+    metrics = set(plan.metrics or [])
+    if plan.intent == "marketing_efficiency":
+        derived = {"归因订单数": "marketing companion column"} if metrics & {"ROI", "投放花费"} else {}
+        if channel_filter_present(plan):
+            derived["渠道"] = "single-channel filter label"
+        return derived
+    if "退款金额" in metrics:
+        return {"退款单数": "refund amount companion column"}
+    if "退款率" in metrics:
+        return {
+            "退款单数": "refund rate numerator",
+            "订单数": "refund rate denominator",
+        }
+    return {}
+
+
 def _plan_metric_names(plan: QueryPlan) -> list[str]:
     """Use the planner's metric contract, with a narrow compatibility default."""
     return list(dict.fromkeys(plan.metrics or ["销售额"]))
@@ -208,16 +230,29 @@ def generate_rule_sql(question: str, plan: QueryPlan) -> str:
         # when the planner did not add a status filter.
         order_filters = _with_metric_filters(order_filters, "归因销售额")
         order_where = _where(order_filters)
+        metrics = _plan_metric_names(plan)
+        dimensions, labels = _plan_dimension_sql(plan)
+        grouped = "channel" in plan.dimensions
+        selected = []
+        if grouped or channel_filter_present(plan):
+            selected.append("m.channel AS 渠道")
+        # The specialized marketing query carries the spend/revenue join inputs
+        # internally. Only plan-declared metrics may become response columns.
+        for metric_name in metrics:
+            if metric_name == "归因销售额":
+                selected.append(f"{metric_sql('归因销售额')} AS {metric_name}")
+            else:
+                selected.append(f"{metric_sql(metric_name)} AS {metric_name}")
+        if metrics in (["ROI"], ["投放花费"]):
+            selected.append(f"{metric_sql('归因订单数')} AS 归因订单数")
+        group_suffix = " GROUP BY m.channel ORDER BY " + metrics[0] + " DESC" if grouped else ""
         return (
-            f"SELECT m.channel AS 渠道, {metric_sql('投放花费')} AS 投放花费, "
-            f"{metric_sql('归因订单数')} AS 归因订单数, "
-            f"{metric_sql('归因销售额')} AS 归因销售额, "
-            f"{metric_sql('ROI')} AS ROI "
-            "FROM (SELECT channel, SUM(spend) AS spend, SUM(attributed_orders) AS attributed_orders "
+            "SELECT " + ", ".join(selected) +
+            " FROM (SELECT channel, SUM(spend) AS spend, SUM(attributed_orders) AS attributed_orders "
             "FROM marketing_spend m " + spend_where + " GROUP BY channel) m "
             "LEFT JOIN (SELECT channel, SUM(paid_amount) AS revenue FROM orders o "
             + order_where + " GROUP BY channel) o ON o.channel = m.channel "
-            "GROUP BY m.channel ORDER BY ROI DESC"
+            + group_suffix
         )
     if plan.intent == "refund_analysis":
         metrics = _plan_metric_names(plan)

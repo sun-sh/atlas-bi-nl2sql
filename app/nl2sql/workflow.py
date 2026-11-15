@@ -12,7 +12,7 @@ from app.nl2sql import generator
 from app.nl2sql.harness import create_run_context, is_cancelled
 from app.nl2sql.intent_guard import OUTCOME_ANSWERED, OUTCOME_CLARIFICATION, OUTCOME_UNSUPPORTED, assess_question
 from app.nl2sql.model_config import get_model_config
-from app.nl2sql.generator import generate_llm_repair_sql_result, generate_llm_sql_result, generate_rule_sql
+from app.nl2sql.generator import derived_columns_for_plan, generate_llm_repair_sql_result, generate_llm_sql_result, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
 from app.nl2sql.planner import make_plan
 from app.nl2sql.result_insight import (
@@ -413,6 +413,7 @@ def finalize_node(state: GraphState) -> GraphState:
         ),
         narrative_validation=narrative_check,
         query_target=state.get("query_target"),
+        derived_columns=derived_columns_for_plan(plan),
     )
     return {"final": final}
 

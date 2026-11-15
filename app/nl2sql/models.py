@@ -116,6 +116,7 @@ class QueryResult:
     outcome: str = "answered"
     narrative_validation: dict[str, Any] = field(default_factory=dict)
     query_target: Any = None
+    derived_columns: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -141,4 +142,5 @@ class QueryResult:
                 "model": self.narrative_model,
                 "retries": self.narrative_retries,
             },
+            "derived_columns": self.derived_columns,
         }

@@ -216,6 +216,17 @@ def metric_table_grain(metric_name: str) -> str:
     return str((metric or {}).get("grain") or "")
 
 
+def metric_tables(metric_name: str) -> tuple[str, ...]:
+    """Return the tables a metric declares it needs, including join inputs."""
+    metric = METRIC_BY_NAME.get(str(metric_name))
+    if metric is None:
+        metric = next(
+            (item for item in METRICS if str(item["name"]).lower() == str(metric_name).lower()),
+            None,
+        )
+    return tuple(str(item) for item in (metric or {}).get("tables") or ())
+
+
 def metric_dimensions(metric_name: str) -> tuple[str, ...]:
     """Return dimensions explicitly supported by a semantic metric."""
     metric = METRIC_BY_NAME.get(str(metric_name))

@@ -45,3 +45,5 @@ jobs:
         run: python -m app.evaluation.run --suite retrieval --min-hit-rate 100
       - name: Run natural-language end-to-end gate
         run: python -m app.evaluation.run --suite natural --min-hit-rate 100
+      - name: Verify archived provenance contract
+        run: python -m app.evaluation.check_archives docs/evaluations/rule-equivalence-v3-103.json --require-clean

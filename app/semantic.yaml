@@ -290,6 +290,7 @@ metrics:
     aliases: [投放花费, 花费, 广告花费, spend, ad_spend]
     grain: 渠道
     tables: [marketing_spend]
+    dimensions: [channel, order_date]
     expr: "ROUND(SUM({m}.spend), 2)"
     filters: []
     definition: "SUM(marketing_spend.spend)"
@@ -299,6 +300,7 @@ metrics:
     aliases: [归因订单数, attributed_orders]
     grain: 渠道
     tables: [marketing_spend]
+    dimensions: [channel, order_date]
     expr: "SUM({m}.attributed_orders)"
     filters: []
     definition: "SUM(marketing_spend.attributed_orders)"
@@ -307,7 +309,8 @@ metrics:
     output: 归因销售额
     aliases: [归因销售额, attributed_sales, attributed_revenue]
     grain: 订单
-    tables: [orders]
+    tables: [orders, marketing_spend]
+    dimensions: [channel, order_date]
     # Used after the orders table has already been aggregated per channel.
     expr: "ROUND(SUM({o}.revenue), 2)"
     filters: ["{o}.status = 'paid'"]

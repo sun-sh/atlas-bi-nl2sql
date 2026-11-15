@@ -19,6 +19,7 @@ from app.nl2sql.semantic import (
     REGION_TERMS,
     metric_dimensions,
     metric_from_text,
+    metric_tables,
     REQUIRED_TABLES,
     TIME_WINDOWS,
 )
@@ -211,7 +212,7 @@ def make_plan(
             time_range = str(context.get("time_range") or "继承上一轮时间范围")
             inherited.append(f"时间范围：{time_range}")
 
-    asks_channel_dimension = any(term in q for term in ("各渠道", "按渠道", "渠道对比", "分渠道"))
+    asks_channel_dimension = any(term in q for term in ("各渠道", "按渠道", "渠道对比", "分渠道", "渠道排名"))
     asks_region_dimension = any(term in q for term in ("各地区", "按地区", "地区对比", "分地区"))
     region = _pick(question, REGION_TERMS, "region", "o")
     channel = _pick(question, CHANNEL_TERMS, "channel", "o")
@@ -257,6 +258,9 @@ def make_plan(
     if metrics and metrics[0] == "销量":
         intent = "category_analysis"
         tables = list(dict.fromkeys([*tables, *REQUIRED_TABLES["category_analysis"]]))
+    elif metrics and metrics[0] in {"投放花费", "归因订单数", "归因销售额", "ROI"}:
+        intent = "marketing_efficiency"
+        tables = list(dict.fromkeys([*tables, *REQUIRED_TABLES["marketing_efficiency"]]))
     if not metrics:
         metrics.append("销售额")
     if is_follow_up and context.get("metrics"):
@@ -268,6 +272,13 @@ def make_plan(
             intent = previous_intent
             tables = list(context.get("tables") or REQUIRED_TABLES.get(intent, ()))
             metrics = [previous_metric]
+
+    # The metric definition is authoritative for its join inputs. Intent-level
+    # REQUIRED_TABLES alone cannot know that 归因订单数 lives on marketing_spend.
+    metric_required_tables = [
+        table for metric_name in metrics for table in metric_tables(metric_name)
+    ]
+    tables = list(dict.fromkeys([*tables, *metric_required_tables]))
 
     if not time_range:
         default_time_range = f"全部数据（{DATASET_RANGE}）"
@@ -286,9 +297,7 @@ def make_plan(
     )
     if (
         asks_channel_dimension
-        or (("渠道" in q or "投放" in q) and detected_intent in {"sales_overview", "marketing_efficiency"})
-        or ("哪个渠道" in q)
-        or ("各渠道" in q)
+        or "哪个渠道" in q
     ):
         dimensions.append("channel")
     if (
