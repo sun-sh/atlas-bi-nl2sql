@@ -379,6 +379,21 @@ def test_archive_provenance_check_rejects_missing_fields_and_dirty_reports(tmp_p
     assert check_archives.validate_report(dirty, require_clean=True)
 
 
+def test_archive_check_requires_matching_current_source(tmp_path, monkeypatch):
+    from app.evaluation import check_archives
+
+    report = tmp_path / "stale.json"
+    report.write_text(json.dumps({"runtime": {
+        "source_sha256": "a" * 64,
+        "git_head": "abc1234",
+        "app_dirty": False,
+    }}), encoding="utf-8")
+    monkeypatch.setattr(check_archives, "_git", lambda *args: True)
+    monkeypatch.setattr(check_archives, "source_sha256", lambda: "b" * 64)
+    errors = check_archives.validate_report(report, require_current_source=True)
+    assert any("current app/ snapshot" in item for item in errors)
+
+
 def test_archive_check_rejects_unknown_commit(tmp_path, monkeypatch):
     from app.evaluation import check_archives
 
@@ -393,22 +408,17 @@ def test_archive_check_rejects_unknown_commit(tmp_path, monkeypatch):
     assert "does not resolve" in errors
 
 
-def test_archive_check_rejects_non_ancestor_commit(tmp_path, monkeypatch):
+def test_archive_check_does_not_require_commit_ancestry_after_squash(tmp_path, monkeypatch):
     from app.evaluation import check_archives
 
-    report = tmp_path / "offbranch.json"
+    report = tmp_path / "squashed.json"
     report.write_text(json.dumps({"runtime": {
         "source_sha256": "a" * 64,
         "git_head": "deadbeef",
         "app_dirty": False,
     }}), encoding="utf-8")
-    calls = []
-    def fake_git(*args):
-        calls.append(args)
-        return args[0] == "cat-file"
-    monkeypatch.setattr(check_archives, "_git", fake_git)
-    errors = " ".join(check_archives.validate_report(report, require_clean=True))
-    assert "not an ancestor" in errors
+    monkeypatch.setattr(check_archives, "_git", lambda *args: True)
+    assert check_archives.validate_report(report, require_clean=True) == []
 
 
 def test_current_v3_103_archive_has_provenance_contract():

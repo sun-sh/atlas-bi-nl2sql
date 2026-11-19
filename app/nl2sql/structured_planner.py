@@ -9,6 +9,14 @@ from pydantic import BaseModel, Field, ValidationError
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.model_runtime import model_call_slot, record_usage
 from app.nl2sql.models import QueryPlan, SchemaHit
+from app.nl2sql.plan_contract import (
+    CONTEXT_FILTER_KEYS,
+    FILTER_TABLES,
+    FILTER_TO_DIMENSION,
+    FILTER_COLUMNS,
+    dependency_tables,
+    validate_executable_shape,
+)
 from app.nl2sql.planner import time_filter_for_label
 from app.nl2sql.semantic import (
     CATEGORIES, CHANNELS, DIMENSIONS, INTENT_TERMS, MEMBER_LEVELS, REFUND_REASONS, REGIONS,
@@ -62,7 +70,7 @@ def _extract_json(text: str) -> dict[str, Any]:
 def _filter_sql(item: PlanFilter, *, item_metric: bool) -> str:
     field = item.field.strip().lower()
     values = [str(value) for value in item.values]
-    mapping = {"channel": (set(CHANNELS), "o.channel"), "region": (set(REGIONS), "o.region"), "category": (set(CATEGORIES), "oi.category" if item_metric else "o.category"), "member_level": (set(MEMBER_LEVELS), "c.member_level"), "refund_reason": (set(REFUND_REASONS), "r.reason")}
+    mapping = {"channel": (set(CHANNELS), "o.channel"), "region": (set(REGIONS), "o.region"), "category": (set(CATEGORIES), "oi.category" if item_metric else "o.category"), "member_level": (set(MEMBER_LEVELS), "c.member_level")}
     if field not in mapping: raise ValueError(f"unsupported filter field: {field}")
     allowed, column = mapping[field]
     invalid = [value for value in values if value not in allowed]
@@ -70,6 +78,37 @@ def _filter_sql(item: PlanFilter, *, item_metric: bool) -> str:
     if item.operator == "in": return f"{column} IN ({', '.join(repr(value) for value in values)})"
     if len(values) != 1: raise ValueError(f"eq filter requires exactly one value: {field}")
     return f"{column} = {values[0]!r}"
+
+def _inherited_filters(context: dict[str, Any], incoming_fields: set[str]) -> tuple[list[PlanFilter], set[str]]:
+    inherited: list[PlanFilter] = []
+    inherited_fields: set[str] = set()
+    for field, context_key in CONTEXT_FILTER_KEYS.items():
+        if field in incoming_fields:
+            continue
+        raw = context.get(context_key)
+        if isinstance(raw, (list, tuple)):
+            values = [str(value) for value in raw if value]
+            operator = "in"
+        elif raw:
+            values = [str(raw)]
+            operator = "eq"
+        else:
+            continue
+        if field not in set(FILTER_TABLES):
+            # Refund reason is represented as a dimension/reason predicate by
+            # the rule generator; keep it in context but do not materialize an
+            # unsupported generic filter.
+            continue
+        inherited.append(PlanFilter(field=field, operator=operator, values=values))
+        inherited_fields.add(field)
+    return inherited, inherited_fields
+
+
+def _context_time_filter(context: dict[str, Any], incoming_window: str) -> str:
+    if incoming_window:
+        return ""
+    return str(context.get("time_filter") or "")
+
 
 def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, context: dict[str, Any] | None = None, reference_date: str | None = None) -> QueryPlan:
     context = context or {}
@@ -80,15 +119,25 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
     if not metrics: raise ValueError("answered plan must include at least one metric")
     if any(item not in METRIC_NAMES for item in metrics): raise ValueError(f"unknown metrics: {metrics}")
     if any(item not in DIMENSIONS for item in dimensions): raise ValueError(f"unknown dimensions: {dimensions}")
+    explicit_fields = {item.field.strip().lower() for item in draft.filters}
+    inherited_filters, inherited_fields = _inherited_filters(context, explicit_fields)
+    effective_filters = [*draft.filters, *inherited_filters]
+    filter_fields = explicit_fields | inherited_fields
+    validate_executable_shape(
+        intent=draft.intent,
+        metrics=metrics,
+        dimensions=dimensions,
+        filter_fields=filter_fields,
+    )
     # A single-value channel/region/category condition belongs in filters.
     # Treating it as a dimension produces a redundant GROUP BY and a plan that
     # claims a breakdown the user did not request.
-    filter_fields = {item.field.strip().lower() for item in draft.filters}
     scalar_filtered_dimensions = {
         item for item in dimensions
-        if item in filter_fields and any(
-            filter.field.strip().lower() == item and filter.operator == "eq"
-            for filter in draft.filters
+        if item in FILTER_TO_DIMENSION.values() and any(
+            FILTER_TO_DIMENSION.get(filter.field.strip().lower()) == item
+            and filter.operator == "eq"
+            for filter in effective_filters
         )
     }
     if scalar_filtered_dimensions:
@@ -108,13 +157,18 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
     # dimension grain. A cross-table query is only allowed when every metric
     # can be rendered from the selected table set.
     item_metric = any(metric == "销量" for metric in metrics)
-    filters = [_filter_sql(item, item_metric=item_metric) for item in draft.filters]
+    filters = [_filter_sql(item, item_metric=item_metric) for item in effective_filters]
     time_range = ""
     if draft.time_window:
         if draft.time_window not in TIME_WINDOWS: raise ValueError(f"unknown time window: {draft.time_window}")
         label = str(TIME_WINDOWS[draft.time_window].get("label") or "")
         time_filter, time_range, _ = time_filter_for_label(label, reference_date)
         if time_filter: filters.insert(0, time_filter)
+    else:
+        inherited_time_filter = _context_time_filter(context, draft.time_window)
+        if inherited_time_filter:
+            filters.insert(0, inherited_time_filter)
+            time_range = str(context.get("time_range") or "继承上一轮时间范围")
     intent_tables = list(REQUIRED_TABLES.get(draft.intent, ()))
     # Metric definitions are authoritative for their physical join inputs.
     # The intent only provides a baseline table set; requiring every metric
@@ -123,9 +177,26 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
     metric_required = {
         table for metric_name in metrics for table in metric_tables(metric_name)
     }
-    tables = list(dict.fromkeys([*intent_tables, *sorted(metric_required)]))
+    shape_tables = dependency_tables(
+        metrics=metrics,
+        dimensions=dimensions,
+        filter_fields=filter_fields,
+        item_metric=item_metric,
+    )
+    tables = list(dict.fromkeys([*intent_tables, *sorted(metric_required), *sorted(shape_tables)]))
     if not time_range:
         time_range = str(context.get("time_range") or "全部数据")
+    normalized_filter_values = {
+        field: next(
+            (
+                item.values[0]
+                for item in effective_filters
+                if item.field.strip().lower() == field and len(item.values) == 1
+            ),
+            context.get(context_key, ""),
+        )
+        for field, context_key in CONTEXT_FILTER_KEYS.items()
+    }
     return QueryPlan(
         intent=draft.intent,
         tables=tables,
@@ -141,8 +212,25 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
             "planner_mode": "llm",
             "time_range": time_range,
             "metrics": metrics,
+            "time_filter": next((item for item in filters if "order_date" in item), ""),
+            "channel_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["channel"] + " =")), ""),
+            "region_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["region"] + " =")), ""),
+            "category_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["category"] + " =")), ""),
+            "channel_label": normalized_filter_values["channel"],
+            "region_label": normalized_filter_values["region"],
+            "category_label": normalized_filter_values["category"],
+            "member_level_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["member_level"] + " =")), ""),
+            "member_level_label": normalized_filter_values["member_level"],
+            "refund_reason_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["refund_reason"] + " =")), ""),
+            "refund_reason_label": normalized_filter_values["refund_reason"],
             "retrieval_candidates": list(context.get("retrieval_candidates") or []),
             "retrieval_supplements": list(context.get("retrieval_supplements") or []),
+        },
+        slots={
+            "time_window": draft.time_window or str(context.get("time_window") or ""),
+            "filters": [item.model_dump() for item in effective_filters],
+            "dimensions": dimensions,
+            "metrics": metrics,
         },
     )
 

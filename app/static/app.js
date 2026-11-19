@@ -8,15 +8,25 @@ import { createSession, loadSessions, cancelActiveQuery, submitQuery } from "./s
 import { scrollThreadToLatest, updateLatestReplyButton } from "./result-view.js";
 import { switchView, bindNavigation, setPageHeading, toggleWorkspacePanel, closeWorkspacePanels } from "./shell.js";
 
+function formatDatasetRange(dataset) {
+  const start = String(dataset?.start || '').slice(0, 7).replace('-', '.');
+  const end = String(dataset?.end || '').slice(0, 7).replace('-', '.');
+  return start && end ? `${start} – ${end}` : '当前数据范围';
+}
+
 async function loadOverview() {
   try {
     const data = await api('/api/overview');
     state.overview = data;
+    const datasetRange = $('#dataset-note-range');
+    if (datasetRange) datasetRange.textContent = formatDatasetRange(data.dataset).replace(/./g, '.');
+    const reference = $('#dataset-note-reference');
+    if (reference && data.dataset?.reference_date) reference.textContent = data.dataset.reference_date;
     $('#metrics-grid').innerHTML = [
       metricCard(
         '累计实付销售额',
         fmtMoney(data.revenue),
-        '2025.10 – 2026.02 · 已支付订单',
+        `${formatDatasetRange(data.dataset)} · 已支付订单`,
         true,
       ),
       metricCard(

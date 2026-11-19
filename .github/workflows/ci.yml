@@ -51,4 +51,4 @@ jobs:
       - name: Run large-schema retrieval gate
         run: python -m app.evaluation.run --suite large-schema --min-hit-rate 90
       - name: Verify archived provenance contract
-        run: python -m app.evaluation.check_archives docs/evaluations/rule-equivalence-v3-103.json --require-clean
+        run: python -m app.evaluation.check_archives docs/evaluations/rule-equivalence-v3-103.json docs/evaluations/large-schema-v1.json --require-clean --require-current-source

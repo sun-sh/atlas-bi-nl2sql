@@ -181,7 +181,9 @@ def _seed_tables(question: str) -> set[str]:
 def run_large_schema_ablation() -> dict:
     tables = benchmark_tables()
     table_by_name = {table.name: table for table in tables}
-    retriever = HybridSchemaRetriever(tables=tables)
+    # A synthetic 40-table catalog must never be indexed into a real user's
+    # shared Elasticsearch/Qdrant stores. This benchmark is local-IDF only.
+    retriever = HybridSchemaRetriever(tables=tables, local_only=True)
     rows = []
     full_hits = 0
     top4_hits = 0

@@ -91,6 +91,10 @@ def overview_metrics(db_path: str | Path | QueryTarget | None = None) -> dict[st
         "trend": [dict(item) for item in trend],
         "channel": channel_rows,
         "channel_metric": "销售额",
-        "dataset": {"start": DATASET_START, "end": DATASET_END},
+        "dataset": {
+            "start": DATASET_START,
+            "end": DATASET_END,
+            "reference_date": REFERENCE_DATE.isoformat(),
+        },
         "adapter": target.as_dict(),
     }

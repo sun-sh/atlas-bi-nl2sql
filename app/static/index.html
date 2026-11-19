@@ -96,7 +96,7 @@
               </div>
             </div>
             <button id="latest-reply-btn" class="latest-reply-btn" type="button" hidden>↓ 回到最新回答</button>
-            <div class="dataset-note">演示数据：2025.10–2026.02 · “本月 / 上个月”以 2026.02.28 为基准</div>
+            <div class="dataset-note">演示数据：<span id="dataset-note-range">当前数据范围</span> · “本月 / 上个月”以 <span id="dataset-note-reference">当前参考日期</span> 为基准</div>
             <form id="query-form" class="composer">
               <textarea id="question" aria-label="输入经营问题" rows="2" maxlength="300" placeholder="问销售额、品类、退款率、渠道 ROI，或继续追问…"></textarea>
               <div class="composer-foot">
