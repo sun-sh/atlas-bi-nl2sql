@@ -238,3 +238,25 @@ def test_marketing_sql_avoids_dialect_sensitive_bare_columns():
     assert "select channel, spend_date, sum(spend)" in grouped_sql
     assert "on 1=1" not in grouped_sql
     assert "order by 日期 asc, 渠道 asc" in grouped_sql
+
+
+def test_structured_plan_filters_reach_rule_sql():
+    from app.nl2sql import structured_planner
+
+    plan = structured_planner.validate_structured_plan(
+        structured_planner.StructuredPlanDraft(
+            intent="sales_overview",
+            metrics=["销售额"],
+            dimensions=["channel"],
+            filters=[structured_planner.PlanFilter(field="region", values=["华东"])],
+            time_window="last_month",
+        ),
+        question="上个月华东各渠道销售额",
+        reference_date="2026-02-28",
+    )
+    sql = __import__("app.nl2sql.generator", fromlist=["generate_rule_sql"]).generate_rule_sql(
+        "上个月华东各渠道销售额", plan
+    )
+    assert "o.region = '华东'" in sql
+    assert "o.order_date" in sql
+    assert "GROUP BY o.channel" in sql

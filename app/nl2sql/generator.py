@@ -28,10 +28,17 @@ from app.nl2sql.schema_catalog import semantic_schema_prompt
 from app.nl2sql.settings import get_settings
 
 
-SQL_INSTRUCTIONS = (
-    "你是 SQLite 电商分析专家。输出一条完整 SELECT SQL，支持 SELECT 内的子查询；不要解释或代码块。"
+def sql_instructions(plan: QueryPlan | None = None, *, dialect: str = 'sqlite') -> str:
+    """Render SQL instructions with the request's actual reference date."""
+    reference_date = (
+        str(plan.context.get("reference_date") or REFERENCE_DATE.isoformat())
+        if plan is not None
+        else REFERENCE_DATE.isoformat()
+    )
+    return (
+    f"你是 {'SQLite' if dialect == 'sqlite' else 'PostgreSQL' if dialect == 'postgres' else 'MySQL'} 电商分析专家。输出一条完整 SELECT SQL，支持 SELECT 内的子查询；不要解释或代码块。"
     "只能查询提供的公开字段；禁止 customer_id、cost_price、SELECT *，必须聚合。"
-    "数据范围以当前激活数据源和当前计划中的时间过滤为准；相对日期基准见下方当前计划中的 reference_date，不得使用系统当前日期。"
+    f"本次查询的相对日期基准是 {reference_date}，不得使用系统当前日期；数据范围以当前激活数据源和计划中的时间过滤为准。"
     "严格遵守已解析时间区间和当前筛选，不要因无数据擅自扩大范围。"
     f"订单状态必须用真实英文枚举：{enum_prompt('orders.status')}。"
     "业务指标必须使用语义层给出的 expr 和 filters，不得自行更换口径。"
@@ -48,7 +55,12 @@ SQL_INSTRUCTIONS = (
     f"输出列使用明确业务名：{'、'.join(output_metric_names())}；"
     "维度用地区、渠道、品类、日期、退款原因、会员等级、客户城市。"
     "追问必须以当前计划的指标、时间与筛选为准，并结合前置问题理解继承项。"
-)
+    )
+
+
+# Kept for compatibility with callers that import the historical constant.
+# Runtime generation must use sql_instructions(plan) so the date is request-scoped.
+SQL_INSTRUCTIONS = sql_instructions()
 
 DIALECT_INSTRUCTIONS = {
     "postgres": (
@@ -479,7 +491,7 @@ def generate_llm_sql_result(
     dialect: str = "sqlite",
 ) -> tuple[str | None, str]:
     return _llm_sql_result(
-        SQL_INSTRUCTIONS + DIALECT_INSTRUCTIONS.get(dialect, ""),
+        sql_instructions(plan, dialect=dialect) + DIALECT_INSTRUCTIONS.get(dialect, ""),
         _sql_prompt(question, plan),
     )
 
@@ -505,7 +517,7 @@ def generate_llm_repair_sql_result(
     dialect: str = "sqlite",
 ) -> tuple[str | None, str]:
     return _llm_sql_result(
-        SQL_INSTRUCTIONS
+        sql_instructions(plan, dialect=dialect)
         + DIALECT_INSTRUCTIONS.get(dialect, "")
         + "根据反馈修复原SQL，保持用户要求的业务口径，不得改变筛选来制造非空结果。",
         _sql_prompt(question, plan) + "\n"

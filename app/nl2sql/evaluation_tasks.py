@@ -155,7 +155,6 @@ def _seed_archived_reports(conn: sqlite3.Connection) -> None:
     archive_dir = ROOT / "docs" / "evaluations" / "archive"
     entries = (
         ("ev_archive_v3_final", "归档 · strict-model-v3-100 最终", "evaluation-v3-100-2026-10-27.json"),
-        ("ev_archive_v3_initial", "归档 · strict-model-v3-100 首轮", "evaluation-v3-100-initial-2026-10-27.json"),
         ("ev_archive_v2", "归档 · strict-model-v2 旧版", "evaluation-v2-2026-10-27.json"),
     )
     for task_id, label, filename in entries:

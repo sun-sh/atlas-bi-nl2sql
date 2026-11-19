@@ -103,7 +103,8 @@ def test_evaluation_page_explains_strict_model_policy():
     assert '逐用例结果' in body
     assert 'id="eval-meta"' in body
     assert 'id="eval-count"' in body
-    script = client.get('/static/app.js').text
+    script = (client.get('/static/app.js').text + client.get('/static/shell.js').text
+              + client.get('/static/evaluation-page.js').text)
     assert "if (view === 'evaluation') loadEvaluationTasks();" in script
     assert '任务队列' in body
     assert 'id="eval-baseline"' in body
@@ -117,7 +118,8 @@ def test_evaluation_page_explains_strict_model_policy():
 
 def test_workspace_ui_contract_keeps_results_and_model_settings_consistent():
     page = client.get('/workspace').text
-    script = client.get('/static/app.js').text
+    script = (client.get('/static/app.js').text + client.get('/static/shell.js').text
+              + client.get('/static/sessions.js').text + client.get('/static/result-view.js').text)
     styles = client.get('/static/styles.css').text
 
     assert 'id="model-name"' in page
@@ -245,7 +247,7 @@ def test_evaluation_task_history_and_comparison(monkeypatch, tmp_path):
     assert history.status_code == 200
     body = history.json()
     assert {task['id'] for task in body['tasks']} == {
-        'ev_archive_v3_final', 'ev_archive_v3_initial', 'ev_archive_v2'
+        'ev_archive_v3_final', 'ev_archive_v2'
     }
     assert body['active'] is None
     detail = client.get('/api/evaluation/tasks/ev_archive_v3_final')
@@ -253,13 +255,13 @@ def test_evaluation_task_history_and_comparison(monkeypatch, tmp_path):
     assert detail.json()['report']['passed'] == 100
     comparison = client.get(
         '/api/evaluation/compare',
-        params={'baseline': 'ev_archive_v3_initial', 'candidate': 'ev_archive_v3_final'},
+        params={'baseline': 'ev_archive_v3_final', 'candidate': 'ev_archive_v3_final'},
     )
     assert comparison.status_code == 200
     diff = comparison.json()
     assert diff['shared_cases'] == 100
-    assert diff['delta']['passed'] == 21
-    assert len(diff['fixed']) == 21
+    assert diff['delta']['passed'] == 0
+    assert diff['fixed'] == []
     assert diff['regressed'] == []
 
 

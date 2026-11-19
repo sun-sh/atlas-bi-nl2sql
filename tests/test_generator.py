@@ -111,11 +111,12 @@ def test_generation_prompt_only_includes_selected_plan_tables(monkeypatch):
 
 def test_roi_prompt_requires_all_channels_unless_single_top_requested():
     from app.nl2sql.planner import make_plan
-    from app.nl2sql.generator import _sql_prompt, SQL_INSTRUCTIONS
+    from app.nl2sql.generator import _sql_prompt, sql_instructions
 
     prompt = _sql_prompt("上个月各渠道ROI", make_plan("上个月各渠道ROI", []))
-    assert "必须返回每个有投放花费的渠道" in SQL_INSTRUCTIONS
-    assert "不要加 LIMIT 1" in SQL_INSTRUCTIONS
+    instructions = sql_instructions(make_plan("上个月各渠道ROI", []))
+    assert "必须返回每个有投放花费的渠道" in instructions
+    assert "不要加 LIMIT 1" in instructions
     assert "上个月各渠道ROI" in prompt
 
 
@@ -160,4 +161,5 @@ def test_sql_prompt_uses_the_runtime_relative_date(monkeypatch):
     plan = make_plan("本月销售额", [], reference_date="2026-10-31")
     generator.generate_llm_sql("本月销售额", plan)
     assert "2026-10-31" in captured["prompt"]
-    assert "固定为2026-02-28" not in captured["instructions"]
+    assert "2026-10-31" in captured["instructions"]
+    assert "2026-02-28" not in captured["instructions"]

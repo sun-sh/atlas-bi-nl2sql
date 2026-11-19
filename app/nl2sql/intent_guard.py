@@ -96,7 +96,12 @@ class QuestionDecision:
         }
 
 
-def assess_question(question: str, context: dict[str, Any] | None = None) -> QuestionDecision:
+def assess_question(
+    question: str,
+    context: dict[str, Any] | None = None,
+    *,
+    semantic_checks: bool = True,
+) -> QuestionDecision:
     """Decide whether a question belongs in the safe, bounded SQL path.
 
     This is deliberately conservative about destructive and out-of-domain
@@ -162,6 +167,12 @@ def assess_question(question: str, context: dict[str, Any] | None = None) -> Que
             "我不能执行写操作。当前 SQL 链路只允许单条只读 SELECT，不会修改任何数据。",
             _suggestions(OUTCOME_UNSUPPORTED),
         )
+    # The LLM structured planner owns semantic ambiguity when a model is
+    # enabled. Sensitive, destructive and out-of-domain requests are still
+    # blocked above; this mode only skips the lexical ambiguity gate.
+    if not semantic_checks:
+        return QuestionDecision()
+
 
     if (
         ("退款" in q and any(term in q for term in ("原因", "分布")))

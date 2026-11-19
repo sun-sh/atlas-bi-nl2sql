@@ -36,6 +36,8 @@ def live_server(tmp_path_factory):
         "ATLAS_PLATFORM_WAREHOUSE_DB_PATH": str(data_dir / "warehouse.db"),
         "PYTHONDONTWRITEBYTECODE": "1",
     })
+    log_path = data_dir / "server.log"
+    log_handle = log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
         [
             sys.executable,
@@ -49,7 +51,7 @@ def live_server(tmp_path_factory):
         ],
         cwd=ROOT,
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=log_handle,
         stderr=subprocess.STDOUT,
         text=True,
     )
@@ -67,6 +69,7 @@ def live_server(tmp_path_factory):
             time.sleep(0.1)
     else:
         process.terminate()
+        log_handle.close()
         raise RuntimeError("server did not become ready")
     yield url
     process.terminate()
@@ -75,6 +78,7 @@ def live_server(tmp_path_factory):
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
+    log_handle.close()
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +92,7 @@ def browser():
 def test_workspace_query_renders_answer_and_sql(live_server, browser):
     context = browser.new_context()
     page = context.new_page()
-    page.goto(live_server + "/workspace", wait_until="networkidle")
+    page.goto(live_server + "/workspace", wait_until="load")
     page.evaluate("window.localStorage.clear()")
     page.fill("#question", "上个月华东地区销售额是多少？")
     page.click("#submit-btn")
@@ -103,9 +107,9 @@ def test_workspace_query_renders_answer_and_sql(live_server, browser):
 def test_clarification_stops_without_sql(live_server, browser):
     context = browser.new_context()
     page = context.new_page()
-    page.goto(live_server + "/workspace", wait_until="networkidle")
+    page.goto(live_server + "/workspace", wait_until="load")
     page.evaluate("window.localStorage.clear()")
-    page.reload(wait_until="networkidle")
+    page.reload(wait_until="load")
     errors = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
     page.click("#new-session-btn")
@@ -125,7 +129,7 @@ def test_clarification_stops_without_sql(live_server, browser):
 def test_follow_up_inherits_context_visibly(live_server, browser):
     context = browser.new_context()
     page = context.new_page()
-    page.goto(live_server + "/workspace", wait_until="networkidle")
+    page.goto(live_server + "/workspace", wait_until="load")
     page.evaluate("window.localStorage.clear()")
     page.fill("#question", "上个月华东地区销售额是多少？")
     page.click("#submit-btn")
@@ -144,7 +148,7 @@ def test_follow_up_inherits_context_visibly(live_server, browser):
 def test_mobile_navigation_keeps_workspace_query(live_server, browser):
     context = browser.new_context(viewport={"width": 390, "height": 844})
     page = context.new_page()
-    page.goto(live_server + "/workspace", wait_until="networkidle")
+    page.goto(live_server + "/workspace", wait_until="load")
     page.evaluate("window.localStorage.clear()")
     assert page.locator("#question").is_visible()
     page.fill("#question", "上个月销售额是多少？")

@@ -2,7 +2,7 @@
 
 ## 当前评测集
 
-`strict-model-v3-100` 是用于开发和回归的 100 条严格模型评测集；另有一套独立的 `strict-model-v3-holdout-30` 留出集，不参与 Prompt、口径和重试逻辑调整，用于观察未见组合上的表现。holdout 共 30 条，覆盖 4 类意图、7 种指标、时间与地区/渠道组合筛选、日趋势和 2 条连续追问；它仍属于固定电商业务域，不等同开放域泛化评测。
+`strict-model-v3-100` 是用于开发和回归的 100 条严格模型评测集；另有一套独立的 `strict-model-v3-holdout-30` 留出集，不参与 Prompt、口径和重试逻辑调整，用于观察未见组合上的表现。holdout 共 30 条，覆盖 4 类意图、7 种指标、时间与地区/渠道组合筛选、日趋势和 2 条连续追问；它仍属于固定电商业务域，不等同开放域泛化评测。模型启用时，`workflow.plan_node` 优先调用受 `semantic.yaml` 枚举约束的结构化 Planner；模型未启用、输出非法或调用失败时才回退规则 Planner。结构化 Planner 返回 `clarification/unsupported` 时，规则 SQL 生成与执行阶段必须继续停止。
 
 运行回归集：
 
@@ -22,7 +22,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 当前规则回归集 `strict-model-v3-103` 在历史 `strict-model-v3-100` 基础上新增 3 条无筛选标量销售用例，共 **103 条**。它覆盖固定种子的电商数据（2025-10-01 至 2026-02-28），包含时间窗口、地区、渠道、品类、销售额、商品销量、退款率、退款原因、退款金额、ROI、日趋势、组合筛选，并保留 11 条两轮连续追问链。完整模型回归轮的查询总轮次为 **114**；每个轮次可能包含 SQL 生成、有限修复和结果解读请求。
 
-矩阵使用四个时间窗口：上个月（2026-01）、本月（2026-02）、近 30 天（2026-01-30 至 2026-02-28）、近 90 天（2025-12-01 至 2026-02-28）。地区覆盖华东、华南、华北、西南；渠道覆盖 App、MiniProgram、小程序、Web、Douyin、抖音；品类覆盖运动鞋服、食品饮料、数码家电、美妆个护。100 条用例的 ID、问题和独立基准 SQL 由 `app/nl2sql/evaluation.py` 生成，测试会验证 ID 唯一、基准可执行且结果非空。
+矩阵使用四个时间窗口：上个月（2026-01）、本月（2026-02）、近 30 天（2026-01-30 至 2026-02-28）、近 90 天（2025-12-01 至 2026-02-28）。地区覆盖华东、华南、华北、西南；渠道覆盖 App、MiniProgram、小程序、Web、Douyin、抖音；品类覆盖运动鞋服、食品饮料、数码家电、美妆个护。103 条用例的 ID、问题和独立基准 SQL 由 `app/nl2sql/evaluation.py` 生成，测试会验证 ID 唯一、基准可执行且结果非空。
 
 ## 范围判定与拒答
 
@@ -34,7 +34,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 澄清和拒答在规划阶段直接终止，返回空意图、空指标、空 SQL 和空行集；系统不会为了填满计划而默认成“销售额”。因此评测可以区分“正确澄清”和“静默改成另一个问题”。
 
-`scope-guard-v1` 包含 7 条用例：模糊经营问题、用户满意度、删除订单、修改退款金额、销售额下降原因、导出手机号、写 Python 代码。模糊和因果问题应澄清，写操作、敏感字段和域外问题应拒绝；所有用例都必须满足 `sql == ""` 且 `rows == []`。当前语义层快照为 **7/7 通过**，报告见 [范围评测 JSON](evaluations/archive/scope-guard-2026-11-10-final.json)。该套件是确定性规则回归，不是模型开放域理解评测。
+`scope-guard-v1` 包含 7 条用例：模糊经营问题、用户满意度、删除订单、修改退款金额、销售额下降原因、导出手机号、写 Python 代码。模糊和因果问题应澄清，写操作、敏感字段和域外问题应拒绝；所有用例都必须满足 `sql == ""` 且 `rows == []`。当前语义层快照为 **7/7 通过**，报告见 `python -m app.evaluation.run`（原报告未保留）。该套件是确定性规则回归，不是模型开放域理解评测。
 
 ## 自然语言、检索与 HTTP 压测
 
@@ -46,7 +46,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 ### 自然语言变体与真实执行
 
-`natural-language-holdout-v1` 有 15 条独立问法，其中 8 条应回答、7 条应澄清。每个可回答用例同时检查范围判定、意图、指标、预期的 Schema 表和真实执行结果；澄清用例必须没有 SQL、没有数据行，且不保留默认指标。只有范围、意图、指标、指标列、时间范围、表召回和执行行都通过，才记为端到端通过。当前为 **15/15（8 个题型族）**，但它是确定性规则链路加固定 SQLite 的真实执行验证，不是在线模型准确率，也不能替代开放域语义 SQL 测试。报告见 [自然语言评测 JSON](evaluations/archive/natural-language-holdout-2026-11-10-final.json)。
+`natural-language-holdout-v1` 有 15 条独立问法，其中 8 条应回答、7 条应澄清。每个可回答用例同时检查范围判定、意图、指标、预期的 Schema 表和真实执行结果；澄清用例必须没有 SQL、没有数据行，且不保留默认指标。只有范围、意图、指标、指标列、时间范围、表召回和执行行都通过，才记为端到端通过。当前为 **15/15（8 个题型族）**，但它是确定性规则链路加固定 SQLite 的真实执行验证，不是在线模型准确率，也不能替代开放域语义 SQL 测试。报告见 `python -m app.evaluation.run`（原报告未保留）。
 
 ### 口语严格模型集（冻结）
 
@@ -62,7 +62,19 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 - **MRR**：期望表首次出现位置倒数的均值。
 - **Full recall@4**：全部期望表都出现在前四位的比例。
 
-当前 source hash 下的本地 IDF 报告为 Top-1 **91.7%**、MRR **0.9444**、完整表召回@4 **100%**；2026-11-06 的 BGE + 本地 IDF 历史快照为 MRR **0.9583**。但该集合本身已有 top-1 失败：`哪个渠道贡献的收入最多？`返回 `customers, marketing_spend, orders, order_items`，订单表排第三。这个反例说明 91.7% 不能包装成“检索能稳定驱动 SQL 路由”。报告见 [检索消融 JSON](evaluations/archive/retrieval-ablation-2026-11-10-final.json)。
+当前 source hash 下的本地 IDF 报告为 Top-1 **91.7%**、MRR **0.9444**、完整表召回@4 **100%**；2026-11-06 的 BGE + 本地 IDF 历史快照为 MRR **0.9583**。但该集合本身已有 top-1 失败：`哪个渠道贡献的收入最多？`返回 `customers, marketing_spend, orders, order_items`，订单表排第三。这个反例说明 91.7% 不能包装成“检索能稳定驱动 SQL 路由”。报告见 `python -m app.evaluation.run`（原报告未保留）。
+
+### 40 表仿真 Schema 与关系闭包
+
+`large-schema-retrieval-v1` 使用 40 张表（核心电商 5 表 + 仓储、物流、优惠券、财务、客服、埋点、采购、HR、审计等 35 张干扰表）和 12 条标注检索题。当前结果：
+
+| 策略 | 平均估算 token | 全表召回 |
+| --- | ---: | ---: |
+| 全量 Schema | 911 | — |
+| 本地混合检索 Top-4 | 106.8 | 66.7% |
+| Top-4 + 外键图闭包（最多 10 表） | 159.3（仅计新增表） | 91.7% |
+
+Top-1 命中率为 100%，但 Top-4 仍漏掉多表连接所需的父表或子表，说明“检索命中主表”不等于“取得可执行 Schema”。闭包只从 Top-4 种子沿 benchmark 中显式声明的 24 条 synthetic foreign-key 边扩展，不按关键词补表、不注入 gold tables；上限固定为 10 表，以保证 Prompt 有界。未召回桥表时闭包不会凭空恢复，因此物流三表问题仍失败，整体为 91.7%。该 benchmark 验证的是 Schema 选择和关系扩展，不代表 40 表上的 SQL 执行准确率，也没有接入生产数据库。报告见 [large-schema-v1.json](evaluations/large-schema-v1.json)。
 
 为避免 5 张表在 top-4 下几乎全量进入 Prompt，当前默认 `ATLAS_RETRIEVAL_SUPPLEMENTS=0`：SQL 只用意图规划出的必需表。显式设为 `1` 时，只允许 **一张 top-1 且不在必需表中的检索补充表**进入 prompt；其余命中只作为 `/evidence` 证据。
 
@@ -73,11 +85,11 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 | 必需表 only（默认） | 旧快照 7/13 | 61.5% | 没有检索补充表进入 SQL Prompt |
 | 必需表 + top-1 补充 | 旧快照 7/13 | 61.5% | 逐题命中与必需表版本完全一致，未观察到生成增益 |
 
-结论：在这套五表业务上，旧 A/B 没有观察到可测的生成增益，默认不进生成链路。该 A/B 是历史快照；当前检索搜索消融见 [检索消融 JSON](evaluations/archive/retrieval-ablation-2026-11-10-final.json)。复现时分别设置 `ATLAS_RETRIEVAL_SUPPLEMENTS=0` 和 `1`。
+结论：在这套五表业务上，旧 A/B 没有观察到可测的生成增益，默认不进生成链路。该 A/B 是历史快照；当前检索搜索消融见 `python -m app.evaluation.run`（原报告未保留）。复现时分别设置 `ATLAS_RETRIEVAL_SUPPLEMENTS=0` 和 `1`。
 
 ### HTTP 冒烟压测
 
-`python -m app.evaluation.loadtest` 对真实运行中的 FastAPI 服务发送有并发上限的查询请求。2026-11-06 的本机结果为 20 个请求、并发 4、20/20 成功，P50 55.7 ms、P95 158.6 ms、约 15.56 req/s。该轮关闭在线模型、使用规则 SQL 和固定种子 SQLite，只覆盖 HTTP 接入与只读查询，不代表模型调用延迟、连接池饱和、多实例调度或生产容量。报告见 [HTTP 压测 JSON](evaluations/archive/http-loadtest-2026-11-06.json)。
+`python -m app.evaluation.loadtest` 对真实运行中的 FastAPI 服务发送有并发上限的查询请求。2026-11-06 的本机结果为 20 个请求、并发 4、20/20 成功，P50 55.7 ms、P95 158.6 ms、约 15.56 req/s。该轮关闭在线模型、使用规则 SQL 和固定种子 SQLite，只覆盖 HTTP 接入与只读查询，不代表模型调用延迟、连接池饱和、多实例调度或生产容量。报告见 `python -m app.evaluation.run`（原报告未保留）。
 
 ## 解读事实校验
 
@@ -119,7 +131,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 ## 结果记录
 
-2026-11-10 在语义层重构后的 source hash 上，用 3 个隔离进程和 `deepseek/deepseek-v4.1-flash` 重跑 100 条回归：**答案 100/100、计划 94/100**，SQL 执行率、模型完成率均为 100%；运行时自愈触发 2 条，全部成功。当前报告见 [regression JSON](evaluations/archive/regression-2026-11-10-final.json)。该回归集的独立单位仍不是 100：矩阵按时间/筛选扩展出 **19 个业务题型族**，题型族全通过率也是 19/19；不能把 raw 100/100 直接描述成 100 个独立语义样本。答案与计划的 6 条差异（94/100 计划口径）保留在逐用例报告中，不能用单一口径覆盖。历史报告不删除、不覆盖。
+2026-11-10 在语义层重构后的 source hash 上，用 3 个隔离进程和 `deepseek/deepseek-v4.1-flash` 重跑 100 条回归：**答案 100/100、计划 94/100**，SQL 执行率、模型完成率均为 100%；运行时自愈触发 2 条，全部成功。当前报告见 `regression` 历史报告（已从精简归档移出，可用 `python -m app.evaluation.run --suite regression` 重跑）。该回归集的独立单位仍不是 100：矩阵按时间/筛选扩展出 **19 个业务题型族**，题型族全通过率也是 19/19；不能把 raw 100/100 直接描述成 100 个独立语义样本。答案与计划的 6 条差异（94/100 计划口径）保留在逐用例报告中，不能用单一口径覆盖。历史报告不删除、不覆盖。
 
 2026-10-27 使用 `deepseek/deepseek-v4.1-flash` 对同一 `strict-model-v3-100` 套件完成首轮和复跑：
 
@@ -131,11 +143,11 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 
 首轮 21 条失败中，12 条为模型解读问题，9 条为结果口径问题。修正 SQL 指令、业务口径、空 SQL/全空聚合/解读重试和验收逻辑后，同套件复跑达到 100/100：修复 21 条、回归 0 条。**21 条不能全部归因于运行时自愈**；完整闭环是评测发现问题 → 修正约束和重试逻辑 → 独立验收再评测。最终轮 2 条运行时 SQL 自愈均成功。
 
-最终轮由 3 个隔离进程运行，报告保存 `runtime`、`source_sha256`、`case_manifest_sha256` 和 `evaluation_contract`。完整结果见 [首轮 JSON](evaluations/archive/evaluation-v3-100-initial-2026-10-27.json) 与 [最终轮 JSON](evaluations/archive/evaluation-v3-100-2026-10-27.json)。该成绩是带日期的在线能力快照，不是 CI 固定分数。
+最终轮由 3 个隔离进程运行，报告保存 `runtime`、`source_sha256`、`case_manifest_sha256` 和 `evaluation_contract`。完整结果见 首轮历史报告（已从精简归档移出；可用 `python -m app.evaluation.run --suite regression` 重跑） 与 [最终轮 JSON](evaluations/archive/evaluation-v3-100-2026-10-27.json)。该成绩是带日期的在线能力快照，不是 CI 固定分数。
 
 归档的 100/100 只代表 2026-10-27 的模型、网络和数据条件下的一次快照，不应被表述为稳定承诺；用当前配置重新运行时，应以新生成的带日期报告为准，不要把未归档的临时抽查写成正式成绩。
 
-2026-10-27 的旧版 18 条快照为 **5/18 通过、命中率 27.8%、SQL 执行率 55.6%、模型完成率 44.4%、平均每条 15.4 秒**。该结果用于定位 Qwen thinking、空 SQL、SQL 修复、语义口径和解读回退问题，不代表当前 100 条套件成绩；完整报告见 [旧版评测 JSON](evaluations/archive/evaluation-v2-2026-10-27.json)。
+2026-10-27 的旧版 18 条快照为 **5/18 通过、命中率 27.8%、SQL 执行率 55.6%、模型完成率 44.4%、平均每条 15.4 秒**。该结果用于定位 Qwen thinking、空 SQL、SQL 修复、语义口径和解读回退问题，不代表当前 100 条套件成绩；完整报告见 `python -m app.evaluation.run`（原报告未保留）。
 
 页面不会自动运行评测，需点击提交评测任务。任务进入 SQLite 队列后由单执行槽领取，页面轮询进度；任务支持取消、重试和两次运行对比。提交任务通过 FastAPI `BackgroundTasks` 执行，其他排队任务需要显式 claim worker 继续消费；当前没有常驻分布式 worker。
 
@@ -166,7 +178,7 @@ API 返回 `suite_version`、模型名、评测时间、`answer_correct[_rate]`�
 - 数据集版本记录用例子集、数量、题目/意图/基准 SQL 快照和校验和；任务运行前会校验快照，发现基准被静默修改时拒绝执行。失败回流候选审核后会生成新的可执行数据集。
 - 实验把同一假设下的多次模型运行组织在一起。
 - 失败用例可从已完成任务自动生成回归候选，保留原问题、预期指标和失败原因；必须人工审核后才会生成数据集版本并进入后续评测，避免把模型错误答案固化成金标准。
-- 对比接口按用例 ID 计算 `新增修复`、`新增回归` 与指标差值，并返回 `comparable`、`comparability` 和说明；数据集、用例清单、来源哈希或模型不一致时，差值只能用于定位，不能作为单一变量的因果结论。来源哈希覆盖 `app/` 下的 Python 与 YAML 文件，尚未覆盖完整仓库、Prompt、模型配置和数据库快照。
+- 对比接口按用例 ID 计算 `新增修复`、`新增回归` 与指标差值，并返回 `comparable`、`comparability` 和说明；数据集、用例清单、来源哈希或模型不一致时，差值只能用于定位，不能作为单一变量的因果结论。来源哈希覆盖 `app/` 下的 Python 与 YAML 文件，并与 `git_head`、`app_dirty` 和数据库指纹一起归档；尚未覆盖完整仓库、模型配置和全部 Prompt 模板。
 
 这套能力是可运行的项目级评测中台，但仍不是跨组织评测平台：当前使用 SQLite 任务队列和单执行槽，没有分布式任务集群、跨租户权限、自动人工标注或线上抽样回流。
 
@@ -180,9 +192,14 @@ python -m app.evaluation.run --suite scope --min-hit-rate 100
 python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
+python -m app.evaluation.run --suite large-schema --min-hit-rate 100
 # 需要已启用模型；以下会消耗在线配额，不是 CI 固定门禁
 python -m app.evaluation.run --suite colloquial-frozen --min-hit-rate 0
 node --check app/static/app.js
+node --check app/static/shell.js
+node --check app/static/sessions.js
+node --check app/static/data-platform-page.js
+node --check app/static/evaluation-page.js
 ```
 
-真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false`、`USE_BGE=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **253 passed**。
+真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false`、`USE_BGE=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **271 passed**。

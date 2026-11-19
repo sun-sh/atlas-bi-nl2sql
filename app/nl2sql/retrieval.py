@@ -32,9 +32,9 @@ def _table_text(table: TableInfo) -> str:
 
 
 class HybridSchemaRetriever:
-    def __init__(self, settings=None) -> None:
+    def __init__(self, settings=None, tables: list[TableInfo] | None = None) -> None:
         self.settings = settings or get_settings()
-        self.tables = list(SCHEMA)
+        self.tables = list(tables if tables is not None else SCHEMA)
         self.corpus = [_table_text(t) for t in self.tables]
         self.doc_tokens = [set(_tokens(x)) for x in self.corpus]
         self.df: dict[str, int] = {}
