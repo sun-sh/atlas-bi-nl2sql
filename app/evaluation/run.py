@@ -84,7 +84,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.with_suffix(".cases.jsonl").write_text("", encoding="utf-8")
     started = time.perf_counter()
     is_holdout = args.suite == "holdout"
     is_scope = args.suite == "scope"

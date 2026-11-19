@@ -259,6 +259,16 @@ def test_report_exposes_answer_and_plan_denominators(monkeypatch, tmp_path):
     assert report["plan_correct_rate"] == 100.0
 
 
+def test_large_schema_report_does_not_create_empty_case_checkpoint(monkeypatch, tmp_path):
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
+    output = tmp_path / "large-schema.json"
+    assert run.main([
+        "--suite", "large-schema", "--output", str(output), "--min-hit-rate", "90"
+    ]) == 0
+    assert output.exists()
+    assert not output.with_suffix(".cases.jsonl").exists()
+
+
 def test_scope_report_gets_answer_first_aliases(monkeypatch, tmp_path):
     monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
     output = tmp_path / "scope.json"
