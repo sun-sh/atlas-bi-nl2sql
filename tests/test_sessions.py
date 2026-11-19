@@ -16,7 +16,7 @@ def isolated_sessions(monkeypatch, tmp_path: Path):
     return tmp_path / "sessions.db"
 
 
-def make_result(question: str, context: dict) -> QueryResult:
+def make_result(question: str, context: dict, slots: dict | None = None) -> QueryResult:
     plan = QueryPlan(
         intent="sales_overview",
         tables=["orders"],
@@ -25,6 +25,7 @@ def make_result(question: str, context: dict) -> QueryResult:
         time_range="2026-01-01 至 2026-01-31",
         chart_type="bar",
         context=context,
+        slots=slots or {},
     )
     return QueryResult(
         question=question,
@@ -98,3 +99,25 @@ def test_expired_session_is_pruned(isolated_sessions):
             (session["id"],),
         )
     assert session_store.get_session(session["id"]) is None
+
+
+def test_session_context_preserves_structured_multi_value_slots(isolated_sessions):
+    session = session_store.create_session()
+    slots = {
+        "filters": [
+            {"field": "channel", "operator": "in", "values": ["App", "Web"]},
+        ],
+        "metrics": ["销售额"],
+        "dimensions": ["channel"],
+    }
+    updated = session_store.append_turn(
+        session["id"],
+        "本月 App 和 Web 各渠道销售额",
+        make_result(
+            "本月 App 和 Web 各渠道销售额",
+            {"channel_label": ["App", "Web"]},
+            slots=slots,
+        ),
+    )
+    assert updated is not None
+    assert updated["context"]["slots"] == slots

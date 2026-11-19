@@ -188,11 +188,11 @@ def _grouped_metric_sql(
     extra_metrics: list[str] | None = None,
     extra_metrics_first: bool = True,
 ) -> str:
-    """Render the generic rule path from the same plan the API reports.
+    """Render a plan where each metric keeps its own declared predicates.
 
-    The rule generator must not re-infer metrics or dimensions from the
-    question. Specialized intents (ROI and item-grain quantity) retain their
-    own joins, but ordinary sales/refund/category queries share this renderer.
+    Shared user filters stay in the outer WHERE. Metric predicates are applied
+    inside conditional aggregates; merging them globally changes the meaning of
+    companion metrics such as 订单数 when 销售额 contributes status='paid'.
     """
     metrics = _plan_metric_names(plan)
     metric = metrics[0] if metrics else default_metric
@@ -207,20 +207,45 @@ def _grouped_metric_sql(
         *metrics,
         *([] if extra_metrics_first else (extra_metrics or [])),
     ]
+
+    def metric_expression(metric_name: str) -> str:
+        expression = metric_sql(metric_name)
+        predicates = [
+            metric_filters(metric_name, aliases={"o": "o"})[0]
+            for _ in [0]
+        ] if False else list(metric_filters(metric_name))
+        if not predicates:
+            return expression
+        condition = " AND ".join(f"({item})" for item in predicates)
+        # Rewrite the aggregate itself so every aggregate receives the metric
+        # predicate per row. A CASE outside SUM would conditionally suppress
+        # the entire aggregate, yielding NULL instead of a filtered sum.
+        if expression.startswith("ROUND(SUM(") and expression.endswith(", 2)"):
+            inner = expression[len("ROUND(SUM("):-len("), 2)")]
+            return f"ROUND(SUM(CASE WHEN {condition} THEN {inner} END), 2)"
+        if expression.startswith("SUM(") and expression.endswith(")"):
+            inner = expression[len("SUM("):-1]
+            return f"SUM(CASE WHEN {condition} THEN {inner} END)"
+        if expression.startswith("COUNT(") and expression.endswith(")"):
+            inner = expression[len("COUNT("):-1]
+            return f"COUNT(CASE WHEN {condition} THEN {inner} END)"
+        if expression.startswith("ROUND(AVG(") and expression.endswith(", 2)"):
+            inner = expression[len("ROUND(AVG("):-len("), 2)")]
+            return f"ROUND(AVG(CASE WHEN {condition} THEN {inner} END), 2)"
+        return f"CASE WHEN {condition} THEN {expression} END"
+
     for metric_name in ordered_metrics:
-        selected.append(f"{metric_sql(metric_name)} AS {metric_name}")
+        selected.append(f"{metric_expression(metric_name)} AS {metric_name}")
     selected_sql = ", ".join(selected)
-    all_filters = _with_metric_filters(filters, *metrics)
-    where_sql = _where(all_filters)
-    if dimensions:
-        order = f" ORDER BY {aliases[0]}" if aliases[0].endswith("order_date") else f" ORDER BY {metric} DESC"
-        from_sql = f"SELECT {selected_sql} FROM {table_sql}"
-        if _plan_requires_customer_join(plan):
-            from_sql += " JOIN customers c ON c.customer_id = o.customer_id"
-        return from_sql + where_sql + " GROUP BY " + ", ".join(aliases) + order
+    # Only explicit plan filters are shared. Metric-declared filters are already
+    # represented in each conditional aggregate above.
+    where_sql = _where(list(filters))
     from_sql = f"SELECT {selected_sql} FROM {table_sql}"
     if _plan_requires_customer_join(plan):
         from_sql += " JOIN customers c ON c.customer_id = o.customer_id"
+    if dimensions:
+        order = f" ORDER BY {aliases[0]}" if aliases[0].endswith("order_date") else f" ORDER BY {metric} DESC"
+        return from_sql + where_sql + " GROUP BY " + ", ".join(aliases) + order
     return from_sql + where_sql
 
 def _item_grain_sales_sql(plan: QueryPlan, filters: list[str]) -> str:

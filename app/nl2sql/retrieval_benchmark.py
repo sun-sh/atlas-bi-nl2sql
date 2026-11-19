@@ -192,6 +192,8 @@ def run_large_schema_ablation() -> dict:
     seen_closure: set[str] = set()
     top4_token_total = 0.0
     closure_token_spend = 0.0
+    same_budget_topk_hits = 0
+    same_budget_topk_token_total = 0.0
     for case in BENCHMARK_CASES:
         expected = set(case["expected"])
         # A single Top-4 retrieval is the baseline. The closure arm uses only
@@ -203,16 +205,34 @@ def run_large_schema_ablation() -> dict:
 
         full_recall = expected.issubset(returned)
         closure_recall = expected.issubset(closure)
+        closure_tokens = _estimate_tokens(
+            [table_by_name[name] for name in dict.fromkeys(closure)]
+        )
+        ranked = [hit.table for hit in retriever.search(case["question"], limit=len(tables))]
+        same_budget: list[str] = []
+        for table_name in ranked:
+            candidate = list(dict.fromkeys([*same_budget, table_name]))
+            if same_budget and _estimate_tokens(
+                [table_by_name[name] for name in candidate]
+            ) > closure_tokens:
+                break
+            same_budget = candidate
+        same_budget_hit = expected.issubset(same_budget)
+        same_budget_topk_hits += int(same_budget_hit)
+        same_budget_topk_token_total += _estimate_tokens(
+            [table_by_name[name] for name in same_budget]
+        )
         full_hits += int(full_recall)
         top4_hits += int(bool(returned) and returned[0] in expected)
         closure_hits += int(closure_recall)
         top4_token_total += _estimate_tokens(
             [table_by_name[name] for name in dict.fromkeys(returned)]
         )
-        # Count only tables newly admitted by the graph. A closure does not
-        # duplicate schema text already present in the retrieval prompt.
+        # Count the complete schema text sent to the model, not just newly
+        # admitted tables. This is the only valid basis for a same-budget
+        # comparison against pure Top-K retrieval.
         closure_token_spend += _estimate_tokens(
-            [table_by_name[name] for name in dict.fromkeys(closure) if name not in returned]
+            [table_by_name[name] for name in dict.fromkeys(closure)]
         )
         seen_top4.update(returned)
         seen_closure.update(closure)
@@ -221,8 +241,13 @@ def run_large_schema_ablation() -> dict:
             "expected_tables": sorted(expected),
             "top4_tables": returned,
             "closure_tables": closure,
+            "same_budget_topk_tables": same_budget,
+            "same_budget_estimated_tokens": _estimate_tokens(
+                [table_by_name[name] for name in same_budget]
+            ),
             "full_recall_at_4": full_recall,
             "full_recall_with_closure": closure_recall,
+            "full_recall_same_budget_topk": same_budget_hit,
         })
     total = len(rows)
     return {
@@ -243,6 +268,11 @@ def run_large_schema_ablation() -> dict:
             "unique_tables": len(seen_closure),
             "seed_policy": "top4 retrieval only",
         },
+        "same_budget_topk": {
+            "estimated_tokens": round(same_budget_topk_token_total / max(1, total), 1),
+            "full_recall_rate": round(same_budget_topk_hits * 100 / total, 1),
+            "comparison": "pure retrieval ranked to the closure arm's prompt token budget",
+        },
         "cases": rows,
-        "limitations": "Synthetic catalog and labelled questions; validates schema-selection behavior and relationship closure, not SQL accuracy. Closure uses a declared synthetic foreign-key graph.",
+        "limitations": "Synthetic catalog and labelled questions; validates schema-selection behavior and relationship closure, not SQL accuracy. Closure uses a declared synthetic foreign-key graph. Same-budget Top-K is the fair comparison; closure is not claimed to improve recall.",
     }

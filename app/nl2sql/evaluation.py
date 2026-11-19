@@ -989,11 +989,13 @@ RETRIEVAL_CASES = (
 def _retrieval_metrics(retriever, weights: dict[str, float]) -> dict[str, Any]:
     cases = []
     reciprocal_ranks: list[float] = []
+    curve = {}
     for case in RETRIEVAL_CASES:
-        returned = [hit.table for hit in retriever.search(case["question"], limit=4, **weights)]
+        ranked = [hit.table for hit in retriever.search(case["question"], limit=len(RETRIEVAL_CASES), **weights)]
+        returned = ranked[:4]
         expected = set(case["expected"])
-        positions = [returned.index(table) + 1 for table in expected if table in returned]
-        top1 = bool(returned and returned[0] in expected)
+        positions = [ranked.index(table) + 1 for table in expected if table in ranked]
+        top1 = bool(ranked and ranked[0] in expected)
         full_recall = expected.issubset(returned)
         reciprocal_rank = 1.0 / min(positions) if positions else 0.0
         reciprocal_ranks.append(reciprocal_rank)
@@ -1007,6 +1009,9 @@ def _retrieval_metrics(retriever, weights: dict[str, float]) -> dict[str, Any]:
                 "reciprocal_rank": round(reciprocal_rank, 4),
             }
         )
+        for k in (1, 2, 3, 4):
+            curve.setdefault(k, 0)
+            curve[k] += int(expected.issubset(ranked[:k]))
     total = len(cases)
     top1_count = sum(item["top1_hit"] for item in cases)
     recall_count = sum(item["full_recall"] for item in cases)
@@ -1017,10 +1022,10 @@ def _retrieval_metrics(retriever, weights: dict[str, float]) -> dict[str, Any]:
         "top1_accuracy": round(top1_count * 100 / total, 1),
         "mrr": round(sum(reciprocal_ranks) / total, 4),
         "full_recall_at_4": round(recall_count * 100 / total, 1),
+        "full_recall_curve": {str(k): round(v * 100 / total, 1) for k, v in curve.items()},
         "metric": "top1_accuracy / MRR / all_expected_tables_present_in_top_4",
         "cases": cases,
     }
-
 
 def run_retrieval_ablation(retriever=None) -> dict[str, Any]:
     """Compare lexical-only, semantic-only and the shipped fusion weights."""

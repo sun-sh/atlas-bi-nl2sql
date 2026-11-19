@@ -16,6 +16,7 @@ from app.nl2sql.plan_contract import (
     FILTER_COLUMNS,
     dependency_tables,
     validate_executable_shape,
+    is_follow_up_question,
 )
 from app.nl2sql.planner import time_filter_for_label
 from app.nl2sql.semantic import (
@@ -70,7 +71,7 @@ def _extract_json(text: str) -> dict[str, Any]:
 def _filter_sql(item: PlanFilter, *, item_metric: bool) -> str:
     field = item.field.strip().lower()
     values = [str(value) for value in item.values]
-    mapping = {"channel": (set(CHANNELS), "o.channel"), "region": (set(REGIONS), "o.region"), "category": (set(CATEGORIES), "oi.category" if item_metric else "o.category"), "member_level": (set(MEMBER_LEVELS), "c.member_level")}
+    mapping = {"channel": (set(CHANNELS), "o.channel"), "region": (set(REGIONS), "o.region"), "category": (set(CATEGORIES), "oi.category" if item_metric else "o.category"), "member_level": (set(MEMBER_LEVELS), "c.member_level"), "refund_reason": (set(REFUND_REASONS), "r.reason")}
     if field not in mapping: raise ValueError(f"unsupported filter field: {field}")
     allowed, column = mapping[field]
     invalid = [value for value in values if value not in allowed]
@@ -79,30 +80,34 @@ def _filter_sql(item: PlanFilter, *, item_metric: bool) -> str:
     if len(values) != 1: raise ValueError(f"eq filter requires exactly one value: {field}")
     return f"{column} = {values[0]!r}"
 
+def _slot_filters(context: dict[str, Any]) -> list[PlanFilter]:
+    """Read the last turn's structured filters, including multi-value IN slots."""
+    slots = context.get("slots") or {}
+    raw_filters = slots.get("filters") if isinstance(slots, dict) else None
+    if not raw_filters:
+        raw_filters = context.get("filters") or []
+    result: list[PlanFilter] = []
+    for raw in raw_filters or []:
+        if isinstance(raw, PlanFilter):
+            result.append(raw)
+        elif isinstance(raw, dict):
+            try:
+                result.append(PlanFilter.model_validate(raw))
+            except ValidationError:
+                continue
+    return result
+
+
 def _inherited_filters(context: dict[str, Any], incoming_fields: set[str]) -> tuple[list[PlanFilter], set[str]]:
     inherited: list[PlanFilter] = []
     inherited_fields: set[str] = set()
-    for field, context_key in CONTEXT_FILTER_KEYS.items():
-        if field in incoming_fields:
+    for item in _slot_filters(context):
+        field = item.field.strip().lower()
+        if field in incoming_fields or field not in FILTER_TABLES:
             continue
-        raw = context.get(context_key)
-        if isinstance(raw, (list, tuple)):
-            values = [str(value) for value in raw if value]
-            operator = "in"
-        elif raw:
-            values = [str(raw)]
-            operator = "eq"
-        else:
-            continue
-        if field not in set(FILTER_TABLES):
-            # Refund reason is represented as a dimension/reason predicate by
-            # the rule generator; keep it in context but do not materialize an
-            # unsupported generic filter.
-            continue
-        inherited.append(PlanFilter(field=field, operator=operator, values=values))
+        inherited.append(item)
         inherited_fields.add(field)
     return inherited, inherited_fields
-
 
 def _context_time_filter(context: dict[str, Any], incoming_window: str) -> str:
     if incoming_window:
@@ -120,7 +125,8 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
     if any(item not in METRIC_NAMES for item in metrics): raise ValueError(f"unknown metrics: {metrics}")
     if any(item not in DIMENSIONS for item in dimensions): raise ValueError(f"unknown dimensions: {dimensions}")
     explicit_fields = {item.field.strip().lower() for item in draft.filters}
-    inherited_filters, inherited_fields = _inherited_filters(context, explicit_fields)
+    follow_up = is_follow_up_question(question, context)
+    inherited_filters, inherited_fields = _inherited_filters(context, explicit_fields) if follow_up else ([], set())
     effective_filters = [*draft.filters, *inherited_filters]
     filter_fields = explicit_fields | inherited_fields
     validate_executable_shape(
@@ -165,7 +171,7 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
         time_filter, time_range, _ = time_filter_for_label(label, reference_date)
         if time_filter: filters.insert(0, time_filter)
     else:
-        inherited_time_filter = _context_time_filter(context, draft.time_window)
+        inherited_time_filter = _context_time_filter(context, draft.time_window) if follow_up else ""
         if inherited_time_filter:
             filters.insert(0, inherited_time_filter)
             time_range = str(context.get("time_range") or "继承上一轮时间范围")
@@ -185,18 +191,28 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
     )
     tables = list(dict.fromkeys([*intent_tables, *sorted(metric_required), *sorted(shape_tables)]))
     if not time_range:
-        time_range = str(context.get("time_range") or "全部数据")
-    normalized_filter_values = {
-        field: next(
-            (
-                item.values[0]
-                for item in effective_filters
-                if item.field.strip().lower() == field and len(item.values) == 1
-            ),
-            context.get(context_key, ""),
+        time_range = str(context.get("time_range") or "全部数据") if follow_up else "全部数据"
+    def context_predicate(field: str) -> str:
+        prefixes = [FILTER_COLUMNS[field]]
+        if field == "category":
+            prefixes.append("oi.category")
+        for item in filters:
+            if any(item.startswith(prefix + " =") or item.startswith(prefix + " IN") for prefix in prefixes):
+                return item
+        return ""
+
+    normalized_filter_values = {}
+    for field, context_key in CONTEXT_FILTER_KEYS.items():
+        values = [
+            value
+            for item in effective_filters
+            if item.field.strip().lower() == field
+            for value in item.values
+        ]
+        fallback = context.get(context_key, "") if follow_up else ""
+        normalized_filter_values[context_key] = (
+            list(dict.fromkeys(values)) if len(values) > 1 else (values[0] if values else fallback)
         )
-        for field, context_key in CONTEXT_FILTER_KEYS.items()
-    }
     return QueryPlan(
         intent=draft.intent,
         tables=tables,
@@ -213,16 +229,16 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
             "time_range": time_range,
             "metrics": metrics,
             "time_filter": next((item for item in filters if "order_date" in item), ""),
-            "channel_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["channel"] + " =")), ""),
-            "region_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["region"] + " =")), ""),
-            "category_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["category"] + " =")), ""),
-            "channel_label": normalized_filter_values["channel"],
-            "region_label": normalized_filter_values["region"],
-            "category_label": normalized_filter_values["category"],
-            "member_level_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["member_level"] + " =")), ""),
-            "member_level_label": normalized_filter_values["member_level"],
-            "refund_reason_filter": next((item for item in filters if item.startswith(FILTER_COLUMNS["refund_reason"] + " =")), ""),
-            "refund_reason_label": normalized_filter_values["refund_reason"],
+            "channel_filter": context_predicate("channel"),
+            "region_filter": context_predicate("region"),
+            "category_filter": context_predicate("category"),
+            "channel_label": normalized_filter_values["channel_label"],
+            "region_label": normalized_filter_values["region_label"],
+            "category_label": normalized_filter_values["category_label"],
+            "member_level_filter": context_predicate("member_level"),
+            "member_level_label": normalized_filter_values["member_level_label"],
+            "refund_reason_filter": context_predicate("refund_reason"),
+            "refund_reason_label": normalized_filter_values["refund_reason_label"],
             "retrieval_candidates": list(context.get("retrieval_candidates") or []),
             "retrieval_supplements": list(context.get("retrieval_supplements") or []),
         },

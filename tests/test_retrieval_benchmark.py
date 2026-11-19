@@ -56,3 +56,12 @@ def test_large_schema_benchmark_never_initializes_shared_vector_backends(monkeyp
     monkeypatch.setattr(retrieval.HybridSchemaRetriever, "_load_semantic", fail)
     report = run_large_schema_ablation()
     assert report["passed"] == 11
+
+
+def test_large_schema_reports_same_budget_baseline():
+    report = run_large_schema_ablation()
+    same_budget = report["same_budget_topk"]
+    assert same_budget["full_recall_rate"] == report["closure_top10"]["full_recall_rate"]
+    assert same_budget["estimated_tokens"] <= report["closure_top10"]["estimated_tokens"]
+    by_question = {case["question"]: case for case in report["cases"]}
+    assert "same_budget_topk_tables" in by_question["客服工单最多的品类"]

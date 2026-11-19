@@ -173,6 +173,8 @@ def get_session(session_id: str) -> dict[str, Any] | None:
         latest_plan = dict(latest_result.get("plan") or {})
         latest_plan["previous_question"] = latest_answerable["question"]
         latest_plan.update(dict(latest_plan.get("context") or {}))
+        # Keep the structured slot object available for follow-up merging.
+        latest_plan["slots"] = dict(latest_plan.get("slots") or {})
     return {
         **dict(session),
         "turn_count": len(payload_turns),
