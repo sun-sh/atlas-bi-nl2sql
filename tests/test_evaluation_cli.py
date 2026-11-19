@@ -115,6 +115,15 @@ def test_evaluation_queue_accepts_multiple_but_claims_one(monkeypatch, tmp_path)
     assert evaluation_tasks.claim_next_evaluation_task() is None
 
 
+def test_retrieval_curve_reports_top3_already_saturates_five_table_benchmark():
+    from app.nl2sql.evaluation import run_retrieval_ablation
+
+    report = run_retrieval_ablation()
+    selected = report["variants"][report["selected"]]
+    assert selected["full_recall_curve"]["3"] == 100.0
+    assert selected["full_recall_curve"]["4"] == 100.0
+
+
 def test_retrieval_gate_uses_selected_variant_not_best_variant(monkeypatch, tmp_path):
     def fake_ablation():
         return {

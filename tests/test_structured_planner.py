@@ -50,7 +50,7 @@ def test_dimension_not_supported_by_metric_is_rejected():
 
 def test_metric_tables_extend_the_intent_table_set():
     plan = structured_planner.validate_structured_plan(
-        _draft(intent="sales_overview", metrics=["退款率"]),
+        _draft(intent="refund_analysis", metrics=["退款率"]),
         question="退款率",
     )
     assert plan.tables == ["orders", "refunds"]
@@ -296,6 +296,7 @@ def test_follow_up_inherits_time_and_filter_slots_without_model_repetition():
             "region_filter": "o.region = '华东'",
             "region_label": "华东",
             "metrics": ["销售额"],
+            "slots": {"filters": [{"field": "region", "operator": "eq", "values": ["华东"]}]},
         },
         reference_date="2026-02-28",
     )
@@ -326,3 +327,65 @@ def test_member_filter_requires_customers_table_and_keeps_sql_executable():
     assert "c.member_level = '普通'" in sql
     assert validate_sql(sql)
     assert execute_sql(sql)["rows"]
+
+
+def test_new_question_clears_prior_filters_unless_explicitly_repeated():
+    plan = structured_planner.validate_structured_plan(
+        _draft(intent="sales_overview", metrics=["销售额"], dimensions=["channel"], time_window="current_month"),
+        question="本月全国各渠道销售额",
+        context={
+            "question": "上个月华东各渠道销售额",
+            "region_label": "华东",
+            "region_filter": "o.region = '华东'",
+            "slots": {"filters": [{"field": "region", "operator": "eq", "values": ["华东"]}]},
+        },
+        reference_date="2026-02-28",
+    )
+    assert not any("o.region" in item for item in plan.filters)
+    assert plan.context["region_label"] == ""
+    assert plan.context["region_filter"] == ""
+
+
+def test_follow_up_reads_multi_value_channel_slots():
+    plan = structured_planner.validate_structured_plan(
+        _draft(intent="sales_overview", metrics=["销售额"], dimensions=["channel"], time_window="last_month"),
+        question="那上个月呢？",
+        context={
+            "question": "本月 App 和 Web 销售额",
+            "channel_label": ["App", "Web"],
+            "channel_filter": "o.channel IN ('App', 'Web')",
+            "slots": {"filters": [{"field": "channel", "operator": "in", "values": ["App", "Web"]}]},
+        },
+        reference_date="2026-02-28",
+    )
+    assert any("o.channel IN ('App', 'Web')" in item for item in plan.filters)
+    assert plan.context["channel_label"] == ["App", "Web"]
+
+
+def test_sales_intent_rejects_refund_rate():
+    with pytest.raises(ValueError, match="cannot render metrics"):
+        structured_planner.validate_structured_plan(
+            _draft(intent="sales_overview", metrics=["退款率"]),
+            question="本月退款率",
+        )
+
+
+def test_follow_up_inherits_refund_reason_slot_and_table():
+    plan = structured_planner.validate_structured_plan(
+        _draft(
+            intent="refund_analysis",
+            metrics=["退款金额"],
+            dimensions=["reason"],
+            time_window="last_month",
+        ),
+        question="那上个月呢？",
+        context={
+            "question": "本月质量问题退款金额",
+            "slots": {"filters": [
+                {"field": "refund_reason", "operator": "eq", "values": ["质量问题"]}
+            ]},
+        },
+        reference_date="2026-02-28",
+    )
+    assert "refunds" in plan.tables
+    assert any("r.reason = '质量问题'" in item for item in plan.filters)

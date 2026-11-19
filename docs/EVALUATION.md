@@ -62,7 +62,7 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 - **MRR**：期望表首次出现位置倒数的均值。
 - **Full recall@4**：全部期望表都出现在前四位的比例。
 
-当前 source hash 下的本地 IDF 报告为 Top-1 **91.7%**、MRR **0.9444**、完整表召回@4 **100%**；2026-11-06 的 BGE + 本地 IDF 历史快照为 MRR **0.9583**。但该集合本身已有 top-1 失败：`哪个渠道贡献的收入最多？`返回 `customers, marketing_spend, orders, order_items`，订单表排第三。这个反例说明 91.7% 不能包装成“检索能稳定驱动 SQL 路由”。报告见 `python -m app.evaluation.run`（原报告未保留）。
+当前 source hash 下的本地 IDF 报告为 Top-1 **91.7%**、MRR **0.9444**、完整表召回@3 和 @4 均为 **100%**（5 表小样本，Top-3 已饱和，适合回归不适合作为亮点）；2026-11-06 的 BGE + 本地 IDF 历史快照为 MRR **0.9583**。但该集合本身已有 top-1 失败：`哪个渠道贡献的收入最多？`返回 `customers, marketing_spend, orders, order_items`，订单表排第三。这个反例说明 91.7% 不能包装成“检索能稳定驱动 SQL 路由”。报告见 `python -m app.evaluation.run`（原报告未保留）。
 
 ### 40 表仿真 Schema 与关系闭包
 
@@ -72,9 +72,10 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 | --- | ---: | ---: |
 | 全量 Schema | 911 | — |
 | 本地混合检索 Top-4 | 106.8 | 66.7% |
-| Top-4 + 外键图闭包（最多 10 表） | 159.3（仅计新增表） | 91.7% |
+| Top-4 + 外键图闭包（最多 10 表） | 266.0（完整 Prompt） | 91.7% |
+| 同 token 预算纯 Top-K | 250.2 | 91.7% |
 
-Top-1 命中率为 100%，但 Top-4 仍漏掉多表连接所需的父表或子表，说明“检索命中主表”不等于“取得可执行 Schema”。闭包只从 Top-4 种子沿 benchmark 中显式声明的 24 条 synthetic foreign-key 边扩展，不按关键词补表、不注入 gold tables；上限固定为 10 表，以保证 Prompt 有界。40 张 synthetic 表强制使用本地 IDF，绝不写入用户的共享 Elasticsearch/Qdrant。未召回桥表时闭包不会凭空恢复，因此物流三表问题仍失败，整体为 91.7%。该 benchmark 验证的是 Schema 选择和关系扩展，不代表 40 表上的 SQL 执行准确率，也没有接入生产数据库。报告见 [large-schema-v1.json](evaluations/large-schema-v1.json)。
+Top-1 命中率为 100%，但 Top-4 仍漏掉多表连接所需的父表或子表，说明“检索命中主表”不等于“取得可执行 Schema”。闭包只从 Top-4 种子沿 benchmark 中显式声明的 24 条 synthetic foreign-key 边扩展，不按关键词补表、不注入 gold tables；上限固定为 10 表，以保证 Prompt 有界。40 张 synthetic 表强制使用本地 IDF，绝不写入用户的共享 Elasticsearch/Qdrant。未召回桥表时闭包不会凭空恢复，因此物流三表问题仍失败，整体为 91.7%。**同 token 预算的纯 Top-K 也是 91.7%**，所以当前闭包只证明可复现和有界，不证明召回增益。该 benchmark 验证的是 Schema 选择和关系扩展，不代表 40 表上的 SQL 执行准确率，也没有接入生产数据库。报告见 [large-schema-v1.json](evaluations/large-schema-v1.json)。
 
 为避免 5 张表在 top-4 下几乎全量进入 Prompt，当前默认 `ATLAS_RETRIEVAL_SUPPLEMENTS=0`：SQL 只用意图规划出的必需表。显式设为 `1` 时，只允许 **一张 top-1 且不在必需表中的检索补充表**进入 prompt；其余命中只作为 `/evidence` 证据。
 
@@ -202,4 +203,4 @@ node --check app/static/data-platform-page.js
 node --check app/static/evaluation-page.js
 ```
 
-真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false`、`USE_BGE=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **291 passed**。来源哈希只覆盖 Git 跟踪的 Python/YAML 源文件，字段细节见 [PROVENANCE.md](PROVENANCE.md)。
+真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false`、`USE_BGE=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **301 passed**。来源哈希只覆盖 Git 跟踪的 Python/YAML 源文件，字段细节见 [PROVENANCE.md](PROVENANCE.md)。

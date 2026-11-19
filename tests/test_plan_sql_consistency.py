@@ -294,3 +294,69 @@ def test_every_accepted_structured_shape_generates_executable_sql(
     )
     sql = generate_rule_sql("结构化计划可执行性回归", plan)
     assert validate_sql(sql)
+
+
+def test_multi_metric_sql_keeps_metric_scoped_filters_separate():
+    from app.nl2sql import structured_planner
+    from app.nl2sql.generator import generate_rule_sql
+    from app.nl2sql.sql_engine import validate_sql
+
+    plan = structured_planner.validate_structured_plan(
+        structured_planner.StructuredPlanDraft(
+            intent="sales_overview",
+            metrics=["销售额", "订单数"],
+            time_window="current_month",
+        ),
+        question="本月销售额和订单数",
+        reference_date="2026-02-28",
+    )
+    sql = generate_rule_sql("本月销售额和订单数", plan)
+    assert validate_sql(sql)
+    row = execute_sql(sql, limit=1)["rows"][0]
+    expected_sales = execute_sql(
+        "SELECT ROUND(SUM(paid_amount), 2) AS value FROM orders "
+        "WHERE status = 'paid' AND order_date >= '2026-02-01' "
+        "AND order_date <= '2026-02-28'"
+    )["rows"][0]["value"]
+    expected_orders = execute_sql(
+        "SELECT COUNT(*) AS value FROM orders "
+        "WHERE order_date >= '2026-02-01' AND order_date <= '2026-02-28'"
+    )["rows"][0]["value"]
+    assert row["销售额"] == expected_sales
+    assert row["订单数"] == expected_orders
+    assert row["订单数"] == 733
+
+
+@pytest.mark.parametrize(
+    ("metrics", "expected_dates"),
+    [
+        (["销售额", "订单数"], "2026-02-01"),
+        (["客单价", "订单数"], "2026-02-01"),
+    ],
+)
+def test_multi_metric_filters_do_not_bleed(metrics, expected_dates):
+    from app.nl2sql import structured_planner
+    from app.nl2sql.generator import generate_rule_sql
+
+    plan = structured_planner.validate_structured_plan(
+        structured_planner.StructuredPlanDraft(
+            intent="sales_overview",
+            metrics=metrics,
+            time_window="current_month",
+        ),
+        question="本月销售额和订单数",
+        reference_date="2026-02-28",
+    )
+    row = execute_sql(
+        generate_rule_sql("本月销售额和订单数", plan), limit=1
+    )["rows"][0]
+    paid = execute_sql(
+        "SELECT COUNT(*) AS value FROM orders WHERE order_date >= '2026-02-01' "
+        "AND order_date <= '2026-02-28' AND status = 'paid'"
+    )["rows"][0]["value"]
+    all_orders = execute_sql(
+        "SELECT COUNT(*) AS value FROM orders WHERE order_date >= '2026-02-01' "
+        "AND order_date <= '2026-02-28'"
+    )["rows"][0]["value"]
+    assert paid < all_orders
+    assert row["订单数"] == all_orders
