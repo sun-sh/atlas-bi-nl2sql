@@ -259,6 +259,16 @@ def test_report_exposes_answer_and_plan_denominators(monkeypatch, tmp_path):
     assert report["plan_correct_rate"] == 100.0
 
 
+def test_large_schema_report_does_not_create_empty_case_checkpoint(monkeypatch, tmp_path):
+    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
+    output = tmp_path / "large-schema.json"
+    assert run.main([
+        "--suite", "large-schema", "--output", str(output), "--min-hit-rate", "90"
+    ]) == 0
+    assert output.exists()
+    assert not output.with_suffix(".cases.jsonl").exists()
+
+
 def test_scope_report_gets_answer_first_aliases(monkeypatch, tmp_path):
     monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
     output = tmp_path / "scope.json"
@@ -460,18 +470,18 @@ def test_archive_check_requires_matching_current_source(tmp_path, monkeypatch):
     assert any("current app/ snapshot" in item for item in errors)
 
 
-def test_archive_check_rejects_unknown_commit(tmp_path, monkeypatch):
+def test_archive_check_allows_unreachable_git_head_with_matching_source(tmp_path, monkeypatch):
     from app.evaluation import check_archives
 
-    report = tmp_path / "unknown.json"
+    report = tmp_path / "archived.json"
     report.write_text(json.dumps({"runtime": {
         "source_sha256": "a" * 64,
         "git_head": "deadbeef",
         "app_dirty": False,
     }}), encoding="utf-8")
     monkeypatch.setattr(check_archives, "_git", lambda *args: False)
-    errors = " ".join(check_archives.validate_report(report, require_clean=True))
-    assert "does not resolve" in errors
+    monkeypatch.setattr(check_archives, "source_sha256", lambda: "a" * 64)
+    assert check_archives.validate_report(report, require_clean=True, require_current_source=True) == []
 
 
 def test_archive_check_does_not_require_commit_ancestry_after_squash(tmp_path, monkeypatch):
