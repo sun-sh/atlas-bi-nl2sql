@@ -67,3 +67,20 @@ def test_colloquial_current_month_applies_month_filter():
     plan = make_plan("这个月每天卖得怎么样？", [])
     assert plan.time_range == "2026-02-01 至 2026-02-28"
     assert any("2026-02-01" in item and "2026-02-28" in item for item in plan.filters)
+
+
+def test_refund_ratio_phrase_is_recognized_as_refund_rate():
+    from app.nl2sql.intent_guard import assess_question
+    from app.nl2sql.semantic import metric_from_text
+
+    question = "上个月按品类看，退款申请占全部订单的比例是多少？"
+    assert metric_from_text(question)["name"] == "退款率"
+    assert assess_question(question).answerable
+
+
+def test_vague_refund_judgement_requires_clarification():
+    from app.nl2sql.intent_guard import assess_question
+
+    decision = assess_question("退款问题严重吗？")
+    assert decision.outcome == "clarification"
+    assert decision.reason_code == "missing_metric"

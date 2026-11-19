@@ -115,6 +115,16 @@ def assess_question(question: str, context: dict[str, Any] | None = None) -> Que
     q = text.lower()
     context_metrics = _context_has_metric(context)
 
+    # A vague judgement question such as “退款问题严重吗？” must ask which
+    # refund metric to use instead of slipping through to a default sales metric.
+    if "退款" in q and any(term in q for term in ("严重", "好不好", "怎么样")) and not _has_metric(q):
+        return QuestionDecision(
+            OUTCOME_CLARIFICATION,
+            "missing_metric",
+            "退款问题需要明确指标。请指定退款率、退款单数或退款金额。",
+            _suggestions(OUTCOME_CLARIFICATION),
+        )
+
     if any(term in q for term in _SENSITIVE_TERMS):
         return QuestionDecision(
             OUTCOME_UNSUPPORTED,

@@ -235,7 +235,7 @@ metrics:
     ratio: false
   - name: 退款率
     output: 退款率
-    aliases: [退款率, 退货率, 售后占比, 售后问题占比, refund_rate, return_rate]
+    aliases: [退款率, 退货率, 售后占比, 售后问题占比, 退款申请占全部订单的比例, 退款申请数占订单数的比例, refund_rate, return_rate]
     grain: 订单 / 品类
     tables: [orders, refunds]
     dimensions: [channel, region, category, order_date]

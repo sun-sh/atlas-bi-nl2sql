@@ -63,11 +63,19 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 - Do not claim full async execution, distributed evaluation or cross-worker metrics.
 - Do not claim secret encryption at rest, SSO, tenant isolation or row-level security.
 
+## Known design limits
+
+- **Rule-first semantic routing.** Intent, metric and dimension routing currently depend on curated semantic aliases and deterministic rules. This is intentional for auditability in the fixed domain, but it is not open-domain NLU and will need a learned or hybrid router plus calibration data before broad schema expansion.
+- **Retrieval is a scoped experiment.** The five-table demo has no measured generation gain from retrieval supplements; it remains evidence-only by default. Qdrant, BGE and Elasticsearch are extension points, not a claim that RAG improves this benchmark.
+- **LangGraph is used as a bounded state machine.** The graph is intentionally linear with a bounded repair loop. There is no checkpointer, human-in-the-loop interrupt/resume or parallel fan-out; a smaller state machine would express the same current runtime.
+- **Single-process control planes.** Data and evaluation backends are local SQLite services in one FastAPI process. They demonstrate workflow and provenance, not distributed multi-tenant scale.
+- **External adapter boundaries.** PostgreSQL/MySQL adapters are opt-in and lack pooling, live integration tests and active cross-thread cancellation; the SQLite demo is the supported reference deployment.
+
 ## Verification snapshot
 
 Historical evidence was produced from source hash `1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178` after the semantic single-source refactor. This is a historical working-tree snapshot, not a commit identifier; new reports add `git_head` and `app_dirty` to make that distinction explicit.
 
-- Full pytest suite: **249 passed** in an approved environment (Windows sandbox blocked pytest temp paths, named pipes and local sockets; the same code passed outside it).
+- Full pytest suite: **253 passed** in an approved environment (Windows sandbox blocked pytest temp paths, named pipes and local sockets; the same code passed outside it).
 - Rule equivalence (current v3-103): **103/103 raw cases** after adding three unfiltered scalar sales cases; historical v3-100 report remains **100/100**, forced rule path.
 - Natural-language deterministic end-to-end: **15/15 raw cases / 8 fully passed families**.
 - Scope guard: **7/7**.

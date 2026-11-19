@@ -148,3 +148,16 @@ def test_rule_sql_renders_item_grain_sales_from_semantic_expression():
     sql = generate_rule_sql(question, make_plan(question, []))
     assert "ROUND(SUM(o.revenue), 2)" in sql
     assert execute_sql(sql)["rows"]
+
+
+def test_sql_prompt_uses_the_runtime_relative_date(monkeypatch):
+    captured = {}
+    def capture(instructions, prompt, **kwargs):
+        captured["instructions"] = instructions
+        captured["prompt"] = prompt
+        return "SELECT COUNT(*) AS n FROM orders", ""
+    monkeypatch.setattr(generator, "_llm_sql_result", capture)
+    plan = make_plan("本月销售额", [], reference_date="2026-10-31")
+    generator.generate_llm_sql("本月销售额", plan)
+    assert "2026-10-31" in captured["prompt"]
+    assert "固定为2026-02-28" not in captured["instructions"]

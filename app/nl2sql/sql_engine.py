@@ -16,12 +16,11 @@ from app.nl2sql.schema_catalog import allowed_tables
 from app.nl2sql.settings import get_settings
 
 
-FORBIDDEN = re.compile(r"\b(insert|update|delete|drop|alter|create|attach|detach|pragma|vacuum|replace|truncate|grant|revoke)\b", re.I)
 SENSITIVE_COLUMNS = {"customer_id", "cost_price"}
 ALLOWED_FUNCTIONS = {
     "sum", "avg", "count", "min", "max", "round", "coalesce", "ifnull",
     "cast", "substr", "strftime", "date", "datetime", "lower", "upper",
-    "abs", "nullif",
+    "abs", "nullif", "replace",
     # CASE is a SQL expression, not a callable, but sqlglot exposes it as a
     # function node. Blocking it rejects legitimate conditional aggregation.
     "case",
@@ -249,8 +248,6 @@ def validate_sql(sql: str, *, dialect: str = "sqlite") -> str:
     text = sql.strip().rstrip(";").strip()
     if not text:
         raise SQLValidationError("SQL 为空")
-    if FORBIDDEN.search(text):
-        raise SQLValidationError("检测到写操作或危险关键字")
     parse_dialect = SQL_DIALECTS.get(dialect, dialect)
     try:
         statements = sqlglot.parse(text, read=parse_dialect)

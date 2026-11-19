@@ -3,6 +3,9 @@ from __future__ import annotations
 import re
 import json
 
+import sqlglot
+from sqlglot import exp
+
 from app.nl2sql.model_config import get_model_config, make_client, model_error_message
 from app.nl2sql.model_runtime import model_call_slot, record_usage
 from app.nl2sql.models import QueryPlan
@@ -28,7 +31,7 @@ from app.nl2sql.settings import get_settings
 SQL_INSTRUCTIONS = (
     "你是 SQLite 电商分析专家。输出一条完整 SELECT SQL，支持 SELECT 内的子查询；不要解释或代码块。"
     "只能查询提供的公开字段；禁止 customer_id、cost_price、SELECT *，必须聚合。"
-    f"数据范围{DATASET_START}至{DATASET_END}，相对日期基准固定为{REFERENCE_DATE.isoformat()}；不得使用系统当前日期。"
+    "数据范围以当前激活数据源和当前计划中的时间过滤为准；相对日期基准见下方当前计划中的 reference_date，不得使用系统当前日期。"
     "严格遵守已解析时间区间和当前筛选，不要因无数据擅自扩大范围。"
     f"订单状态必须用真实英文枚举：{enum_prompt('orders.status')}。"
     "业务指标必须使用语义层给出的 expr 和 filters，不得自行更换口径。"
@@ -59,6 +62,11 @@ DIALECT_INSTRUCTIONS = {
 }
 
 
+def _relative_date_instruction(plan: QueryPlan) -> str:
+    reference_date = str(plan.context.get("reference_date") or REFERENCE_DATE.isoformat())
+    return f"本次查询的参考日期是 {reference_date}；用户说本月/上个月时，以该日期为锚点。"
+
+
 def _sql_prompt(question: str, plan: QueryPlan) -> str:
     # Only the tables selected by the planner enter the prompt. The retriever
     # can add at most one supplement to that plan; the remaining ranked hits
@@ -68,6 +76,7 @@ def _sql_prompt(question: str, plan: QueryPlan) -> str:
         f"检索补充表：{', '.join(plan.context.get('retrieval_supplements') or []) or '无'}\n"
     )
     return (
+        f"{_relative_date_instruction(plan)}\n"
         f"当前问题：{question}\n前置问题：{plan.source_question or '无'}\n"
         f"当前完整计划：{json.dumps(plan.as_dict(), ensure_ascii=False)}\n"
         f"{retrieval_note}"
@@ -90,11 +99,31 @@ def _with_metric_filters(filters: list[str], *metric_names: str) -> list[str]:
 
 
 def _marketing_filters(plan: QueryPlan) -> list[str]:
+    """Move known order predicates onto marketing_spend by AST column mapping.
+
+    String replacement is unsafe once a predicate contains a function call,
+    subquery, or a literal that happens to contain an alias-like substring.
+    """
     filters: list[str] = []
     for item in plan.filters:
-        if ".region" in item or ".category" in item:
-            raise ValueError("营销投放表不包含地区或品类字段，暂不支持按这些维度拆分 ROI")
-        filters.append(item.replace("o.order_date", "m.spend_date").replace("o.channel", "m.channel"))
+        try:
+            predicate = sqlglot.parse_one(item, read="sqlite")
+        except Exception as exc:
+            raise ValueError(f"无法解析营销筛选条件：{item}") from exc
+        for column in predicate.find_all(exp.Column):
+            if column.table.lower() != "o":
+                continue
+            name = column.name.lower()
+            if name == "order_date":
+                column.set("this", exp.to_identifier("spend_date"))
+            elif name == "channel":
+                column.set("this", exp.to_identifier("channel"))
+            else:
+                raise ValueError(
+                    "营销投放表只支持订单日期和渠道筛选，暂不支持其他订单字段"
+                )
+            column.set("table", exp.to_identifier("m"))
+        filters.append(str(predicate))
     return filters
 
 

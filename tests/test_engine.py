@@ -177,7 +177,7 @@ def test_marketing_queries_filter_on_spend_date(question, channel, date_fragment
 def test_marketing_region_filter_is_rejected_clearly(retriever: HybridSchemaRetriever):
     question = "上个月华东地区各渠道ROI"
     plan = make_plan(question, retriever.search(question))
-    with pytest.raises(ValueError, match="不包含地区或品类字段"):
+    with pytest.raises(ValueError, match="只支持订单日期和渠道筛选"):
         generate_rule_sql(question, plan)
 
 
@@ -719,3 +719,10 @@ def test_validator_allows_composite_join_key():
         "WHERE o.status = 'paid' GROUP BY c.member_level"
     )
     assert validate_sql(composite)
+
+
+def test_validator_allows_replace_function_and_keyword_literals():
+    assert validate_sql("SELECT REPLACE(o.channel, 'App', 'APP') AS channel FROM orders o")
+    assert validate_sql("SELECT COUNT(*) AS n FROM orders WHERE channel = 'Spring Update'")
+    with pytest.raises(SQLValidationError):
+        validate_sql("UPDATE orders SET status = 'paid'")
