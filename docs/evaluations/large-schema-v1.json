@@ -20,11 +20,16 @@
   },
   "closure_top10": {
     "tables": 10,
-    "estimated_tokens": 159.3,
+    "estimated_tokens": 266.0,
     "full_recall_rate": 91.7,
     "relationship_edges": 24,
     "unique_tables": 30,
     "seed_policy": "top4 retrieval only"
+  },
+  "same_budget_topk": {
+    "estimated_tokens": 250.2,
+    "full_recall_rate": 91.7,
+    "comparison": "pure retrieval ranked to the closure arm's prompt token budget"
   },
   "cases": [
     {
@@ -50,8 +55,21 @@
         "refunds",
         "shipment_orders"
       ],
+      "same_budget_topk_tables": [
+        "orders",
+        "promotion_campaigns",
+        "finance_settlements",
+        "customers",
+        "marketing_spend",
+        "order_items",
+        "refunds",
+        "warehouse_inventory",
+        "warehouse_locations"
+      ],
+      "same_budget_estimated_tokens": 260,
       "full_recall_at_4": true,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "按投放渠道看 ROI 排名",
@@ -77,8 +95,21 @@
         "coupon_redemptions",
         "finance_invoices"
       ],
+      "same_budget_topk_tables": [
+        "marketing_spend",
+        "promotion_campaigns",
+        "finance_settlements",
+        "customers",
+        "orders",
+        "order_items",
+        "refunds",
+        "warehouse_inventory",
+        "warehouse_locations"
+      ],
+      "same_budget_estimated_tokens": 260,
       "full_recall_at_4": false,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "各品类退款率排名",
@@ -104,8 +135,21 @@
         "shipment_orders",
         "support_tickets"
       ],
+      "same_budget_topk_tables": [
+        "refunds",
+        "finance_payments",
+        "order_items",
+        "orders",
+        "marketing_spend",
+        "customers",
+        "warehouse_inventory",
+        "warehouse_locations",
+        "shipment_orders"
+      ],
+      "same_budget_estimated_tokens": 261,
       "full_recall_at_4": true,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "商品行销量按品类汇总",
@@ -131,8 +175,21 @@
         "customers",
         "finance_invoices"
       ],
+      "same_budget_topk_tables": [
+        "order_items",
+        "purchase_lines",
+        "product_prices",
+        "tax_rates",
+        "product_suppliers",
+        "product_catalog",
+        "marketing_spend",
+        "orders",
+        "refunds"
+      ],
+      "same_budget_estimated_tokens": 237,
       "full_recall_at_4": false,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "不同会员等级客户贡献多少销售额",
@@ -158,8 +215,21 @@
         "finance_invoices",
         "finance_payments"
       ],
+      "same_budget_topk_tables": [
+        "customers",
+        "orders",
+        "carriers",
+        "customer_segments",
+        "customer_service_scores",
+        "support_tickets",
+        "support_messages",
+        "order_items",
+        "refunds"
+      ],
+      "same_budget_estimated_tokens": 235,
       "full_recall_at_4": true,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "发货后多久送到，承运商表现如何",
@@ -186,8 +256,21 @@
         "finance_payments",
         "support_tickets"
       ],
+      "same_budget_topk_tables": [
+        "carriers",
+        "orders",
+        "order_items",
+        "refunds",
+        "marketing_spend",
+        "customers",
+        "warehouse_inventory",
+        "warehouse_locations",
+        "shipment_orders"
+      ],
+      "same_budget_estimated_tokens": 257,
       "full_recall_at_4": false,
-      "full_recall_with_closure": false
+      "full_recall_with_closure": false,
+      "full_recall_same_budget_topk": false
     },
     {
       "question": "优惠券核销带来的订单金额",
@@ -213,8 +296,22 @@
         "shipment_orders",
         "support_tickets"
       ],
+      "same_budget_topk_tables": [
+        "coupon_redemptions",
+        "coupon_definitions",
+        "orders",
+        "refunds",
+        "finance_invoices",
+        "purchase_lines",
+        "marketing_attribution",
+        "purchase_orders",
+        "shipment_orders",
+        "marketing_spend"
+      ],
+      "same_budget_estimated_tokens": 275,
       "full_recall_at_4": true,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "客服工单最多的品类",
@@ -240,8 +337,20 @@
         "coupon_redemptions",
         "finance_invoices"
       ],
+      "same_budget_topk_tables": [
+        "support_tickets",
+        "support_messages",
+        "customer_service_scores",
+        "support_agents",
+        "orders",
+        "order_items",
+        "refunds",
+        "marketing_spend"
+      ],
+      "same_budget_estimated_tokens": 221,
       "full_recall_at_4": false,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "App 事件中页面点击转化",
@@ -267,8 +376,21 @@
         "carriers",
         "coupon_redemptions"
       ],
+      "same_budget_topk_tables": [
+        "app_events",
+        "app_sessions",
+        "shipment_events",
+        "marketing_spend",
+        "orders",
+        "order_items",
+        "refunds",
+        "customers",
+        "warehouse_inventory"
+      ],
+      "same_budget_estimated_tokens": 259,
       "full_recall_at_4": true,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "财务结算各渠道手续费",
@@ -293,8 +415,21 @@
         "finance_payments",
         "order_items"
       ],
+      "same_budget_topk_tables": [
+        "finance_settlements",
+        "finance_invoices",
+        "finance_ledger",
+        "carriers",
+        "finance_payments",
+        "promotion_campaigns",
+        "customers",
+        "marketing_spend",
+        "orders"
+      ],
+      "same_budget_estimated_tokens": 237,
       "full_recall_at_4": true,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "采购订单到货延迟",
@@ -320,8 +455,21 @@
         "coupon_redemptions",
         "customers"
       ],
+      "same_budget_topk_tables": [
+        "purchase_orders",
+        "purchase_lines",
+        "product_suppliers",
+        "finance_invoices",
+        "marketing_attribution",
+        "coupon_redemptions",
+        "shipment_orders",
+        "orders",
+        "refunds"
+      ],
+      "same_budget_estimated_tokens": 240,
       "full_recall_at_4": true,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     },
     {
       "question": "仓库 SKU 安全库存告警",
@@ -347,16 +495,29 @@
         "finance_payments",
         "refunds"
       ],
+      "same_budget_topk_tables": [
+        "warehouse_inventory",
+        "warehouse_locations",
+        "order_items",
+        "orders",
+        "refunds",
+        "marketing_spend",
+        "customers",
+        "shipment_orders",
+        "shipment_events"
+      ],
+      "same_budget_estimated_tokens": 261,
       "full_recall_at_4": true,
-      "full_recall_with_closure": true
+      "full_recall_with_closure": true,
+      "full_recall_same_budget_topk": true
     }
   ],
-  "limitations": "Synthetic catalog and labelled questions; validates schema-selection behavior and relationship closure, not SQL accuracy. Closure uses a declared synthetic foreign-key graph.",
+  "limitations": "Synthetic catalog and labelled questions; validates schema-selection behavior and relationship closure, not SQL accuracy. Closure uses a declared synthetic foreign-key graph. Same-budget Top-K is the fair comparison; closure is not claimed to improve recall.",
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 12141.6,
-    "source_sha256": "85dc6efa7a3f17c9a0049f1d642aba9a87590afffe718e068a3375d6bc3593a5",
-    "git_head": "12cdda5a7bd55e6bb2d26f50c1c37fba2baee0b5",
+    "wall_elapsed_ms": 7750.6,
+    "source_sha256": "9cc1c251615fc803ae83bba2d23ce3a0fd774c37853f43c1faa5860d1ed850ca",
+    "git_head": "3ec21fcee5d9cddb0e1e59e62bf9731a13767e5a",
     "app_dirty": false,
     "database": {
       "kind": "sqlite",
