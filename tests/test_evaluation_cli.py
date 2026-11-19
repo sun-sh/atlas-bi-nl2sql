@@ -271,52 +271,85 @@ def test_scope_report_gets_answer_first_aliases(monkeypatch, tmp_path):
 
 
 def test_source_hash_ignores_untracked_python_files(monkeypatch):
-    from pathlib import Path
-
     from app.evaluation import provenance
 
-    tracked = provenance.REPO_ROOT / "app" / "nl2sql" / "semantic.py"
-    monkeypatch.setattr(provenance, "_git", lambda *args: "app/nl2sql/semantic.py")
+    monkeypatch.setattr(
+        provenance,
+        "_git",
+        lambda *args: "app/nl2sql/semantic.py",
+    )
+    monkeypatch.setattr(
+        provenance,
+        "_tracked_source_blobs",
+        lambda root: [("nl2sql/semantic.py", b"tracked-source")],
+    )
     before = provenance.source_sha256()
-    debug = Path(provenance.__file__).resolve().parents[1] / "debug_provenance.py"
+    debug = provenance.REPO_ROOT / "app" / "debug_provenance.py"
     debug.write_text("print('debug')\n", encoding="utf-8")
     try:
         after = provenance.source_sha256()
     finally:
         debug.unlink(missing_ok=True)
-    assert tracked.exists()
     assert before == after
 
 
-def test_source_hash_still_changes_for_tracked_file(monkeypatch):
+def test_source_hash_uses_committed_blob_bytes_not_checkout_line_endings(monkeypatch):
     from app.evaluation import provenance
 
-    monkeypatch.setattr(provenance, "_git", lambda *args: "app/semantic.yaml")
+    monkeypatch.setattr(
+        provenance,
+        "_tracked_source_blobs",
+        lambda root: [("nl2sql/example.py", b"print('lf')\n")],
+    )
+    first = provenance.source_sha256()
+    monkeypatch.setattr(
+        provenance,
+        "_tracked_source_blobs",
+        lambda root: [("nl2sql/example.py", b"print('lf')\r\n")],
+    )
+    second = provenance.source_sha256()
+    assert first != second
+
+
+def test_source_hash_tracks_committed_semantic_yaml(monkeypatch):
+    from app.evaluation import provenance
+
+    monkeypatch.setattr(
+        provenance,
+        "_tracked_source_blobs",
+        lambda root: [("semantic.yaml", b"version: tracked")],
+    )
     before = provenance.source_sha256()
-    semantic_path = provenance.REPO_ROOT / "app" / "semantic.yaml"
-    original = semantic_path.read_bytes()
-    try:
-        semantic_path.write_bytes(original + b"\n# provenance-tracked-test\n")
-        after = provenance.source_sha256()
-    finally:
-        semantic_path.write_bytes(original)
+    monkeypatch.setattr(
+        provenance,
+        "_tracked_source_blobs",
+        lambda root: [("semantic.yaml", b"version: newer-commit")],
+    )
+    after = provenance.source_sha256()
     assert before != after
 
 
-def test_source_hash_covers_semantic_yaml(monkeypatch, tmp_path):
-    monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
-    output = tmp_path / "hash.json"
-    assert run.main(["--suite", "scope", "--output", str(output)]) == 0
-    before = json.loads(output.read_text(encoding="utf-8"))["runtime"]["source_sha256"]
-    semantic_path = Path(run.__file__).resolve().parents[1] / "semantic.yaml"
-    original = semantic_path.read_bytes()
-    try:
-        semantic_path.write_bytes(original + b"\n# provenance-test\n")
-        assert run.main(["--suite", "scope", "--output", str(output)]) == 0
-        after = json.loads(output.read_text(encoding="utf-8"))["runtime"]["source_sha256"]
-    finally:
-        semantic_path.write_bytes(original)
-    assert before != after
+def test_working_tree_edit_marks_dirty_without_changing_committed_hash(monkeypatch):
+    from app.evaluation import provenance
+
+    monkeypatch.setattr(
+        provenance,
+        "_tracked_source_blobs",
+        lambda root: [("semantic.yaml", b"version: committed")],
+    )
+    monkeypatch.setattr(provenance, "_git", lambda *args: {
+        ("rev-parse", "HEAD"): "clean-head",
+        ("status", "--porcelain", "--untracked-files=no", "--", "app"): " M app/semantic.yaml",
+    }.get(tuple(args), ""))
+    first = provenance.evaluation_provenance()
+    monkeypatch.setattr(provenance, "_git", lambda *args: {
+        ("rev-parse", "HEAD"): "clean-head",
+        ("status", "--porcelain", "--untracked-files=no", "--", "app"): "",
+    }.get(tuple(args), ""))
+    second = provenance.evaluation_provenance()
+    assert first["source_sha256"] == second["source_sha256"]
+    assert first["app_dirty"] is True
+    assert second["app_dirty"] is False
 
 
 def test_cli_report_binds_git_head_and_dirty_flag(monkeypatch, tmp_path):

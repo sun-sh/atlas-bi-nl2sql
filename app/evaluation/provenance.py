@@ -27,43 +27,49 @@ def _git(*args: str) -> str:
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
-def _tracked_source_paths(source_root: Path) -> list[Path]:
-    """Return tracked Python/YAML files under source_root, never cache files."""
+def _tracked_source_blobs(source_root: Path) -> list[tuple[str, bytes]]:
+    """Return (relative path, committed blob bytes) for tracked source files."""
     try:
         relative = source_root.relative_to(REPO_ROOT).as_posix()
     except ValueError:
         relative = ""
     output = _git("ls-files", "--", relative or ".")
-    paths: list[Path] = []
+    blobs: list[tuple[str, bytes]] = []
     for line in output.splitlines():
         path = REPO_ROOT / line
         if path.suffix not in {".py", ".yaml"}:
-            continue
-        if not path.is_file():
             continue
         try:
             path.relative_to(source_root)
         except ValueError:
             continue
-        paths.append(path)
-    return sorted(paths)
+        try:
+            result = subprocess.run(
+                ["git", "show", f":{line}"],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            blobs.append((path.relative_to(source_root).as_posix(), result.stdout))
+    return sorted(blobs)
 
 
 def source_sha256(root: Path | None = None) -> str:
-    """Hash tracked Python and YAML source files at their working-tree bytes.
+    """Hash committed Git blobs for tracked Python/YAML source files.
 
-    Untracked debug scripts and interpreter caches are deliberately excluded:
-    the commit identity plus app_dirty records those separately. A report must
-    bind the reviewed source manifest, not incidental files created by pytest
-    or a local experiment.
+    Using blob bytes rather than checkout bytes makes the digest independent
+    of CRLF checkout policy, pytest caches and untracked debug scripts.
     """
     source_root = (root or APP_ROOT).resolve()
     digest = hashlib.sha256()
-    for path in _tracked_source_paths(source_root):
-        digest.update(path.relative_to(source_root).as_posix().encode("utf-8"))
-        digest.update(path.read_bytes())
+    for relative, content in _tracked_source_blobs(source_root):
+        digest.update(relative.encode("utf-8"))
+        digest.update(content)
     return digest.hexdigest()
-
 
 def database_identity(target) -> dict[str, Any]:
     """Describe the active database without exposing paths or credentials."""
