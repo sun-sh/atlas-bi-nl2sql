@@ -27,13 +27,39 @@ def _git(*args: str) -> str:
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
+def _tracked_source_paths(source_root: Path) -> list[Path]:
+    """Return tracked Python/YAML files under source_root, never cache files."""
+    try:
+        relative = source_root.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        relative = ""
+    output = _git("ls-files", "--", relative or ".")
+    paths: list[Path] = []
+    for line in output.splitlines():
+        path = REPO_ROOT / line
+        if path.suffix not in {".py", ".yaml"}:
+            continue
+        if not path.is_file():
+            continue
+        try:
+            path.relative_to(source_root)
+        except ValueError:
+            continue
+        paths.append(path)
+    return sorted(paths)
+
+
 def source_sha256(root: Path | None = None) -> str:
-    """Hash the working-tree Python and YAML files as an untracked snapshot."""
-    source_root = root or APP_ROOT
+    """Hash tracked Python and YAML source files at their working-tree bytes.
+
+    Untracked debug scripts and interpreter caches are deliberately excluded:
+    the commit identity plus app_dirty records those separately. A report must
+    bind the reviewed source manifest, not incidental files created by pytest
+    or a local experiment.
+    """
+    source_root = (root or APP_ROOT).resolve()
     digest = hashlib.sha256()
-    for path in sorted(
-        item for item in source_root.rglob("*") if item.suffix in {".py", ".yaml"}
-    ):
+    for path in _tracked_source_paths(source_root):
         digest.update(path.relative_to(source_root).as_posix().encode("utf-8"))
         digest.update(path.read_bytes())
     return digest.hexdigest()
@@ -68,7 +94,9 @@ def evaluation_provenance() -> dict[str, Any]:
     only when paired with git_head and app_dirty; it does not identify a
     commit on its own.
     """
-    app_status = _git("status", "--porcelain", "--", "app")
+    # Untracked debug scripts and interpreter caches must not make archived
+    # source snapshots drift. Tracked modifications still mark the app dirty.
+    app_status = _git("status", "--porcelain", "--untracked-files=no", "--", "app")
     return {
         "source_sha256": source_sha256(),
         "git_head": _git("rev-parse", "HEAD"),

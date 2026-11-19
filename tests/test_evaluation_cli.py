@@ -270,6 +270,39 @@ def test_scope_report_gets_answer_first_aliases(monkeypatch, tmp_path):
 
 
 
+def test_source_hash_ignores_untracked_python_files(monkeypatch):
+    from pathlib import Path
+
+    from app.evaluation import provenance
+
+    tracked = provenance.REPO_ROOT / "app" / "nl2sql" / "semantic.py"
+    monkeypatch.setattr(provenance, "_git", lambda *args: "app/nl2sql/semantic.py")
+    before = provenance.source_sha256()
+    debug = Path(provenance.__file__).resolve().parents[1] / "debug_provenance.py"
+    debug.write_text("print('debug')\n", encoding="utf-8")
+    try:
+        after = provenance.source_sha256()
+    finally:
+        debug.unlink(missing_ok=True)
+    assert tracked.exists()
+    assert before == after
+
+
+def test_source_hash_still_changes_for_tracked_file(monkeypatch):
+    from app.evaluation import provenance
+
+    monkeypatch.setattr(provenance, "_git", lambda *args: "app/semantic.yaml")
+    before = provenance.source_sha256()
+    semantic_path = provenance.REPO_ROOT / "app" / "semantic.yaml"
+    original = semantic_path.read_bytes()
+    try:
+        semantic_path.write_bytes(original + b"\n# provenance-tracked-test\n")
+        after = provenance.source_sha256()
+    finally:
+        semantic_path.write_bytes(original)
+    assert before != after
+
+
 def test_source_hash_covers_semantic_yaml(monkeypatch, tmp_path):
     monkeypatch.setattr(run, "get_model_config", lambda: SimpleNamespace(api_key="", base_url=""))
     output = tmp_path / "hash.json"
@@ -300,7 +333,7 @@ def test_cli_report_binds_git_head_and_dirty_flag(monkeypatch, tmp_path):
     })
     monkeypatch.setattr(provenance, "_git", lambda *args: {
         ("rev-parse", "HEAD"): "abc123",
-        ("status", "--porcelain", "--", "app"): " M app/demo.py",
+        ("status", "--porcelain", "--untracked-files=no", "--", "app"): " M app/demo.py",
     }.get(tuple(args), ""))
     output = tmp_path / "provenance.json"
     assert run.main(["--output", str(output)]) == 0
@@ -323,16 +356,16 @@ def test_provenance_function_reports_clean_worktree(monkeypatch):
     assert len(result["source_sha256"]) == 64
 
 
-def test_provenance_function_reports_app_only_dirty(monkeypatch):
+def test_provenance_function_ignores_untracked_app_files(monkeypatch):
     from app.evaluation import provenance
 
     monkeypatch.setattr(provenance, "_git", lambda *args: {
-        ("rev-parse", "HEAD"): "dirty-head",
-        ("status", "--porcelain", "--", "app"): "?? app/debug.py",
+        ("rev-parse", "HEAD"): "clean-head",
+        ("status", "--porcelain", "--untracked-files=no", "--", "app"): "",
     }.get(tuple(args), ""))
     result = provenance.evaluation_provenance()
-    assert result["git_head"] == "dirty-head"
-    assert result["app_dirty"] is True
+    assert result["git_head"] == "clean-head"
+    assert result["app_dirty"] is False
 
 def test_task_report_uses_the_same_provenance_contract(monkeypatch, tmp_path):
     from app.evaluation import provenance
