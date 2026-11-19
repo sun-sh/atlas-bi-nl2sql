@@ -44,3 +44,15 @@ def test_closure_uses_declared_relationship_edges_from_top4_only():
     logistics = by_question["发货后多久送到，承运商表现如何"]
     assert "shipment_events" not in logistics["top4_tables"]
     assert logistics["full_recall_with_closure"] is False
+
+
+def test_large_schema_benchmark_never_initializes_shared_vector_backends(monkeypatch):
+    from app.nl2sql import retrieval
+
+    def fail(*args, **kwargs):
+        raise AssertionError("shared retrieval backend must not be initialized")
+
+    monkeypatch.setattr(retrieval.HybridSchemaRetriever, "_load_elastic", fail)
+    monkeypatch.setattr(retrieval.HybridSchemaRetriever, "_load_semantic", fail)
+    report = run_large_schema_ablation()
+    assert report["passed"] == 11

@@ -110,7 +110,7 @@ def test_all_selected_metrics_must_support_the_dimensions():
         structured_planner.validate_structured_plan(
             _draft(
                 intent="sales_overview",
-                metrics=["销售额", "退款金额"],
+                metrics=["销售额"],
                 dimensions=["reason"],
             ),
             question="各退款原因的销售额和退款金额",
@@ -243,3 +243,86 @@ def test_workflow_reapplies_semantic_guard_when_llm_plan_fails(monkeypatch):
     assert calls == [False, True]
     assert state["decision"]["outcome"] == "clarification"
     assert state["plan"].tables == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_table"),
+    [
+        ("member_level", "普通", "customers"),
+    ],
+)
+def test_filter_table_dependencies_are_closed(field, value, expected_table):
+    plan = structured_planner.validate_structured_plan(
+        _draft(
+            intent="sales_overview",
+            metrics=["销售额"],
+            filters=[structured_planner.PlanFilter(field=field, values=[value])],
+        ),
+        question="本月销售额",
+    )
+    assert expected_table in plan.tables
+
+
+@pytest.mark.parametrize(
+    ("intent", "metrics", "dimensions", "filters"),
+    [
+        ("marketing_efficiency", ["销售额"], [], []),
+        ("category_analysis", ["销量", "销售额"], ["category"], []),
+        ("refund_analysis", ["退款金额", "退款单数"], ["reason"], []),
+    ],
+)
+def test_structured_planner_rejects_shapes_the_rule_generator_cannot_execute(
+    intent, metrics, dimensions, filters
+):
+    with pytest.raises(ValueError, match="cannot render|exactly one"):
+        structured_planner.validate_structured_plan(
+            _draft(intent=intent, metrics=metrics, dimensions=dimensions, filters=filters),
+            question="测试不可执行计划",
+        )
+
+
+def test_follow_up_inherits_time_and_filter_slots_without_model_repetition():
+    plan = structured_planner.validate_structured_plan(
+        _draft(
+            intent="sales_overview",
+            metrics=["销售额"],
+            filters=[structured_planner.PlanFilter(field="channel", values=["Web"])],
+        ),
+        question="那 Web 呢？",
+        context={
+            "question": "上个月华东各渠道销售额",
+            "time_filter": "o.order_date BETWEEN '2026-01-01' AND '2026-01-31'",
+            "time_range": "2026-01-01 至 2026-01-31",
+            "region_filter": "o.region = '华东'",
+            "region_label": "华东",
+            "metrics": ["销售额"],
+        },
+        reference_date="2026-02-28",
+    )
+    assert any("o.order_date BETWEEN" in item for item in plan.filters)
+    assert any("o.region = '华东'" in item for item in plan.filters)
+    assert any("o.channel = 'Web'" in item for item in plan.filters)
+    assert plan.context["time_range"] == "2026-01-01 至 2026-01-31"
+    assert plan.context["region_label"] == "华东"
+
+
+def test_member_filter_requires_customers_table_and_keeps_sql_executable():
+    from app.nl2sql.generator import generate_rule_sql
+    from app.nl2sql.sql_engine import execute_sql, validate_sql
+
+    plan = structured_planner.validate_structured_plan(
+        _draft(
+            intent="sales_overview",
+            metrics=["销售额"],
+            filters=[structured_planner.PlanFilter(field="member_level", values=["普通"])],
+            time_window="current_month",
+        ),
+        question="本月普通会员的销售额",
+        reference_date="2026-02-28",
+    )
+    assert "customers" in plan.tables
+    sql = generate_rule_sql("本月普通会员的销售额", plan)
+    assert "JOIN customers c" in sql
+    assert "c.member_level = '普通'" in sql
+    assert validate_sql(sql)
+    assert execute_sql(sql)["rows"]

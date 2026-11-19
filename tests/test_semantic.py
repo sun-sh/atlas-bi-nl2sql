@@ -82,6 +82,7 @@ def test_overview_metrics_uses_semantic_expressions():
     assert overview["dataset"] == {
         "start": semantic.DATASET_START,
         "end": semantic.DATASET_END,
+        "reference_date": semantic.REFERENCE_DATE.isoformat(),
     }
     assert "dashboard_metrics" in semantic.SEMANTIC
     assert "概览退款率" in semantic.DASHBOARD_METRIC_BY_NAME

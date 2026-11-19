@@ -67,6 +67,9 @@ class QueryPlan:
     inherited: list[str] = field(default_factory=list)
     source_question: str = ""
     context: dict[str, Any] = field(default_factory=dict)
+    # Structured slot values retained separately from rendered SQL predicates
+    # so follow-up turns can merge them without parsing SQL strings.
+    slots: dict[str, Any] = field(default_factory=dict)
     outcome: str = "answered"
     reason_code: str = ""
     decision: dict[str, Any] = field(default_factory=dict)
@@ -84,6 +87,7 @@ class QueryPlan:
             "inherited": self.inherited,
             "source_question": self.source_question,
             "context": self.context,
+            "slots": self.slots,
             "outcome": self.outcome,
             "reason_code": self.reason_code,
             "decision": self.decision,

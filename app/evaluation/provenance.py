@@ -27,17 +27,49 @@ def _git(*args: str) -> str:
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
-def source_sha256(root: Path | None = None) -> str:
-    """Hash the working-tree Python and YAML files as an untracked snapshot."""
-    source_root = root or APP_ROOT
-    digest = hashlib.sha256()
-    for path in sorted(
-        item for item in source_root.rglob("*") if item.suffix in {".py", ".yaml"}
-    ):
-        digest.update(path.relative_to(source_root).as_posix().encode("utf-8"))
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
+def _tracked_source_blobs(source_root: Path) -> list[tuple[str, bytes]]:
+    """Return (relative path, committed blob bytes) for tracked source files."""
+    try:
+        relative = source_root.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        relative = ""
+    output = _git("ls-files", "--", relative or ".")
+    blobs: list[tuple[str, bytes]] = []
+    for line in output.splitlines():
+        path = REPO_ROOT / line
+        if path.suffix not in {".py", ".yaml"}:
+            continue
+        try:
+            path.relative_to(source_root)
+        except ValueError:
+            continue
+        try:
+            result = subprocess.run(
+                ["git", "show", f":{line}"],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            blobs.append((path.relative_to(source_root).as_posix(), result.stdout))
+    return sorted(blobs)
 
+
+def source_sha256(root: Path | None = None) -> str:
+    """Hash committed Git blobs for tracked Python/YAML source files.
+
+    Using blob bytes rather than checkout bytes makes the digest independent
+    of CRLF checkout policy, pytest caches and untracked debug scripts.
+    """
+    source_root = (root or APP_ROOT).resolve()
+    digest = hashlib.sha256()
+    for relative, content in _tracked_source_blobs(source_root):
+        digest.update(relative.encode("utf-8"))
+        digest.update(content)
+    return digest.hexdigest()
 
 def database_identity(target) -> dict[str, Any]:
     """Describe the active database without exposing paths or credentials."""
@@ -68,7 +100,9 @@ def evaluation_provenance() -> dict[str, Any]:
     only when paired with git_head and app_dirty; it does not identify a
     commit on its own.
     """
-    app_status = _git("status", "--porcelain", "--", "app")
+    # Untracked debug scripts and interpreter caches must not make archived
+    # source snapshots drift. Tracked modifications still mark the app dirty.
+    app_status = _git("status", "--porcelain", "--untracked-files=no", "--", "app")
     return {
         "source_sha256": source_sha256(),
         "git_head": _git("rev-parse", "HEAD"),

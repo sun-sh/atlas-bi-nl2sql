@@ -260,3 +260,37 @@ def test_structured_plan_filters_reach_rule_sql():
     assert "o.region = '华东'" in sql
     assert "o.order_date" in sql
     assert "GROUP BY o.channel" in sql
+
+
+@pytest.mark.parametrize(
+    ("intent", "metrics", "dimensions", "filters"),
+    [
+        ("sales_overview", ["销售额"], ["channel"], [{"field": "region", "values": ["华东"]}]),
+        ("sales_overview", ["客单价"], ["category"], []),
+        ("category_analysis", ["销量"], ["category"], []),
+        ("marketing_efficiency", ["ROI"], ["channel"], []),
+        ("marketing_efficiency", ["投放花费"], ["order_date"], []),
+        ("refund_analysis", ["退款率"], ["channel"], []),
+        ("refund_analysis", ["退款金额"], ["reason"], []),
+    ],
+)
+def test_every_accepted_structured_shape_generates_executable_sql(
+    intent, metrics, dimensions, filters
+):
+    from app.nl2sql import structured_planner
+    from app.nl2sql.generator import generate_rule_sql
+    from app.nl2sql.sql_engine import validate_sql
+
+    plan = structured_planner.validate_structured_plan(
+        structured_planner.StructuredPlanDraft(
+            intent=intent,
+            metrics=metrics,
+            dimensions=dimensions,
+            filters=[structured_planner.PlanFilter(**item) for item in filters],
+            time_window="last_month",
+        ),
+        question="结构化计划可执行性回归",
+        reference_date="2026-02-28",
+    )
+    sql = generate_rule_sql("结构化计划可执行性回归", plan)
+    assert validate_sql(sql)

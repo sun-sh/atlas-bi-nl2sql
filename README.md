@@ -126,7 +126,7 @@ flowchart LR
     G --> W
 ```
 
-更完整的组件边界、状态机、存储模型与失败处理见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+更完整的组件边界、状态机、存储模型与失败处理见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)；评测来源签名的字段和门禁见 [PROVENANCE.md](docs/PROVENANCE.md)。
 
 ## 评测
 
@@ -136,7 +136,7 @@ flowchart LR
 
 | 套件 | 当前结果 | 说明 |
 | --- | ---: | --- |
-| pytest | **271 passed** | 含 4 条 Playwright 浏览器用例；与当前 GitHub Actions CI 一致 |
+| pytest | **289 passed** | 含 4 条 Playwright 浏览器用例；与当前 GitHub Actions CI 一致 |
 | 严格模型回归（历史 v3-100） | 答案 **100/100**；计划 **94/100** | 19 个题型族；自愈 2/2；v3-103 当前仅重跑规则链路 |
 | 独立 holdout | 答案 **30/30**；计划 **28/30** | 不参与调参的 30 条固定用例；自愈 3/3 |
 | 冻结口语 | 答案 **11/13**；计划 **9/13** | 10 条可回答、3 条应澄清；小样本快照 |

@@ -32,7 +32,13 @@ def _table_text(table: TableInfo) -> str:
 
 
 class HybridSchemaRetriever:
-    def __init__(self, settings=None, tables: list[TableInfo] | None = None) -> None:
+    def __init__(
+        self,
+        settings=None,
+        tables: list[TableInfo] | None = None,
+        *,
+        local_only: bool = False,
+    ) -> None:
         self.settings = settings or get_settings()
         self.tables = list(tables if tables is not None else SCHEMA)
         self.corpus = [_table_text(t) for t in self.tables]
@@ -46,8 +52,10 @@ class HybridSchemaRetriever:
         self.qdrant = None
         self.qdrant_collection = None
         self.elastic = None
-        self._load_elastic()
-        self._load_semantic()
+        self.local_only = bool(local_only)
+        if not self.local_only:
+            self._load_elastic()
+            self._load_semantic()
 
     def _load_elastic(self) -> None:
         if not self.settings.elasticsearch_url:

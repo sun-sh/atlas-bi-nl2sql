@@ -174,7 +174,9 @@ def _plan_dimension_sql(plan: QueryPlan) -> tuple[list[str], list[str]]:
 
 
 def _plan_requires_customer_join(plan: QueryPlan) -> bool:
-    return any(item in {"member_level", "customer_city"} for item in plan.dimensions)
+    return any(item in {"member_level", "customer_city"} for item in plan.dimensions) or any(
+        "c.member_level" in item for item in plan.filters
+    )
 
 
 def _grouped_metric_sql(

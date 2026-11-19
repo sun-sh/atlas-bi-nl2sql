@@ -116,6 +116,15 @@ def test_evaluation_page_explains_strict_model_policy():
     assert '规则回退' not in evaluation_renderer
 
 
+def test_overview_exposes_dataset_range_for_dynamic_ui():
+    response = client.get('/api/overview')
+    assert response.status_code == 200
+    dataset = response.json()['dataset']
+    assert dataset['start'] == '2025-10-01'
+    assert dataset['end'] == '2026-02-28'
+    assert dataset['reference_date'] == '2026-02-28'
+
+
 def test_workspace_ui_contract_keeps_results_and_model_settings_consistent():
     page = client.get('/workspace').text
     script = (client.get('/static/app.js').text + client.get('/static/shell.js').text
