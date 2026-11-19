@@ -15,6 +15,7 @@ from app.nl2sql.model_config import get_model_config
 from app.nl2sql.generator import derived_columns_for_plan, generate_llm_repair_sql_result, generate_llm_sql_result, generate_rule_sql
 from app.nl2sql.models import QueryPlan, QueryResult, SchemaHit
 from app.nl2sql.planner import make_plan
+from app.nl2sql.structured_planner import plan_with_llm
 from app.nl2sql.result_insight import (
     NarrativeResult,
     build_result_digest,
@@ -114,8 +115,20 @@ def _query_reference_date(query_target: QueryTarget | None, db_path: str | None)
         return None
 
 
+def _llm_planning_enabled() -> bool:
+    config = get_model_config()
+    return bool(config.enabled and config.active)
+
+
 def plan_node(state: GraphState) -> GraphState:
-    decision = assess_question(state["question"], state.get("context"))
+    # Safety checks always run. In rule mode they also own semantic ambiguity;
+    # in LLM mode the validated structured plan owns that decision.
+    semantic_checks = state.get("force_rule", False) or not _llm_planning_enabled()
+    decision = assess_question(
+        state["question"],
+        state.get("context"),
+        semantic_checks=semantic_checks,
+    )
     if not decision.answerable:
         # A clarification/refusal is not an executable query plan. Keep the
         # outcome visible without inventing a default metric or table intent.
@@ -135,16 +148,69 @@ def plan_node(state: GraphState) -> GraphState:
         return {"plan": plan, "decision": decision.as_dict()}
     _emit_stage("plan")
     reference_date = _query_reference_date(state.get("query_target"), state.get("db_path"))
-    plan = make_plan(
-        state["question"],
-        state["hits"],
-        state.get("context"),
-        reference_date=reference_date,
-    )
-    plan.outcome = decision.outcome
-    plan.reason_code = decision.reason_code
-    plan.decision = decision.as_dict()
-    return {"plan": plan, "decision": decision.as_dict()}
+    warnings = list(state.get("warnings", []))
+    plan = None
+    if not state.get("force_rule", False):
+        plan, planner_error = plan_with_llm(
+            state["question"],
+            state["hits"],
+            state.get("context"),
+            reference_date=reference_date,
+        )
+        if plan is None and planner_error and planner_error != "模型未启用":
+            warnings.append("LLM 结构化规划不可用，已回退规则 Planner：" + planner_error)
+    if plan is None:
+        # The first safety pass intentionally skipped lexical semantic checks
+        # to let the validated LLM plan arbitrate ambiguity. If planning falls
+        # back, run the complete rule guard before accepting a rule plan.
+        if semantic_checks is False:
+            decision = assess_question(state["question"], state.get("context"))
+            if not decision.answerable:
+                plan = QueryPlan(
+                    intent="",
+                    tables=[],
+                    metrics=[],
+                    dimensions=[],
+                    filters=[],
+                    time_range="",
+                    chart_type="table",
+                    notes=["结构化规划失败，规则语义守卫已停止执行。"],
+                    outcome=decision.outcome,
+                    reason_code=decision.reason_code,
+                    decision=decision.as_dict(),
+                )
+                plan.context = {"reference_date": reference_date or "", "planner_mode": "rule"}
+                return {"plan": plan, "decision": decision.as_dict(), "warnings": warnings}
+        plan = make_plan(
+            state["question"],
+            state["hits"],
+            state.get("context"),
+            reference_date=reference_date,
+        )
+        plan.context = {**plan.context, "planner_mode": "rule"}
+    # The rule guard is a safety fast path, not an authority over a validated
+    # structured plan. A structured clarification/unsupported decision must
+    # stop generation even when the lexical guard would have allowed the text.
+    if plan.outcome not in (None, OUTCOME_ANSWERED):
+        effective_decision = {
+            "outcome": plan.outcome,
+            "reason_code": plan.reason_code or "structured_planner",
+            "message": (plan.notes[0] if plan.notes else "需要补充业务问题。"),
+            "suggestions": [],
+        }
+    elif decision.outcome not in (None, OUTCOME_ANSWERED):
+        effective_decision = decision.as_dict()
+    else:
+        effective_decision = {
+            "outcome": OUTCOME_ANSWERED,
+            "reason_code": "",
+            "message": "",
+            "suggestions": [],
+        }
+    plan.outcome = effective_decision["outcome"]
+    plan.reason_code = effective_decision["reason_code"]
+    plan.decision = effective_decision
+    return {"plan": plan, "decision": effective_decision, "warnings": warnings}
 
 
 def generate_node(state: GraphState) -> GraphState:

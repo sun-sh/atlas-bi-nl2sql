@@ -1,0 +1,378 @@
+{
+  "suite_version": "large-schema-retrieval-v1",
+  "available": true,
+  "total": 12,
+  "passed": 11,
+  "hit_rate": 91.7,
+  "table_count": 40,
+  "case_count": 12,
+  "full_schema": {
+    "tables": 40,
+    "estimated_tokens": 911,
+    "requires_schema_selection": true
+  },
+  "retrieved_top4": {
+    "tables": 4,
+    "estimated_tokens": 106.8,
+    "full_recall_rate": 66.7,
+    "top1_hit_rate": 100.0,
+    "unique_tables": 28
+  },
+  "closure_top10": {
+    "tables": 10,
+    "estimated_tokens": 159.3,
+    "full_recall_rate": 91.7,
+    "relationship_edges": 24,
+    "unique_tables": 30,
+    "seed_policy": "top4 retrieval only"
+  },
+  "cases": [
+    {
+      "question": "上个月各渠道销售额是多少？",
+      "expected_tables": [
+        "orders"
+      ],
+      "top4_tables": [
+        "orders",
+        "promotion_campaigns",
+        "finance_settlements",
+        "customers"
+      ],
+      "closure_tables": [
+        "orders",
+        "promotion_campaigns",
+        "finance_settlements",
+        "customers",
+        "coupon_redemptions",
+        "finance_invoices",
+        "finance_payments",
+        "order_items",
+        "refunds",
+        "shipment_orders"
+      ],
+      "full_recall_at_4": true,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "按投放渠道看 ROI 排名",
+      "expected_tables": [
+        "marketing_spend",
+        "orders"
+      ],
+      "top4_tables": [
+        "marketing_spend",
+        "promotion_campaigns",
+        "finance_settlements",
+        "customers"
+      ],
+      "closure_tables": [
+        "marketing_spend",
+        "promotion_campaigns",
+        "finance_settlements",
+        "customers",
+        "app_events",
+        "app_sessions",
+        "orders",
+        "support_tickets",
+        "coupon_redemptions",
+        "finance_invoices"
+      ],
+      "full_recall_at_4": false,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "各品类退款率排名",
+      "expected_tables": [
+        "orders",
+        "refunds"
+      ],
+      "top4_tables": [
+        "refunds",
+        "finance_payments",
+        "order_items",
+        "orders"
+      ],
+      "closure_tables": [
+        "refunds",
+        "finance_payments",
+        "order_items",
+        "orders",
+        "product_catalog",
+        "coupon_redemptions",
+        "customers",
+        "finance_invoices",
+        "shipment_orders",
+        "support_tickets"
+      ],
+      "full_recall_at_4": true,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "商品行销量按品类汇总",
+      "expected_tables": [
+        "order_items",
+        "orders"
+      ],
+      "top4_tables": [
+        "order_items",
+        "purchase_lines",
+        "product_prices",
+        "tax_rates"
+      ],
+      "closure_tables": [
+        "order_items",
+        "purchase_lines",
+        "product_prices",
+        "tax_rates",
+        "orders",
+        "product_catalog",
+        "purchase_orders",
+        "coupon_redemptions",
+        "customers",
+        "finance_invoices"
+      ],
+      "full_recall_at_4": false,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "不同会员等级客户贡献多少销售额",
+      "expected_tables": [
+        "customers",
+        "orders"
+      ],
+      "top4_tables": [
+        "customers",
+        "orders",
+        "carriers",
+        "customer_segments"
+      ],
+      "closure_tables": [
+        "customers",
+        "orders",
+        "carriers",
+        "customer_segments",
+        "app_events",
+        "app_sessions",
+        "support_tickets",
+        "coupon_redemptions",
+        "finance_invoices",
+        "finance_payments"
+      ],
+      "full_recall_at_4": true,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "发货后多久送到，承运商表现如何",
+      "expected_tables": [
+        "carriers",
+        "shipment_events",
+        "shipment_orders"
+      ],
+      "top4_tables": [
+        "carriers",
+        "orders",
+        "order_items",
+        "refunds"
+      ],
+      "closure_tables": [
+        "carriers",
+        "orders",
+        "order_items",
+        "refunds",
+        "shipment_orders",
+        "coupon_redemptions",
+        "customers",
+        "finance_invoices",
+        "finance_payments",
+        "support_tickets"
+      ],
+      "full_recall_at_4": false,
+      "full_recall_with_closure": false
+    },
+    {
+      "question": "优惠券核销带来的订单金额",
+      "expected_tables": [
+        "coupon_redemptions",
+        "orders"
+      ],
+      "top4_tables": [
+        "coupon_redemptions",
+        "coupon_definitions",
+        "orders",
+        "refunds"
+      ],
+      "closure_tables": [
+        "coupon_redemptions",
+        "coupon_definitions",
+        "orders",
+        "refunds",
+        "customers",
+        "finance_invoices",
+        "finance_payments",
+        "order_items",
+        "shipment_orders",
+        "support_tickets"
+      ],
+      "full_recall_at_4": true,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "客服工单最多的品类",
+      "expected_tables": [
+        "orders",
+        "support_tickets"
+      ],
+      "top4_tables": [
+        "support_tickets",
+        "support_messages",
+        "customer_service_scores",
+        "support_agents"
+      ],
+      "closure_tables": [
+        "support_tickets",
+        "support_messages",
+        "customer_service_scores",
+        "support_agents",
+        "customers",
+        "orders",
+        "app_events",
+        "app_sessions",
+        "coupon_redemptions",
+        "finance_invoices"
+      ],
+      "full_recall_at_4": false,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "App 事件中页面点击转化",
+      "expected_tables": [
+        "app_events",
+        "app_sessions"
+      ],
+      "top4_tables": [
+        "app_events",
+        "app_sessions",
+        "shipment_events",
+        "marketing_spend"
+      ],
+      "closure_tables": [
+        "app_events",
+        "app_sessions",
+        "shipment_events",
+        "marketing_spend",
+        "customers",
+        "shipment_orders",
+        "orders",
+        "support_tickets",
+        "carriers",
+        "coupon_redemptions"
+      ],
+      "full_recall_at_4": true,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "财务结算各渠道手续费",
+      "expected_tables": [
+        "finance_settlements"
+      ],
+      "top4_tables": [
+        "finance_settlements",
+        "finance_invoices",
+        "finance_ledger",
+        "carriers"
+      ],
+      "closure_tables": [
+        "finance_settlements",
+        "finance_invoices",
+        "finance_ledger",
+        "carriers",
+        "orders",
+        "shipment_orders",
+        "coupon_redemptions",
+        "customers",
+        "finance_payments",
+        "order_items"
+      ],
+      "full_recall_at_4": true,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "采购订单到货延迟",
+      "expected_tables": [
+        "purchase_lines",
+        "purchase_orders"
+      ],
+      "top4_tables": [
+        "purchase_orders",
+        "purchase_lines",
+        "product_suppliers",
+        "finance_invoices"
+      ],
+      "closure_tables": [
+        "purchase_orders",
+        "purchase_lines",
+        "product_suppliers",
+        "finance_invoices",
+        "product_catalog",
+        "orders",
+        "order_items",
+        "warehouse_inventory",
+        "coupon_redemptions",
+        "customers"
+      ],
+      "full_recall_at_4": true,
+      "full_recall_with_closure": true
+    },
+    {
+      "question": "仓库 SKU 安全库存告警",
+      "expected_tables": [
+        "warehouse_inventory",
+        "warehouse_locations"
+      ],
+      "top4_tables": [
+        "warehouse_inventory",
+        "warehouse_locations",
+        "order_items",
+        "orders"
+      ],
+      "closure_tables": [
+        "warehouse_inventory",
+        "warehouse_locations",
+        "order_items",
+        "orders",
+        "product_catalog",
+        "coupon_redemptions",
+        "customers",
+        "finance_invoices",
+        "finance_payments",
+        "refunds"
+      ],
+      "full_recall_at_4": true,
+      "full_recall_with_closure": true
+    }
+  ],
+  "limitations": "Synthetic catalog and labelled questions; validates schema-selection behavior and relationship closure, not SQL accuracy. Closure uses a declared synthetic foreign-key graph.",
+  "runtime": {
+    "workers": 1,
+    "wall_elapsed_ms": 560.7,
+    "source_sha256": "cbe16f881fd4982ce34a2f361ba05246f033c2c474d9db82f2abff8e760b6bab",
+    "git_head": "55c7ca7e57c99acfa2e0ff43c301828f20facc7a",
+    "app_dirty": true,
+    "database": {
+      "kind": "sqlite",
+      "dialect": "sqlite",
+      "sha256": "d9fe740d12a8680bc2eb1ccfdfc77701d7a8f68c3fff94e54f15732d9ee7b203"
+    },
+    "retrieval_supplements": 0
+  },
+  "answer_correct": 11,
+  "answer_correct_rate": 91.7,
+  "plan_correct": 11,
+  "plan_correct_rate": 91.7,
+  "evaluation_contract": "large-schema-retrieval-v1",
+  "case_manifest_sha256": "621aaebd046d57b95263623395e559139ca154d05d1d2af53b4a3084c9eadb2b",
+  "quality_gate": {
+    "min_hit_rate": 90.0,
+    "passed": true
+  }
+}

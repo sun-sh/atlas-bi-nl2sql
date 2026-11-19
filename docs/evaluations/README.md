@@ -7,10 +7,11 @@
 | 文件 | 说明 |
 | --- | --- |
 | [rule-equivalence-v3-103.json](rule-equivalence-v3-103.json) | 当前 103 条规则链路结果等价报告；绑定 `git_head`、`app_dirty=false` 和数据库指纹 |
+| [large-schema-v1.json](large-schema-v1.json) | 40 张 synthetic 表的检索消融与 Top-4 种子外键图闭包报告（91.7% 全召回）；不衡量 SQL 准确率 |
 
 ## 历史归档
 
-[`archive/`](archive/) 保存历史模型评测、holdout、冻结口语、检索消融、范围守卫和逐例 `.cases.jsonl`。这些文件保留原样用于追溯，**不应当作当前代码的分数**。
+[`archive/`](archive/) 只保留核心里程碑报告（v3-100、holdout、冻结口语等）；过程性大规模 JSON/JSONL 已清理，不再把仓库当作产物网盘。历史文件保留原样用于追溯，**不应当作当前代码的分数**。
 
 ## 如何阅读
 

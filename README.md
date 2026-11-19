@@ -136,14 +136,15 @@ flowchart LR
 
 | 套件 | 当前结果 | 说明 |
 | --- | ---: | --- |
-| pytest | **253 passed** | 含 4 条 Playwright 浏览器用例；与当前 GitHub Actions CI 一致 |
+| pytest | **271 passed** | 含 4 条 Playwright 浏览器用例；与当前 GitHub Actions CI 一致 |
 | 严格模型回归（历史 v3-100） | 答案 **100/100**；计划 **94/100** | 19 个题型族；自愈 2/2；v3-103 当前仅重跑规则链路 |
 | 独立 holdout | 答案 **30/30**；计划 **28/30** | 不参与调参的 30 条固定用例；自愈 3/3 |
 | 冻结口语 | 答案 **11/13**；计划 **9/13** | 10 条可回答、3 条应澄清；小样本快照 |
 | 规则等价（当前 v3-103） | **103/103** | 新增 3 条裸标量销售；确定性规则链路，不代表模型能力 |
 | 自然语言确定性端到端 | **15/15** | 8 个题型族 |
 | 范围守卫 | **7/7** | 澄清/拒答不产生 SQL 或结果行 |
-| 检索搜索消融 | Top-1 **91.7%**；MRR **0.9444**；recall@4 **100%** | 12 条小样本，仅衡量 Schema 搜索 |
+| 检索搜索消融 | Top-1 **91.7%**；MRR **0.9444**；recall@4 **100%** | 5 表小样本，仅衡量 Schema 搜索 |
+| 40 表检索消融 | Top-4 全召回 **66.7%**；外键闭包后 **91.7%** | synthetic catalog；验证选表与关系闭包，不代表 SQL 准确率 |
 
 在线模型分数是带日期、模型和 source hash 的能力快照，不是固定 CI 承诺。评测口径、报告路径和复现方式见 [EVALUATION.md](docs/EVALUATION.md)。
 
@@ -156,9 +157,14 @@ python -m app.evaluation.run --suite scope --min-hit-rate 100
 python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
+python -m app.evaluation.run --suite large-schema --min-hit-rate 100
 # 需要已启用模型并消耗在线配额
 python -m app.evaluation.run --suite colloquial-frozen --min-hit-rate 0
 node --check app/static/app.js
+node --check app/static/shell.js
+node --check app/static/sessions.js
+node --check app/static/data-platform-page.js
+node --check app/static/evaluation-page.js
 ```
 
 标准测试默认关闭在线模型和 BGE 下载。CI 在 Python 3.12、`LLM_ENABLED=false`、`USE_BGE=false` 下运行确定性门禁，不生成在线模型成绩。
@@ -173,6 +179,8 @@ app/
     semantic.py          读取 semantic.yaml，渲染 Schema、SQL 与指标
     workflow.py          LangGraph 查询状态机
     retrieval.py         本地 IDF；可选 BGE/Qdrant/Elasticsearch
+    retrieval_benchmark.py 40 表 synthetic Schema 与关系闭包消融
+    structured_planner.py semantic.yaml 强约束的 LLM 结构化规划
     planner.py           意图、时间、指标、筛选与上下文继承
     generator.py         模型 SQL、规则 SQL、有限修复
     sql_engine.py        方言校验、只读适配器与结果限制
@@ -191,13 +199,13 @@ tests/                   自动化测试与浏览器端到端测试
 ## 设计边界
 
 - 当前使用固定种子的电商数据和固定业务口径；更换业务需要同步修改语义文件、种子数据和评测基准。
-- 可答性判定以规则为主，不能替代完整权限系统、审计策略和人工复核。
+- 可答性判定先用规则快筛；模型启用时由受 `semantic.yaml` 枚举约束的结构化 Planner 做语义规划，非法输出才回退规则。它仍不能替代完整权限系统、审计策略和人工复核。
 - 数据中台是单工作区、本地管理员模型；没有 SSO、多租户隔离、用户级授权或行级安全。
 - PostgreSQL/MySQL 是可选 DB-API 查询适配器，尚无连接池、租户过滤和真实数据库集成测试。
 - 外部数据服务当前仅支持 SQLite 快照；DSN 以明文保存在本地元数据中，公开接口会脱敏但不提供加密。
 - `/api/metrics` 是进程内指标，不含网关、连接池或模型供应商侧的全局观测。
 - 评测中台使用 SQLite 任务队列和单执行槽，不是分布式评测平台。
-- 默认 SQL 生成只使用确定性必需表；检索是证据和可选补充，当前固定业务域未测得稳定的生成增益。
+- 默认 SQL 生成只使用确定性必需表；检索是证据和可选补充。5 表演示域未测得稳定生成增益，另有 40 表 synthetic benchmark 验证 Top-4 召回不足时可由显式外键图闭包补全。
 - 严格回归、holdout 和冻结口语都是项目定义的小样本快照，不是开放域准确率或生产 SLA。
 
 ## 文档

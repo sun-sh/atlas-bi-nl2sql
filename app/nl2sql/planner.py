@@ -79,6 +79,15 @@ def _last_month_sql(reference_date: date | str | None = None) -> tuple[str, str]
     return previous.isoformat(), last.isoformat()
 
 
+def time_filter_for_label(label: str, reference_date: date | str | None = None) -> tuple[str, str, str]:
+    """Return the canonical time predicate for a semantic time-window label."""
+    for window in TIME_WINDOWS.values():
+        if str(window.get("label") or "") != str(label):
+            continue
+        return _time_filter(str(label), reference_date)
+    return "", "", ""
+
+
 def _time_filter(
     question: str,
     reference_date: date | str | None = None,

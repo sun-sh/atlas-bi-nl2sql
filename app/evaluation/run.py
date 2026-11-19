@@ -40,8 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-hit-rate", type=float, help="Fail with exit code 2 below this percentage")
     parser.add_argument("--workers", type=int, choices=(1, 2, 3), default=1,
                         help="Isolated model workers; default 1")
-    parser.add_argument("--suite", choices=("regression", "holdout", "scope", "retrieval", "natural", "colloquial", "colloquial-frozen", "rules"), default="regression",
-                        help="Evaluation suite: regression, holdout, scope guard, retrieval ablation, natural wording, colloquial or frozen colloquial")
+    parser.add_argument("--suite", choices=("regression", "holdout", "scope", "retrieval", "natural", "colloquial", "colloquial-frozen", "rules", "large-schema"), default="regression",
+                        help="Evaluation suite: regression, holdout, scope, retrieval, natural, colloquial, frozen colloquial, rules or large-schema")
     args = parser.parse_args(argv)
     if args.min_hit_rate is not None and not 0 <= args.min_hit_rate <= 100:
         parser.error("--min-hit-rate must be between 0 and 100")
@@ -94,8 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     is_frozen_colloquial = args.suite == "colloquial-frozen"
     is_colloquial = is_dev_colloquial or is_frozen_colloquial
     is_rules = args.suite == "rules"
+    is_large_schema = args.suite == "large-schema"
     selected_cases = HOLDOUT_CASES if is_holdout else CASES
-    if is_scope:
+    if is_large_schema:
+        from app.nl2sql.retrieval_benchmark import run_large_schema_ablation
+        report = run_large_schema_ablation()
+    elif is_scope:
         report = run_scope_evaluation(on_case=progress)
     elif is_retrieval:
         report = run_retrieval_ablation()
@@ -186,6 +190,8 @@ def main(argv: list[str] | None = None) -> int:
         if is_rules
         else "retrieval-ablation-v1"
         if is_retrieval
+        else "large-schema-retrieval-v1"
+        if is_large_schema
         else "strict-v3-result-equivalence-v1"
     )
     if is_scope or is_natural or is_colloquial:
@@ -224,6 +230,12 @@ def main(argv: list[str] | None = None) -> int:
         ]
     elif is_rules:
         manifest_cases = [case["id"] for case in CASES]
+    elif is_large_schema:
+        from app.nl2sql.retrieval_benchmark import BENCHMARK_CASES
+        manifest_cases = [
+            {"question": case["question"], "expected_tables": sorted(case["expected"])}
+            for case in BENCHMARK_CASES
+        ]
     else:
         manifest_cases = [case["id"] for case in selected_cases]
     manifest = json.dumps(manifest_cases, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -231,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.min_hit_rate is not None:
         expected_total = (
             report["total"]
-            if is_scope or is_retrieval or is_natural or is_colloquial or is_rules
+            if is_scope or is_retrieval or is_natural or is_colloquial or is_rules or is_large_schema
             else len(selected_cases)
         )
         passed = bool(report["available"] and report["total"] == expected_total and report["hit_rate"] >= args.min_hit_rate)
