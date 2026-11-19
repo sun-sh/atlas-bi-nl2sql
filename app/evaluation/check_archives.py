@@ -49,10 +49,9 @@ def validate_report(
     digest = str(runtime.get("source_sha256") or "")
     if digest and (len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest.lower())):
         errors.append(f"{path}: invalid source_sha256")
-    if head and not _git("cat-file", "-e", f"{head}^{{commit}}"):
-        errors.append(f"{path}: git_head does not resolve to a commit: {head!r}")
-    # Squash merges rewrite commit identity, so ancestry alone is too brittle
-    # and also too weak. The source digest is the actual code snapshot contract.
+    # Squash merges and branch cleanup can make the original commit unreachable.
+    # That is acceptable for an archived report: git_head is provenance metadata,
+    # while source_sha256 is the enforceable code-snapshot contract.
     if require_current_source and digest != source_sha256():
         errors.append(
             f"{path}: source_sha256 does not match the current app/ snapshot"

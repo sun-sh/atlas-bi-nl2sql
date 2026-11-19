@@ -460,18 +460,18 @@ def test_archive_check_requires_matching_current_source(tmp_path, monkeypatch):
     assert any("current app/ snapshot" in item for item in errors)
 
 
-def test_archive_check_rejects_unknown_commit(tmp_path, monkeypatch):
+def test_archive_check_allows_unreachable_git_head_with_matching_source(tmp_path, monkeypatch):
     from app.evaluation import check_archives
 
-    report = tmp_path / "unknown.json"
+    report = tmp_path / "archived.json"
     report.write_text(json.dumps({"runtime": {
         "source_sha256": "a" * 64,
         "git_head": "deadbeef",
         "app_dirty": False,
     }}), encoding="utf-8")
     monkeypatch.setattr(check_archives, "_git", lambda *args: False)
-    errors = " ".join(check_archives.validate_report(report, require_clean=True))
-    assert "does not resolve" in errors
+    monkeypatch.setattr(check_archives, "source_sha256", lambda: "a" * 64)
+    assert check_archives.validate_report(report, require_clean=True, require_current_source=True) == []
 
 
 def test_archive_check_does_not_require_commit_ancestry_after_squash(tmp_path, monkeypatch):
