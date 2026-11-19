@@ -354,9 +354,9 @@
   "limitations": "Synthetic catalog and labelled questions; validates schema-selection behavior and relationship closure, not SQL accuracy. Closure uses a declared synthetic foreign-key graph.",
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 620.8,
-    "source_sha256": "cbe16f881fd4982ce34a2f361ba05246f033c2c474d9db82f2abff8e760b6bab",
-    "git_head": "45b5261fff0afdb21207c6f5a4cf673a1b8e535f",
+    "wall_elapsed_ms": 650.4,
+    "source_sha256": "607f3d6d77bb4b66c03ecddd047f93c15e3a0ed607921fa32d9fd13f6dfdcaf3",
+    "git_head": "f714c5489f8c6552e89bf13f75f0657c284ce396",
     "app_dirty": false,
     "database": {
       "kind": "sqlite",
