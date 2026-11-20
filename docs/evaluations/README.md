@@ -7,7 +7,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | [rule-equivalence-v3-103.json](rule-equivalence-v3-103.json) | 当前 103 条规则链路结果等价报告；绑定 `git_head`、`app_dirty=false` 和数据库指纹 |
-| [large-schema-v1.json](large-schema-v1.json) | 40 张 synthetic 表的检索消融与 Top-4 种子外键图闭包报告（91.7% 全召回）；不衡量 SQL 准确率 |
+| [large-schema-v1.json](large-schema-v1.json) | 40 张 synthetic 表的检索消融；闭包 91.7%，接近相同 token 上限的纯 Top-K 也 91.7%；不衡量 SQL 准确率 |
 
 ## 历史归档
 

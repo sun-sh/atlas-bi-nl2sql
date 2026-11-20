@@ -457,3 +457,61 @@ def test_rule_planner_uses_same_new_scope_semantics(question):
     assert not any("o.channel" in item for item in plan.filters)
     assert plan.context["region_filter"] == ""
     assert plan.context["channel_filter"] == ""
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["换成客单价", "再看订单数", "那客单价呢？"],
+)
+def test_metric_bearing_followups_inherit_prior_time_and_region(question):
+    plan = structured_planner.validate_structured_plan(
+        _draft(
+            intent="sales_overview",
+            metrics=["客单价" if "客单价" in question else "订单数"],
+            dimensions=[],
+        ),
+        question=question,
+        context={
+            "question": "上个月华东销售额",
+            "time_filter": "o.order_date BETWEEN '2026-01-01' AND '2026-01-31'",
+            "time_range": "2026-01-01 至 2026-01-31",
+            "region_label": "华东",
+            "region_filter": "o.region = '华东'",
+            "slots": {
+                "filters": [
+                    {"field": "region", "operator": "eq", "values": ["华东"]},
+                ]
+            },
+        },
+        reference_date="2026-02-28",
+    )
+    assert any("o.order_date BETWEEN" in item for item in plan.filters)
+    assert any("o.region = '华东'" in item for item in plan.filters)
+    assert plan.context["time_range"] == "2026-01-01 至 2026-01-31"
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["本月客单价", "这个月订单数"],
+)
+def test_ordinary_metric_questions_do_not_inherit_old_filters(question):
+    plan = structured_planner.validate_structured_plan(
+        _draft(
+            intent="sales_overview",
+            metrics=["客单价" if "客单价" in question else "订单数"],
+            dimensions=[],
+            time_window="current_month",
+        ),
+        question=question,
+        context={
+            "question": "上个月华东销售额",
+            "time_filter": "o.order_date BETWEEN '2026-01-01' AND '2026-01-31'",
+            "time_range": "2026-01-01 至 2026-01-31",
+            "region_label": "华东",
+            "region_filter": "o.region = '华东'",
+            "slots": {"filters": [{"field": "region", "operator": "eq", "values": ["华东"]}]},
+        },
+        reference_date="2026-02-28",
+    )
+    assert not any("o.region" in item for item in plan.filters)
+    assert plan.context["region_label"] == ""

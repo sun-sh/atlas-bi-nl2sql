@@ -515,9 +515,9 @@
   "limitations": "Synthetic catalog and labelled questions; validates schema-selection behavior and relationship closure, not SQL accuracy. Closure uses a declared synthetic foreign-key graph. Same-budget Top-K is the fair comparison; closure is not claimed to improve recall.",
   "runtime": {
     "workers": 1,
-    "wall_elapsed_ms": 7568.4,
-    "source_sha256": "1ed92de0045a7a4d5076219429c143567af49694340c687331abf85044d5f844",
-    "git_head": "3751ec6be703fbf30abe72862244a910500fd75d",
+    "wall_elapsed_ms": 10535.9,
+    "source_sha256": "0a41c134b8d5a85b37148e899a6466f4cc482d7251394d1b862ef9a8b887009a",
+    "git_head": "5170004bc90ce967a36070499970a8131e2926e1",
     "app_dirty": false,
     "database": {
       "kind": "sqlite",
