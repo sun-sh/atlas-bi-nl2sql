@@ -203,4 +203,4 @@ node --check app/static/data-platform-page.js
 node --check app/static/evaluation-page.js
 ```
 
-真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false`、`USE_BGE=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **301 passed**。来源哈希只覆盖 Git 跟踪的 Python/YAML 源文件，字段细节见 [PROVENANCE.md](PROVENANCE.md)。
+真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false`、`USE_BGE=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **307 passed**。来源哈希只覆盖 Git 跟踪的 Python/YAML 源文件，字段细节见 [PROVENANCE.md](PROVENANCE.md)。

@@ -19,7 +19,7 @@ async function loadOverview() {
     const data = await api('/api/overview');
     state.overview = data;
     const datasetRange = $('#dataset-note-range');
-    if (datasetRange) datasetRange.textContent = formatDatasetRange(data.dataset).replace(/./g, '.');
+    if (datasetRange) datasetRange.textContent = formatDatasetRange(data.dataset);
     const reference = $('#dataset-note-reference');
     if (reference && data.dataset?.reference_date) reference.textContent = data.dataset.reference_date;
     $('#metrics-grid').innerHTML = [

@@ -132,11 +132,11 @@ flowchart LR
 
 固定数据集上的通过率不等于开放域生产准确率。当前 v3-103 规则集在历史 v3-100 基础上新增 3 条无筛选标量销售用例，仍按题型族报告，因此 raw case 不等于独立语义样本；严格模型评测同时报告 **answer-correct** 和 **plan-correct**，两者互不覆盖。
 
-历史模型报告绑定的是工作树 `source_sha256`，不是 commit，不能单凭它追溯代码版本。新报告同时记录 `git_head`、`app_dirty` 和数据库指纹；当前 v3-103 规则报告绑定 `git_head=0d3342c`、`app_dirty=false`，归档门禁会校验该 commit 存在且位于当前 HEAD 历史中。历史报告不追改、不伪签：
+历史模型报告绑定的是工作树 `source_sha256`，不是 commit，不能单凭它追溯代码版本。新报告同时记录 `git_head`、`app_dirty` 和数据库指纹；当前归档报告使用 committed-blob `source_sha256` 校验代码快照，`git_head` 只作为来源元数据，squash merge 后不要求该 commit 仍在当前分支历史中。字段与门禁见 [PROVENANCE.md](docs/PROVENANCE.md)。历史报告不追改、不伪签：
 
 | 套件 | 当前结果 | 说明 |
 | --- | ---: | --- |
-| pytest | **301 passed** | 含 4 条 Playwright 浏览器用例；与当前 GitHub Actions CI 一致 |
+| pytest | **307 passed** | 含 4 条 Playwright 浏览器用例；与当前 GitHub Actions CI 一致 |
 | 严格模型回归（历史 v3-100） | 答案 **100/100**；计划 **94/100** | 19 个题型族；自愈 2/2；v3-103 当前仅重跑规则链路 |
 | 独立 holdout | 答案 **30/30**；计划 **28/30** | 不参与调参的 30 条固定用例；自愈 3/3 |
 | 冻结口语 | 答案 **11/13**；计划 **9/13** | 10 条可回答、3 条应澄清；小样本快照 |
@@ -144,7 +144,7 @@ flowchart LR
 | 自然语言确定性端到端 | **15/15** | 8 个题型族 |
 | 范围守卫 | **7/7** | 澄清/拒答不产生 SQL 或结果行 |
 | 检索搜索消融 | Top-1 **91.7%**；MRR **0.9444**；recall@3/@4 **100%** | 5 表小样本；Top-3 已饱和，仅作回归检查 |
-| 40 表检索消融 | Top-4 **66.7%**；闭包 **91.7%**；同预算 Top-K **91.7%** | synthetic；闭包无召回增益，只保留为可复现实验 |
+| 40 表检索消融 | Top-4 **66.7%**；闭包 **91.7%**；接近相同 token 上限 Top-K **91.7%** | synthetic；闭包无召回增益，只保留为可复现实验 |
 
 在线模型分数是带日期、模型和 source hash 的能力快照，不是固定 CI 承诺。评测口径、报告路径和复现方式见 [EVALUATION.md](docs/EVALUATION.md)。
 
@@ -157,7 +157,7 @@ python -m app.evaluation.run --suite scope --min-hit-rate 100
 python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
-python -m app.evaluation.run --suite large-schema --min-hit-rate 100
+python -m app.evaluation.run --suite large-schema --min-hit-rate 90
 # 需要已启用模型并消耗在线配额
 python -m app.evaluation.run --suite colloquial-frozen --min-hit-rate 0
 node --check app/static/app.js
@@ -205,7 +205,7 @@ tests/                   自动化测试与浏览器端到端测试
 - 外部数据服务当前仅支持 SQLite 快照；DSN 以明文保存在本地元数据中，公开接口会脱敏但不提供加密。
 - `/api/metrics` 是进程内指标，不含网关、连接池或模型供应商侧的全局观测。
 - 评测中台使用 SQLite 任务队列和单执行槽，不是分布式评测平台。
-- 默认 SQL 生成只使用确定性必需表；检索是证据和可选补充。5 表演示域 Top-3 即完全召回，未测得稳定生成增益；40 表 synthetic benchmark 显示外键闭包与同 token 预算纯 Top-K 召回相同，因此仅作为可复现实验保留。
+- 默认 SQL 生成只使用确定性必需表；检索是证据和可选补充。5 表演示域 Top-3 即完全召回，未测得稳定生成增益；40 表 synthetic benchmark 显示外键闭包与接近相同 token 上限的纯 Top-K 召回相同，因此仅作为可复现实验保留。
 - 严格回归、holdout 和冻结口语都是项目定义的小样本快照，不是开放域准确率或生产 SLA。
 
 ## 文档

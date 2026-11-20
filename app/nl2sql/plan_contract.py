@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from app.nl2sql.semantic import FOLLOW_UP_TERMS, INTENT_TERMS, metric_dimensions, metric_from_text
 
 
@@ -120,22 +122,63 @@ def dependency_tables(
     return tables
 
 
-def is_follow_up_question(question: str, context: dict | None) -> bool:
-    """Decide whether a turn may inherit omitted slots from the prior turn.
+EXPLICIT_RESET_TERMS = (
+    "全国", "全部", "全渠道", "整体", "清空筛选", "清除筛选",
+    "换成全部", "所有渠道", "不限渠道", "不限地区",
+)
 
-    A new question with an explicit metric/dimension is a fresh query: stale
-    filters must not leak into it. Bare follow-ups and explicit follow-up
-    words inherit the prior plan.
+TIME_REFERENCE_TERMS = (
+    "本月", "这个月", "上个月", "下个月",
+    "近30天", "近90天", "最近30天", "最近90天",
+    "过去30天", "过去90天", "今年", "去年", "本季度", "上个季度",
+)
+
+# These are grammatical follow-up markers only. Bare substring checks such as
+# "这个" in q incorrectly classify ordinary phrases like "这个月".
+STANDALONE_FOLLOW_UP_MARKERS = (
+    "那呢", "呢", "换成", "改成", "再看", "继续", "同样吧", "同一个指标",
+)
+
+
+def normalize_question_scope(question: str) -> str:
+    """Return a comparison form with explicit time words removed.
+
+    Time labels are not follow-up markers. Removing them before detecting
+    markers prevents "这个月" and "那上个月呢" from being interpreted only by
+    incidental character overlap.
+    """
+    q = str(question or "").strip().lower()
+    for term in sorted(TIME_REFERENCE_TERMS, key=len, reverse=True):
+        q = q.replace(term, " ")
+    return " ".join(q.split())
+
+
+def context_scope(question: str, context: dict | None) -> Literal[
+    "new_query", "reset_scope", "follow_up"
+]:
+    """Classify whether a turn can inherit previous slots.
+
+    Explicit scope resets and metric-bearing new questions always win over
+    follow-up words. This prevents "这个月", "换成全部渠道" and "那全部渠道呢"
+    from silently inheriting a prior region/channel filter.
     """
     if not context:
-        return False
-    q = str(question or "").strip().lower()
-    if not q:
-        return False
-    if any(term in q for term in FOLLOW_UP_TERMS):
-        return True
-    # A bare time/dimension adjustment is a follow-up. If the question names a
-    # metric or explicitly starts a new scope (全国/全部), it is fresh.
-    if any(term in q for term in ("全国", "全部", "全渠道", "整体")):
-        return False
-    return metric_from_text(q) is None
+        return "new_query"
+    raw = str(question or "").strip().lower()
+    if not raw:
+        return "follow_up"
+    if any(term in raw for term in EXPLICIT_RESET_TERMS):
+        return "reset_scope"
+    if metric_from_text(raw) is not None:
+        return "new_query"
+    normalized = normalize_question_scope(raw)
+    # A time-only adjustment such as "那上个月呢" still inherits non-time slots.
+    if normalized and any(term in normalized for term in STANDALONE_FOLLOW_UP_MARKERS):
+        return "follow_up"
+    # Bare time adjustments have no remaining business text.
+    return "follow_up" if not normalized else "new_query"
+
+
+def is_follow_up_question(question: str, context: dict | None) -> bool:
+    """Backward-compatible predicate: only genuine follow-ups inherit slots."""
+    return context_scope(question, context) == "follow_up"

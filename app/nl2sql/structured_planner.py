@@ -16,7 +16,7 @@ from app.nl2sql.plan_contract import (
     FILTER_COLUMNS,
     dependency_tables,
     validate_executable_shape,
-    is_follow_up_question,
+    context_scope,
 )
 from app.nl2sql.planner import time_filter_for_label
 from app.nl2sql.semantic import (
@@ -125,7 +125,8 @@ def validate_structured_plan(draft: StructuredPlanDraft, *, question: str, conte
     if any(item not in METRIC_NAMES for item in metrics): raise ValueError(f"unknown metrics: {metrics}")
     if any(item not in DIMENSIONS for item in dimensions): raise ValueError(f"unknown dimensions: {dimensions}")
     explicit_fields = {item.field.strip().lower() for item in draft.filters}
-    follow_up = is_follow_up_question(question, context)
+    scope = context_scope(question, context)
+    follow_up = scope == "follow_up"
     inherited_filters, inherited_fields = _inherited_filters(context, explicit_fields) if follow_up else ([], set())
     effective_filters = [*draft.filters, *inherited_filters]
     filter_fields = explicit_fields | inherited_fields
