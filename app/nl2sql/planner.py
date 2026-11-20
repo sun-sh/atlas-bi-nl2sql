@@ -5,6 +5,7 @@ import re
 from datetime import date, timedelta
 
 from app.nl2sql.models import QueryPlan, SchemaHit
+from app.nl2sql.plan_contract import context_scope
 from app.nl2sql.semantic import (
     CATEGORIES,
     CATEGORY_TERMS,
@@ -13,7 +14,6 @@ from app.nl2sql.semantic import (
     DATASET_REFERENCE_DATE,
     DIMENSIONS,
     ENUM_ALIAS_DISPLAY,
-    FOLLOW_UP_TERMS,
     INTENT_TERMS,
     MEMBER_TERMS,
     REGION_TERMS,
@@ -162,10 +162,8 @@ def _context_filter(context: dict, key: str) -> str:
 
 
 def _follow_up(question: str, context: dict | None) -> bool:
-    if not context:
-        return False
-    q = question.lower()
-    return any(term in q for term in FOLLOW_UP_TERMS) or not _detect_intent(q)
+    """Use the same scope policy as the structured planner."""
+    return context_scope(question, context) == "follow_up"
 
 
 def make_plan(
@@ -180,7 +178,8 @@ def make_plan(
     filters: list[str] = []
     inherited: list[str] = []
     context = context or {}
-    is_follow_up = _follow_up(question, context)
+    scope = context_scope(question, context)
+    is_follow_up = scope == "follow_up"
 
     detected_intent = _detect_intent(q)
     # A bare time follow-up ("那上个月呢？") has no business keyword of its own.
@@ -365,13 +364,13 @@ def make_plan(
             "reference_date": _reference_date(reference_date).isoformat(),
             "retrieval_candidates": retrieved_tables,
             "retrieval_supplements": retrieval_supplements,
-            "time_filter": time_filter or _context_filter(context, "time_filter"),
+            "time_filter": time_filter or (_context_filter(context, "time_filter") if is_follow_up else ""),
             "time_range": time_range,
-            "region_filter": region or _context_filter(context, "region_filter"),
+            "region_filter": region or (_context_filter(context, "region_filter") if is_follow_up else ""),
             "region_label": region_label,
-            "channel_filter": channel or _context_filter(context, "channel_filter"),
+            "channel_filter": channel or (_context_filter(context, "channel_filter") if is_follow_up else ""),
             "channel_label": channel_label,
-            "category_filter": category_filter or _context_filter(context, "category_filter"),
+            "category_filter": category_filter or (_context_filter(context, "category_filter") if is_follow_up else ""),
             "category_label": category_label,
             "metrics": metrics,
         },

@@ -389,3 +389,71 @@ def test_follow_up_inherits_refund_reason_slot_and_table():
     )
     assert "refunds" in plan.tables
     assert any("r.reason = '质量问题'" in item for item in plan.filters)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "这个月全国各渠道销售额",
+        "换成全部渠道",
+        "那全部渠道呢？",
+    ],
+)
+def test_new_scope_phrases_do_not_inherit_old_filters(question):
+    plan = structured_planner.validate_structured_plan(
+        _draft(
+            intent="sales_overview",
+            metrics=["销售额"],
+            dimensions=["channel"],
+            time_window="current_month",
+        ),
+        question=question,
+        context={
+            "question": "上个月华东 App 和 Web 各渠道销售额",
+            "time_filter": "o.order_date BETWEEN '2026-01-01' AND '2026-01-31'",
+            "time_range": "2026-01-01 至 2026-01-31",
+            "region_label": "华东",
+            "region_filter": "o.region = '华东'",
+            "channel_label": ["App", "Web"],
+            "channel_filter": "o.channel IN ('App', 'Web')",
+            "slots": {
+                "filters": [
+                    {"field": "region", "operator": "eq", "values": ["华东"]},
+                    {"field": "channel", "operator": "in", "values": ["App", "Web"]},
+                ]
+            },
+        },
+        reference_date="2026-02-28",
+    )
+    assert not any("o.region" in item for item in plan.filters)
+    assert not any("o.channel" in item for item in plan.filters)
+    assert plan.context["region_label"] == ""
+    assert plan.context["channel_label"] == ""
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["这个月全国各渠道销售额", "换成全部渠道", "那全部渠道呢？"],
+)
+def test_rule_planner_uses_same_new_scope_semantics(question):
+    from app.nl2sql.planner import make_plan
+
+    plan = make_plan(
+        question,
+        [],
+        context={
+            "question": "上个月华东 App 和 Web 各渠道销售额",
+            "time_filter": "o.order_date BETWEEN '2026-01-01' AND '2026-01-31'",
+            "time_range": "2026-01-01 至 2026-01-31",
+            "region_filter": "o.region = '华东'",
+            "region_label": "华东",
+            "channel_filter": "o.channel IN ('App', 'Web')",
+            "channel_label": ["App", "Web"],
+            "metrics": ["销售额"],
+        },
+        reference_date="2026-02-28",
+    )
+    assert not any("o.region" in item for item in plan.filters)
+    assert not any("o.channel" in item for item in plan.filters)
+    assert plan.context["region_filter"] == ""
+    assert plan.context["channel_filter"] == ""
