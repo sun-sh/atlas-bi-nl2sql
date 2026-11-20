@@ -153,14 +153,32 @@ def normalize_question_scope(question: str) -> str:
     return " ".join(q.split())
 
 
+def _has_follow_up_structure(question: str) -> bool:
+    """Detect grammatical follow-up structure without classifying bare metrics.
+
+    Examples that are follow-ups even when they name a metric:
+    - 换成客单价
+    - 再看订单数
+    - 那客单价呢？
+    """
+    q = normalize_question_scope(question)
+    if not q:
+        return False
+    if any(marker in q for marker in STANDALONE_FOLLOW_UP_MARKERS):
+        return True
+    # "那……呢" is a common discontinuous follow-up construction.
+    return q.startswith("那") and q.endswith("呢")
+
+
 def context_scope(question: str, context: dict | None) -> Literal[
     "new_query", "reset_scope", "follow_up"
 ]:
     """Classify whether a turn can inherit previous slots.
 
-    Explicit scope resets and metric-bearing new questions always win over
-    follow-up words. This prevents "这个月", "换成全部渠道" and "那全部渠道呢"
-    from silently inheriting a prior region/channel filter.
+    Order matters:
+    1. explicit scope reset wins;
+    2. grammatical follow-up structure may name a new metric;
+    3. only an ordinary metric-bearing question is a fresh query.
     """
     if not context:
         return "new_query"
@@ -169,15 +187,13 @@ def context_scope(question: str, context: dict | None) -> Literal[
         return "follow_up"
     if any(term in raw for term in EXPLICIT_RESET_TERMS):
         return "reset_scope"
+    if _has_follow_up_structure(raw):
+        return "follow_up"
     if metric_from_text(raw) is not None:
         return "new_query"
     normalized = normalize_question_scope(raw)
-    # A time-only adjustment such as "那上个月呢" still inherits non-time slots.
-    if normalized and any(term in normalized for term in STANDALONE_FOLLOW_UP_MARKERS):
-        return "follow_up"
-    # Bare time adjustments have no remaining business text.
+    # A bare time adjustment such as "那上个月呢" still inherits non-time slots.
     return "follow_up" if not normalized else "new_query"
-
 
 def is_follow_up_question(question: str, context: dict | None) -> bool:
     """Backward-compatible predicate: only genuine follow-ups inherit slots."""

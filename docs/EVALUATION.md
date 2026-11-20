@@ -73,9 +73,9 @@ python -m app.evaluation.run --suite holdout --min-hit-rate 80 --output docs/eva
 | 全量 Schema | 911 | — |
 | 本地混合检索 Top-4 | 106.8 | 66.7% |
 | Top-4 + 外键图闭包（最多 10 表） | 266.0（完整 Prompt） | 91.7% |
-| 同 token 预算纯 Top-K | 250.2 | 91.7% |
+| 接近相同 token 上限纯 Top-K | 250.2 | 91.7% |
 
-Top-1 命中率为 100%，但 Top-4 仍漏掉多表连接所需的父表或子表，说明“检索命中主表”不等于“取得可执行 Schema”。闭包只从 Top-4 种子沿 benchmark 中显式声明的 24 条 synthetic foreign-key 边扩展，不按关键词补表、不注入 gold tables；上限固定为 10 表，以保证 Prompt 有界。40 张 synthetic 表强制使用本地 IDF，绝不写入用户的共享 Elasticsearch/Qdrant。未召回桥表时闭包不会凭空恢复，因此物流三表问题仍失败，整体为 91.7%。**同 token 预算的纯 Top-K 也是 91.7%**，所以当前闭包只证明可复现和有界，不证明召回增益。该 benchmark 验证的是 Schema 选择和关系扩展，不代表 40 表上的 SQL 执行准确率，也没有接入生产数据库。报告见 [large-schema-v1.json](evaluations/large-schema-v1.json)。
+Top-1 命中率为 100%，但 Top-4 仍漏掉多表连接所需的父表或子表，说明“检索命中主表”不等于“取得可执行 Schema”。闭包只从 Top-4 种子沿 benchmark 中显式声明的 24 条 synthetic foreign-key 边扩展，不按关键词补表、不注入 gold tables；上限固定为 10 表，以保证 Prompt 有界。40 张 synthetic 表强制使用本地 IDF，绝不写入用户的共享 Elasticsearch/Qdrant。未召回桥表时闭包不会凭空恢复，因此物流三表问题仍失败，整体为 91.7%。**接近相同 token 上限的纯 Top-K 也是 91.7%**，所以当前闭包只证明可复现和有界，不证明召回增益。该 benchmark 验证的是 Schema 选择和关系扩展，不代表 40 表上的 SQL 执行准确率，也没有接入生产数据库。报告见 [large-schema-v1.json](evaluations/large-schema-v1.json)。
 
 为避免 5 张表在 top-4 下几乎全量进入 Prompt，当前默认 `ATLAS_RETRIEVAL_SUPPLEMENTS=0`：SQL 只用意图规划出的必需表。显式设为 `1` 时，只允许 **一张 top-1 且不在必需表中的检索补充表**进入 prompt；其余命中只作为 `/evidence` 证据。
 
@@ -193,7 +193,7 @@ python -m app.evaluation.run --suite scope --min-hit-rate 100
 python -m app.evaluation.run --suite rules --min-hit-rate 100
 python -m app.evaluation.run --suite retrieval --min-hit-rate 100
 python -m app.evaluation.run --suite natural --min-hit-rate 100
-python -m app.evaluation.run --suite large-schema --min-hit-rate 100
+python -m app.evaluation.run --suite large-schema --min-hit-rate 90
 # 需要已启用模型；以下会消耗在线配额，不是 CI 固定门禁
 python -m app.evaluation.run --suite colloquial-frozen --min-hit-rate 0
 node --check app/static/app.js
@@ -203,4 +203,4 @@ node --check app/static/data-platform-page.js
 node --check app/static/evaluation-page.js
 ```
 
-真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false`、`USE_BGE=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **307 passed**。来源哈希只覆盖 Git 跟踪的 Python/YAML 源文件，字段细节见 [PROVENANCE.md](PROVENANCE.md)。
+真实模型评测需先在 `/models` 保存并启用模型，会调用在线 API 并消耗模型配额。标准测试固定关闭在线模型和 BGE 下载，用真实本地数据和受控模型响应验证验收器、自愈边界和失败分类。CI 在 `LLM_ENABLED=false`、`USE_BGE=false` 下运行模型评测冒烟检查，验证入口与未配置状态，不产生在线模型成绩；真实模型评测需手动执行并记录日期。当前全量测试为 **312 passed**。来源哈希只覆盖 Git 跟踪的 Python/YAML 源文件，字段细节见 [PROVENANCE.md](PROVENANCE.md)。

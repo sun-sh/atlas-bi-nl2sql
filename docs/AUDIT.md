@@ -75,7 +75,7 @@ Scope: correctness, evaluation integrity, data/security boundaries, operations, 
 
 Historical evidence was produced from source hash `1e111260d4bc14392adc72ffdec676e05efdfafafe7f4c44ae6fbe3267aa4178` after the semantic single-source refactor. This is a historical working-tree snapshot, not a commit identifier; new reports add `git_head` and `app_dirty` to make that distinction explicit.
 
-- Full pytest suite: **307 passed** in an approved environment (Windows sandbox blocked pytest temp paths, named pipes and local sockets; the same code passed outside it).
+- Full pytest suite: **312 passed** in an approved environment (Windows sandbox blocked pytest temp paths, named pipes and local sockets; the same code passed outside it).
 - Rule equivalence (current v3-103): **103/103 raw cases** after adding three unfiltered scalar sales cases; historical v3-100 report remains **100/100**, forced rule path.
 - Natural-language deterministic end-to-end: **15/15 raw cases / 8 fully passed families**.
 - Scope guard: **7/7**.
@@ -83,6 +83,6 @@ Historical evidence was produced from source hash `1e111260d4bc14392adc72ffdec67
 - Holdout: answer **30/30**, plan **28/30**, execution/model rates **100%**; self-healing attempted and passed **3/3**. The two plan-only misses are refund-rate questions where the answer was accepted but the plan metric was recorded as refund count. Report: [holdout](evaluations/archive/holdout-2026-11-10-final.json).
 - Frozen colloquial strict model snapshot: answer **11/13**, plan **9/13**, execution/model rates **69.2%**. Report: [colloquial frozen](evaluations/archive/colloquial-frozen-2026-11-10-final.json).
 - Retrieval search ablation: Top-1 **91.7%**, MRR **0.9444**, full table recall@4 **100%** on the 12-case local-IDF fallback. This is search evidence, not a generation-gain claim. Report: `python -m app.evaluation.run`（原报告未保留）.
-- Large-schema ablation: on a 40-table synthetic catalog, Top-4 full recall is **66.7%** and Top-4-seeded, explicit foreign-key closure (10-table cap) reaches **91.7%** with **266.0** full prompt tokens; a same-budget pure Top-K arm also reaches **91.7%**, so closure is not claimed to improve recall. Report: [large-schema-v1.json](evaluations/large-schema-v1.json). This validates schema selection/closure, not SQL accuracy.
+- Large-schema ablation: on a 40-table synthetic catalog, Top-4 full recall is **66.7%** and Top-4-seeded, explicit foreign-key closure (10-table cap) reaches **91.7%** with **266.0** full prompt tokens; a near-equal-token-ceiling pure Top-K arm also reaches **91.7%**, so closure is not claimed to improve recall. Report: [large-schema-v1.json](evaluations/large-schema-v1.json). This validates schema selection/closure, not SQL accuracy.
 
 Historical reports remain immutable snapshots and must not be mixed with the current source hash.
