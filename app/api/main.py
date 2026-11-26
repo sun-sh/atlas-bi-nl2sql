@@ -441,8 +441,17 @@ def _stream_turn(
     context: dict,
     trace_id: str,
     query_target: QueryTarget,
+    request_id: str | None = None,
 ) -> Iterator[str]:
-    yield _sse("start", {"session_id": session_id, "trace_id": trace_id, "message": "正在分析问题"})
+    yield _sse(
+        "start",
+        {
+            "session_id": session_id,
+            "request_id": request_id,
+            "trace_id": trace_id,
+            "message": "正在分析问题",
+        },
+    )
     result = None
     events = query_stream_events(
         question,
@@ -564,18 +573,29 @@ def query_stream(payload: QueryRequest, request: Request) -> StreamingResponse:
     except Exception as exc:
         error = True
         raise HTTPException(status_code=500, detail=f"查询失败：{exc}") from exc
-    trace_id = payload.request_id or __import__("uuid").uuid4().hex[:12]
-    register_cancel(trace_id)
+    # request_id is a client correlation/idempotency value, not a cancellation
+    # handle. Always allocate a server-owned execution id so retries or
+    # duplicate client ids cannot make two streams share cancellation state.
+    request_id = payload.request_id
+    trace_id = __import__("uuid").uuid4().hex[:12]
+    cancel_event = register_cancel(trace_id)
 
     def stream():
         nonlocal error
         try:
-            yield from _stream_turn(question, session_id, context, trace_id, query_target)
+            yield from _stream_turn(
+                question,
+                session_id,
+                context,
+                trace_id,
+                query_target,
+                request_id=request_id,
+            )
         except Exception:
             error = True
             raise
         finally:
-            release_cancel(trace_id)
+            release_cancel(trace_id, cancel_event)
             observe("query_stream", (time.perf_counter() - started) * 1000, error=error)
 
     return StreamingResponse(

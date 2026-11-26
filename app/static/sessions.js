@@ -234,7 +234,7 @@ async function createSession() {
 async function streamQuery(question, sessionId) {
   const card = state.activeQueryCard;
   const requestId = crypto.randomUUID().replace(/-/g, '').slice(0, 24);
-  state.activeTraceId = requestId;
+  state.activeTraceId = null;
     const controller = new AbortController();
       state.activeAbortController = controller;
         const response = await fetch('/api/query/stream', {
@@ -268,7 +268,10 @@ async function streamQuery(question, sessionId) {
       const parsed = parseSseFrame(frame);
       if (parsed) {
         const { event, data } = parsed;
-        if (event === 'start' || event === 'status') {
+        if (event === 'start') {
+          if (data.trace_id) state.activeTraceId = data.trace_id;
+          updateStreamStage(card, data);
+        } else if (event === 'status') {
           updateStreamStage(card, data);
         } else if (event === 'result') {
           result = data.result;

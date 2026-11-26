@@ -126,6 +126,18 @@ def test_harness_cancel_registry_is_idempotent():
     assert not is_cancelled(trace)
 
 
+def test_harness_cleanup_does_not_remove_replacement_event():
+    from app.nl2sql.harness import register_cancel, release_cancel, request_cancel
+
+    trace = "replacement-cancel-trace"
+    first = register_cancel(trace)
+    second = register_cancel(trace)
+    release_cancel(trace, first)
+    assert request_cancel(trace)
+    release_cancel(trace, second)
+    assert not request_cancel(trace)
+
+
 def test_execute_returns_typed_rows():
     result = execute_sql("SELECT COUNT(*) AS n FROM orders WHERE status = 'paid'")
     assert result["rows"][0]["n"] > 0

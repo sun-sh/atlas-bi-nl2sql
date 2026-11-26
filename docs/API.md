@@ -21,7 +21,7 @@ Atlas BI 的交互式 OpenAPI 文档位于运行实例的 `/docs`，默认地址
 | `GET/POST /api/data-platform/sources` | 数据源列表与注册 |
 | `POST /api/data-platform/sources/{id}/sync` | 执行快照或入库同步 |
 | `POST /api/data-platform/sources/{id}/activate` | 将兼容 SQLite/PostgreSQL/MySQL 设为当前 NL2SQL 分析库 |
-| `GET/POST /api/data-platform/metrics` | 指标目录 |
+| `GET/POST /api/data-platform/metrics` | 指标治理目录；当前不直接修改运行时查询语义 |
 | `GET/POST /api/data-platform/quality-rules` | 质量规则 |
 | `POST /api/data-platform/sources/{id}/quality` | 执行质量巡检 |
 | `GET /api/data-platform/data-service` | 受控只读数据服务（当前仅支持 SQLite 快照） |
@@ -42,6 +42,8 @@ Atlas BI 的交互式 OpenAPI 文档位于运行实例的 `/docs`，默认地址
 | `GET /docs` | OpenAPI 交互文档 |
 
 同步查询返回计划、召回结果、SQL、数据、尝试记录、告警、`trace_id` 和解读。`narrative.mode` 标明解读来自模型还是确定性摘要。带会话的查询还会返回 `session_id` 和更新后的快照，`plan.inherited` 列出继承了哪些条件。评测任务走 `POST /api/evaluation/tasks`；`GET /api/evaluation` 默认关闭，避免公网请求同步跑完整评测并消耗模型额度。
+
+流式查询中的 `request_id` 仅用于客户端关联请求；服务端会在 `start` 事件中返回唯一的执行 `trace_id`，取消请求必须使用该 `trace_id`。客户端不应把可重试请求的 `request_id` 直接当作取消句柄。
 
 ## SSE 事件
 
