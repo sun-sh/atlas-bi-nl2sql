@@ -24,11 +24,14 @@ def parse_sse(text: str) -> list[tuple[str, dict]]:
     return events
 
 
-def _query_stream(client, question, session_id):
+def _query_stream(client, question, session_id, request_id=None):
+    payload = {'question': question, 'session_id': session_id}
+    if request_id is not None:
+        payload['request_id'] = request_id
     with client.stream(
         'POST',
         '/api/query/stream',
-        json={'question': question, 'session_id': session_id},
+        json=payload,
         headers={'Accept': 'text/event-stream'},
     ) as response:
         assert response.status_code == 200
@@ -79,6 +82,29 @@ def test_cancel_endpoint_returns_false_for_unknown_trace():
     response = client.post("/api/query/cancel/unknown-trace")
     assert response.status_code == 200
     assert response.json()["cancelled"] is False
+
+
+def test_reused_request_id_gets_distinct_server_trace_ids(monkeypatch):
+    monkeypatch.setenv('ATLAS_SESSION_DB_PATH', '.tmp/request-id-regression.db')
+    session = client.post('/api/sessions', json={}).json()
+    first = _query_stream(
+        client,
+        '上个月各渠道ROI',
+        session['id'],
+        request_id='client-retry-id',
+    )
+    second = _query_stream(
+        client,
+        '上个月各渠道ROI',
+        session['id'],
+        request_id='client-retry-id',
+    )
+    first_start = next(data for name, data in first if name == 'start')
+    second_start = next(data for name, data in second if name == 'start')
+    assert first_start['request_id'] == second_start['request_id'] == 'client-retry-id'
+    assert first_start['trace_id']
+    assert second_start['trace_id']
+    assert first_start['trace_id'] != second_start['trace_id']
 
 
 def test_stream_narrative_uses_model_delta_when_available(monkeypatch):

@@ -110,6 +110,14 @@ def is_cancelled(trace_id: str | None = None, event: Event | None = None) -> boo
     return bool(current and current.is_set())
 
 
-def release_cancel(trace_id: str) -> None:
+def release_cancel(trace_id: str, event: Event | None = None) -> None:
+    """Release one cancellation handle without deleting a replacement.
+
+    The optional event identity makes cleanup safe even if a caller reuses a
+    trace id accidentally: an older request cannot remove a newer request's
+    cancellation event.
+    """
     with _CANCEL_LOCK:
-        _CANCEL_EVENTS.pop(trace_id, None)
+        current = _CANCEL_EVENTS.get(trace_id)
+        if event is None or current is event:
+            _CANCEL_EVENTS.pop(trace_id, None)
